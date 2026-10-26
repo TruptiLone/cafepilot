@@ -1,0 +1,150 @@
+
+{
+    "cafe_id": "CAFE001",
+    "currency": "USD",
+    "products": [
+      {
+        "id": "COF001",
+        "name": "Brewed Coffee",
+        "category": "coffee",
+        "description": "Freshly brewed drip coffee",
+        "price_cents": 350
+      },
+      {
+        "id": "COF002",
+        "name": "Americano",
+        "category": "coffee",
+        "description": "Espresso with hot water",
+        "price_cents": 400
+      },
+      {
+        "id": "COF003",
+        "name": "Latte",
+        "category": "coffee",
+        "description": "Espresso with steamed milk",
+        "price_cents": 500
+      },
+      {
+        "id": "COF004",
+        "name": "Cappuccino",
+        "category": "coffee",
+        "description": "Espresso, steamed milk, and milk foam",
+        "price_cents": 450
+      },
+      {
+        "id": "COF005",
+        "name": "Vanilla Latte",
+        "category": "coffee",
+        "description": "Espresso, milk, and vanilla syrup",
+        "price_cents": 550
+      },
+      {
+        "id": "COF006",
+        "name": "Caramel Latte",
+        "category": "coffee",
+        "description": "Espresso, milk, and caramel syrup",
+        "price_cents": 550
+      },
+      {
+        "id": "COF007",
+        "name": "Mocha",
+        "category": "coffee",
+        "description": "Espresso, milk, and chocolate sauce",
+        "price_cents": 550
+      },
+      {
+        "id": "COF008",
+        "name": "Cold Brew",
+        "category": "coffee",
+        "description": "Slow-steeped coffee served over ice",
+        "price_cents": 450
+      },
+      {
+        "id": "DRK001",
+        "name": "Hot Chocolate",
+        "category": "other_drinks",
+        "description": "Chocolate with steamed milk",
+        "price_cents": 400
+      },
+      {
+        "id": "DRK002",
+        "name": "Chai Latte",
+        "category": "other_drinks",
+        "description": "Spiced chai with milk",
+        "price_cents": 500
+      },
+      {
+        "id": "DRK003",
+        "name": "Matcha Latte",
+        "category": "other_drinks",
+        "description": "Matcha green tea with milk",
+        "price_cents": 550
+      },
+      {
+        "id": "DRK004",
+        "name": "Brewed Tea",
+        "category": "other_drinks",
+        "description": "English breakfast, Earl Grey, or green tea",
+        "price_cents": 300
+      },
+      {
+        "id": "BAK001",
+        "name": "Blueberry Muffin",
+        "category": "bakery",
+        "description": "Classic muffin with blueberries",
+        "price_cents": 400
+      },
+      {
+        "id": "BAK002",
+        "name": "Chocolate Chip Muffin",
+        "category": "bakery",
+        "description": "Muffin with chocolate chips",
+        "price_cents": 400
+      },
+      {
+        "id": "BAK003",
+        "name": "Banana Nut Muffin",
+        "category": "bakery",
+        "description": "Banana muffin with walnuts",
+        "price_cents": 400
+      },
+      {
+        "id": "BAK004",
+        "name": "Banana Bread",
+        "category": "bakery",
+        "description": "A slice of banana bread",
+        "price_cents": 400
+      },
+      {
+        "id": "BAK005",
+        "name": "Lemon Loaf",
+        "category": "bakery",
+        "description": "A slice of lemon cake with a light glaze",
+        "price_cents": 400
+      },
+      {
+        "id": "BAK006",
+        "name": "Butter Croissant",
+        "category": "bakery",
+        "description": "Flaky, buttery pastry",
+        "price_cents": 450
+      }
+    ],
+    "options": {
+      "sizes": [
+        {"id": "regular", "label": "Regular", "ounces": 12, "additional_price_cents": 0},
+        {"id": "large", "label": "Large", "ounces": 16, "additional_price_cents": 75}
+      ],
+      "milk": [
+        {"id": "whole", "label": "Whole milk", "additional_price_cents": 0},
+        {"id": "skim", "label": "Skim milk", "additional_price_cents": 0},
+        {"id": "oat", "label": "Oat milk", "additional_price_cents": 75},
+        {"id": "almond", "label": "Almond milk", "additional_price_cents": 75}
+      ],
+      "extra_espresso_shot": {
+        "additional_price_cents": 100
+      },
+      "temperatures": ["hot", "iced"]
+    }
+  }
+  

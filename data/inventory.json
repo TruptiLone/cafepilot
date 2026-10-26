@@ -1,0 +1,142 @@
+
+{
+    "cafe_id": "CAFE001",
+    "is_synthetic": true,
+    "snapshot_date": "2026-10-26",
+    "inventory": [
+      {
+        "ingredient_id": "COFFEE_BEANS",
+        "name": "Espresso Coffee Beans",
+        "category": "coffee",
+        "usable_quantity": 1000,
+        "unit": "g"
+      },
+      {
+        "ingredient_id": "DRIP_COFFEE",
+        "name": "Drip Coffee Grounds",
+        "category": "coffee",
+        "usable_quantity": 2000,
+        "unit": "g"
+      },
+      {
+        "ingredient_id": "WHOLE_MILK",
+        "name": "Whole Milk",
+        "category": "dairy",
+        "usable_quantity": 6000,
+        "unit": "mL"
+      },
+      {
+        "ingredient_id": "SKIM_MILK",
+        "name": "Skim Milk",
+        "category": "dairy",
+        "usable_quantity": 4000,
+        "unit": "mL"
+      },
+      {
+        "ingredient_id": "OAT_MILK",
+        "name": "Oat Milk",
+        "category": "alternative_milk",
+        "usable_quantity": 2000,
+        "unit": "mL"
+      },
+      {
+        "ingredient_id": "ALMOND_MILK",
+        "name": "Almond Milk",
+        "category": "alternative_milk",
+        "usable_quantity": 2000,
+        "unit": "mL"
+      },
+      {
+        "ingredient_id": "VANILLA_SYRUP",
+        "name": "Vanilla Syrup",
+        "category": "syrup",
+        "usable_quantity": 1000,
+        "unit": "mL"
+      },
+      {
+        "ingredient_id": "CARAMEL_SYRUP",
+        "name": "Caramel Syrup",
+        "category": "syrup",
+        "usable_quantity": 1000,
+        "unit": "mL"
+      },
+      {
+        "ingredient_id": "CHOCOLATE_SAUCE",
+        "name": "Chocolate Sauce",
+        "category": "sauce",
+        "usable_quantity": 1500,
+        "unit": "mL"
+      },
+      {
+        "ingredient_id": "COLD_BREW_CONCENTRATE",
+        "name": "Cold Brew Concentrate",
+        "category": "coffee",
+        "usable_quantity": 4000,
+        "unit": "mL"
+      },
+      {
+        "ingredient_id": "CHAI_CONCENTRATE",
+        "name": "Chai Concentrate",
+        "category": "tea",
+        "usable_quantity": 3000,
+        "unit": "mL"
+      },
+      {
+        "ingredient_id": "MATCHA_POWDER",
+        "name": "Matcha Powder",
+        "category": "tea",
+        "usable_quantity": 500,
+        "unit": "g"
+      },
+      {
+        "ingredient_id": "TEA_BAG",
+        "name": "Tea Bags",
+        "category": "tea",
+        "usable_quantity": 100,
+        "unit": "each"
+      },
+      {
+        "ingredient_id": "BLUEBERRY_MUFFIN",
+        "name": "Blueberry Muffin",
+        "category": "bakery",
+        "usable_quantity": 12,
+        "unit": "each"
+      },
+      {
+        "ingredient_id": "CHOCOLATE_CHIP_MUFFIN",
+        "name": "Chocolate Chip Muffin",
+        "category": "bakery",
+        "usable_quantity": 12,
+        "unit": "each"
+      },
+      {
+        "ingredient_id": "BANANA_NUT_MUFFIN",
+        "name": "Banana Nut Muffin",
+        "category": "bakery",
+        "usable_quantity": 10,
+        "unit": "each"
+      },
+      {
+        "ingredient_id": "BANANA_BREAD",
+        "name": "Banana Bread",
+        "category": "bakery",
+        "usable_quantity": 10,
+        "unit": "each"
+      },
+      {
+        "ingredient_id": "LEMON_LOAF",
+        "name": "Lemon Loaf",
+        "category": "bakery",
+        "usable_quantity": 10,
+        "unit": "each"
+      },
+      {
+        "ingredient_id": "BUTTER_CROISSANT",
+        "name": "Butter Croissant",
+        "category": "bakery",
+        "usable_quantity": 12,
+        "unit": "each"
+      }
+    ]
+  }
+  

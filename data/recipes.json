@@ -1,0 +1,246 @@
+
+{
+    "cafe_id": "CAFE001",
+    "is_synthetic": true,
+    "recipes": [
+      {
+        "product_id": "COF001",
+        "name": "Brewed Coffee",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "DRIP_COFFEE", "quantity": 20, "unit": "g"}
+          ],
+          "large": [
+            {"ingredient_id": "DRIP_COFFEE", "quantity": 26, "unit": "g"}
+          ]
+        }
+      },
+      {
+        "product_id": "COF002",
+        "name": "Americano",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"}
+          ],
+          "large": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"}
+          ]
+        }
+      },
+      {
+        "product_id": "COF003",
+        "name": "Latte",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 240, "unit": "mL"}
+          ],
+          "large": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 320, "unit": "mL"}
+          ]
+        }
+      },
+      {
+        "product_id": "COF004",
+        "name": "Cappuccino",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 180, "unit": "mL"}
+          ],
+          "large": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 240, "unit": "mL"}
+          ]
+        }
+      },
+      {
+        "product_id": "COF005",
+        "name": "Vanilla Latte",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 240, "unit": "mL"},
+            {"ingredient_id": "VANILLA_SYRUP", "quantity": 15, "unit": "mL"}
+          ],
+          "large": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 320, "unit": "mL"},
+            {"ingredient_id": "VANILLA_SYRUP", "quantity": 20, "unit": "mL"}
+          ]
+        }
+      },
+      {
+        "product_id": "COF006",
+        "name": "Caramel Latte",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 240, "unit": "mL"},
+            {"ingredient_id": "CARAMEL_SYRUP", "quantity": 15, "unit": "mL"}
+          ],
+          "large": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 320, "unit": "mL"},
+            {"ingredient_id": "CARAMEL_SYRUP", "quantity": 20, "unit": "mL"}
+          ]
+        }
+      },
+      {
+        "product_id": "COF007",
+        "name": "Mocha",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 240, "unit": "mL"},
+            {"ingredient_id": "CHOCOLATE_SAUCE", "quantity": 25, "unit": "mL"}
+          ],
+          "large": [
+            {"ingredient_id": "COFFEE_BEANS", "quantity": 18, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 320, "unit": "mL"},
+            {"ingredient_id": "CHOCOLATE_SAUCE", "quantity": 35, "unit": "mL"}
+          ]
+        }
+      },
+      {
+        "product_id": "COF008",
+        "name": "Cold Brew",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "COLD_BREW_CONCENTRATE", "quantity": 120, "unit": "mL"}
+          ],
+          "large": [
+            {"ingredient_id": "COLD_BREW_CONCENTRATE", "quantity": 160, "unit": "mL"}
+          ]
+        }
+      },
+      {
+        "product_id": "DRK001",
+        "name": "Hot Chocolate",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "WHOLE_MILK", "quantity": 240, "unit": "mL"},
+            {"ingredient_id": "CHOCOLATE_SAUCE", "quantity": 30, "unit": "mL"}
+          ],
+          "large": [
+            {"ingredient_id": "WHOLE_MILK", "quantity": 320, "unit": "mL"},
+            {"ingredient_id": "CHOCOLATE_SAUCE", "quantity": 40, "unit": "mL"}
+          ]
+        }
+      },
+      {
+        "product_id": "DRK002",
+        "name": "Chai Latte",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "CHAI_CONCENTRATE", "quantity": 120, "unit": "mL"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 180, "unit": "mL"}
+          ],
+          "large": [
+            {"ingredient_id": "CHAI_CONCENTRATE", "quantity": 160, "unit": "mL"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 240, "unit": "mL"}
+          ]
+        }
+      },
+      {
+        "product_id": "DRK003",
+        "name": "Matcha Latte",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "MATCHA_POWDER", "quantity": 4, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 240, "unit": "mL"}
+          ],
+          "large": [
+            {"ingredient_id": "MATCHA_POWDER", "quantity": 6, "unit": "g"},
+            {"ingredient_id": "WHOLE_MILK", "quantity": 320, "unit": "mL"}
+          ]
+        }
+      },
+      {
+        "product_id": "DRK004",
+        "name": "Brewed Tea",
+        "portions": {
+          "regular": [
+            {"ingredient_id": "TEA_BAG", "quantity": 1, "unit": "each"}
+          ],
+          "large": [
+            {"ingredient_id": "TEA_BAG", "quantity": 2, "unit": "each"}
+          ]
+        }
+      },
+      {
+        "product_id": "BAK001",
+        "name": "Blueberry Muffin",
+        "portions": {
+          "each": [
+            {"ingredient_id": "BLUEBERRY_MUFFIN", "quantity": 1, "unit": "each"}
+          ]
+        }
+      },
+      {
+        "product_id": "BAK002",
+        "name": "Chocolate Chip Muffin",
+        "portions": {
+          "each": [
+            {"ingredient_id": "CHOCOLATE_CHIP_MUFFIN", "quantity": 1, "unit": "each"}
+          ]
+        }
+      },
+      {
+        "product_id": "BAK003",
+        "name": "Banana Nut Muffin",
+        "portions": {
+          "each": [
+            {"ingredient_id": "BANANA_NUT_MUFFIN", "quantity": 1, "unit": "each"}
+          ]
+        }
+      },
+      {
+        "product_id": "BAK004",
+        "name": "Banana Bread",
+        "portions": {
+          "each": [
+            {"ingredient_id": "BANANA_BREAD", "quantity": 1, "unit": "each"}
+          ]
+        }
+      },
+      {
+        "product_id": "BAK005",
+        "name": "Lemon Loaf",
+        "portions": {
+          "each": [
+            {"ingredient_id": "LEMON_LOAF", "quantity": 1, "unit": "each"}
+          ]
+        }
+      },
+      {
+        "product_id": "BAK006",
+        "name": "Butter Croissant",
+        "portions": {
+          "each": [
+            {"ingredient_id": "BUTTER_CROISSANT", "quantity": 1, "unit": "each"}
+          ]
+        }
+      }
+    ],
+    "recipe_rules": {
+      "milk_substitutions": {
+        "operation": "replace",
+        "default_ingredient_id": "WHOLE_MILK",
+        "choices": {
+          "whole": "WHOLE_MILK",
+          "skim": "SKIM_MILK",
+          "oat": "OAT_MILK",
+          "almond": "ALMOND_MILK"
+        }
+      },
+      "extra_espresso_shot": {
+        "operation": "add",
+        "ingredient_id": "COFFEE_BEANS",
+        "quantity_per_shot": 9,
+        "unit": "g"
+      }
+    }
+  }
+  

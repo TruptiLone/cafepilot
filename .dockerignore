@@ -1,0 +1,43 @@
+
+# Local Python environments
+.venv/
+venv/
+env/
+
+# Environment variables and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Version control
+.git/
+.gitignore
+
+# Python cache and tests cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editor and operating system files
+.vscode/
+.idea/
+.DS_Store
+
+# Local build artifacts
+build/
+dist/
+*.egg-info/
+
+# Development notes not needed in the runtime image
+development-log/
+
+# Future frontend dependencies
+node_modules/
+frontend/node_modules/

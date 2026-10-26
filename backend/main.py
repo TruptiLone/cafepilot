@@ -1,5 +1,10 @@
 
 from fastapi import FastAPI
+from typing import Literal
+from fastapi import HTTPException
+from pydantic import BaseModel, Field
+from backend.agents.cafe_agent import chat_with_agent
+from backend.services.catering_service import evaluate_catering_order
 
 # Create our CafePilot application
 app = FastAPI(title="CafePilot API")
@@ -59,3 +64,60 @@ def get_inventory():
         })
 
     return {"inventory": results}
+
+
+# Defines a single product in a catering request.
+class CateringItem(BaseModel):
+    product_id: str
+    size: Literal["regular", "large", "each"] = "regular"
+    quantity: int = Field(gt=0)
+    milk: Literal["whole", "skim", "oat", "almond"] = "whole"
+    extra_shots: int = Field(default=0, ge=0)
+
+
+# Defines the full catering request.
+class CateringRequest(BaseModel):
+    items: list[CateringItem] = Field(min_length=1)
+
+
+@app.post("/catering/readiness")
+def catering_readiness(request: CateringRequest):
+    """
+    Check ingredient readiness for a catering order.
+    This endpoint does not modify inventory.
+    """
+    try:
+        items = [
+            item.model_dump()
+            for item in request.items
+        ]
+
+        report = evaluate_catering_order(items)
+
+        return report
+
+    except ValueError as error:
+        # Unknown product, invalid size, or incompatible modifier.
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        ) from error
+
+
+class AgentChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+
+
+@app.post("/agent/chat")
+def agent_chat(request: AgentChatRequest):
+    """Send an owner question to our CafePilot agent."""
+    try:
+        return chat_with_agent(request.message)
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        ) from error
+
+

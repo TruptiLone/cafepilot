@@ -1,5 +1,5 @@
 
-import json
+import logging
 import os
 from pathlib import Path
 
@@ -7,333 +7,196 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from pydantic import ValidationError
 
-from backend.services.menu_service import get_menu
+from backend.agents.order_extractor import extract_order
+from backend.services.order_validator import validate_order
 from backend.services.catering_service import evaluate_catering_order
 
 
-# --------------------------------------------------
-# Configuration
-# --------------------------------------------------
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+logger = logging.getLogger(__name__)
 
-MODEL_NAME = "muse-spark-1.3"
-MODEL_BASE_URL = "https://api.meta.ai/v1"
-
-
-# --------------------------------------------------
-# Agent instructions
-# --------------------------------------------------
-
-SYSTEM_PROMPT = """
-You are CafePilot, an AI operations assistant for independent cafe owners.
-
-Your job is to help cafe owners understand catering readiness,
-ingredient requirements, and inventory shortages.
-
-You have access to two tools:
-
-1. get_menu
-   Retrieves the current menu, including product names and IDs.
-
-2. check_catering_readiness
-   Calculates ingredient requirements and checks inventory.
-
-IMPORTANT RULES:
-
-- Always retrieve the current menu before evaluating a catering order.
-- Never invent product names or IDs.
-- Never ask the owner to supply internal product IDs.
-- Match natural language to the menu.
-
-Examples:
-"oat milk latte" means Latte with oat milk.
-"large vanilla latte" means Vanilla Latte, size large.
-
-- Use check_catering_readiness for ingredient calculations.
-- Never calculate inventory quantities yourself.
-- Only report numerical results returned by tools.
-- Ask for clarification if the product or quantity is genuinely unclear.
-- If size is unspecified, regular is the default.
-- If milk is unspecified, whole milk is the default.
-- Never claim inventory has been reserved or deducted.
-- Never claim a supplier order has been placed.
-- All current inventory data is synthetic.
-- A stock check is based on the stored inventory snapshot,
-  not a guarantee of availability at a future pickup time.
-
-Respond clearly and concisely.
-"""
-
-
-# --------------------------------------------------
-# Tool definitions
-# --------------------------------------------------
-
-MENU_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "get_menu",
-        "description": (
-            "Retrieve the current CafePilot menu with product IDs, "
-            "names, prices and descriptions."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "additionalProperties": False
-        }
-    }
-}
-
-
-CATERING_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "check_catering_readiness",
-        "description": (
-            "Calculate ingredient requirements and check available "
-            "inventory for a catering order. This tool is read-only."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "items": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "product_id": {"type": "string"},
-                            "size": {
-                                "type": "string",
-                                "enum": ["regular", "large", "each"]
-                            },
-                            "quantity": {
-                                "type": "integer",
-                                "minimum": 1
-                            },
-                            "milk": {
-                                "type": "string",
-                                "enum": [
-                                    "whole", "skim", "oat", "almond"
-                                ]
-                            },
-                            "extra_shots": {
-                                "type": "integer",
-                                "minimum": 0
-                            }
-                        },
-                        "required": [
-                            "product_id",
-                            "size",
-                            "quantity"
-                        ]
-                    }
-                }
-            },
-            "required": ["items"]
-        }
-    }
-}
-
-
-# --------------------------------------------------
-# Meta API client
-# --------------------------------------------------
 
 def create_meta_client():
-    """Initialize Meta's Model API client."""
-
+    """Create a client for the Meta Model API."""
     load_dotenv(PROJECT_ROOT / ".env")
 
     api_key = os.getenv("MODEL_API_KEY")
-
     if not api_key:
-        raise RuntimeError("MODEL_API_KEY is missing from .env")
+        raise RuntimeError("MODEL_API_KEY is missing")
 
     return OpenAI(
         api_key=api_key,
-        base_url=MODEL_BASE_URL,
+        base_url="https://api.meta.ai/v1",
         timeout=30.0,
-        max_retries=1
+        max_retries=1,
     )
 
 
-# --------------------------------------------------
-# Tool execution
-# --------------------------------------------------
+def format_quantity(value):
+    """Display whole numbers without unnecessary decimals."""
+    return f"{value:g}"
 
-def execute_tool(tool_name, arguments):
+
+def build_readiness_summary(report):
     """
-    Execute one of the approved tools.
+    Generate an explanation using verified inventory calculations.
 
-    All business calculations happen in Python,
-    not inside the language model.
+    This function does not call an LLM or invent quantities.
     """
 
-    if not isinstance(arguments, dict):
-        return {"error": "Tool arguments must be a JSON object"}
+    status = report["status"]
 
-    # TOOL 1: Read the current menu
-    if tool_name == "get_menu":
-        if arguments:
-            return {"error": "get_menu does not accept arguments"}
+    if status == "insufficient_data":
+        introduction = (
+            "I cannot determine readiness because some "
+            "inventory information is missing or invalid."
+        )
+    elif status == "shortage":
+        introduction = (
+            "The order has ingredient shortages "
+            "against the current inventory snapshot."
+        )
+    elif status == "sufficient":
+        introduction = (
+            "The listed ingredients are sufficient "
+            "against the current inventory snapshot."
+        )
+    else:
+        raise ValueError(f"Unexpected readiness status: {status}")
 
-        return {"products": get_menu()}
+    lines = [introduction]
 
-    # TOOL 2: Check catering inventory readiness
-    if tool_name == "check_catering_readiness":
+    for item in report["inventory_report"]["items"]:
+        ingredient = item.get("name", item["ingredient_id"])
+        required = item["required_quantity"]
+        unit = item["unit"]
 
-        try:
-            # Reuse our existing FastAPI request validation.
-            from backend.main import CateringRequest
+        if item["status"] == "unknown":
+            lines.append(
+                f"{ingredient}: "
+                f"{format_quantity(required)} {unit} required; "
+                "availability unknown."
+            )
+        else:
+            available = item["available_quantity"]
+            shortage = item["shortage_quantity"]
 
-            validated = CateringRequest.model_validate(arguments)
+            lines.append(
+                f"{ingredient}: "
+                f"{format_quantity(required)} {unit} required, "
+                f"{format_quantity(available)} {unit} available, "
+                f"{format_quantity(shortage)} {unit} shortage."
+            )
 
-            items = [
-                item.model_dump()
-                for item in validated.items
-            ]
+    lines.append(
+        "This assessment uses synthetic inventory data "
+        "and does not reserve or deduct stock."
+    )
 
-            # Verify product IDs against the current menu.
-            menu_products = get_menu()
+    return "\n".join(lines)
 
-            valid_product_ids = {
-                product["id"]
-                for product in menu_products
-            }
-
-            for item in items:
-                if item["product_id"] not in valid_product_ids:
-                    return {
-                        "error": (
-                            f"Unknown product ID: {item['product_id']}"
-                        )
-                    }
-
-            return evaluate_catering_order(items)
-
-        except (ValueError, TypeError, ValidationError) as error:
-            return {"error": str(error)}
-
-    return {"error": f"Tool not allowed: {tool_name}"}
-
-
-# --------------------------------------------------
-# Agent conversation
-# --------------------------------------------------
 
 def chat_with_agent(user_message, client=None):
     """
-    Process a natural-language request using Muse Spark.
+    Run the controlled CafePilot agent workflow.
 
-    The model chooses tools, Python executes them,
-    and the model explains the validated results.
+    Steps:
+    1. Extract the order using Muse Spark.
+    2. Validate products, quantities and modifiers in Python.
+    3. Automatically calculate catering readiness.
+    4. Generate an explanation from the calculated results.
 
-    A mock client can be injected during testing.
+    No inventory is modified and no supplier orders are placed.
     """
 
-    if not user_message or not user_message.strip():
+    if not isinstance(user_message, str) or not user_message.strip():
         raise ValueError("Message cannot be empty")
 
     if client is None:
         client = create_meta_client()
 
-    messages = [
+    # STEP 1: Extract the owner's request with Muse Spark.
+    try:
+        extracted = extract_order(user_message, client)
+
+    except (ValueError, KeyError, IndexError, TypeError) as error:
+        logger.warning("Order extraction failed: %s", error)
+
+        return {
+            "status": "extraction_failed",
+            "answer": (
+                "I couldn't reliably interpret your request. "
+                "Please rephrase it."
+            ),
+            "tool_history": [],
+        }
+
+    # STEP 2: Validate the extracted data using Python.
+    try:
+        validated = validate_order(extracted)
+
+    except (ValidationError, ValueError, TypeError) as error:
+        logger.warning("Order validation failed: %s", error)
+
+        return {
+            "status": "validation_failed",
+            "answer": (
+                "I couldn't validate the requested products "
+                "or options. Please check the order details."
+            ),
+            "tool_history": [],
+        }
+
+    # Missing order information requires clarification.
+    # Do not calculate inventory until the request is complete.
+    if validated["status"] == "needs_clarification":
+        return {
+            "status": "needs_clarification",
+            "answer": validated["question"],
+            "tool_history": [],
+        }
+    # Greetings and unsupported requests must not execute tools.
+    if validated["status"] == "out_of_scope":
+        return {
+            "status": "out_of_scope",
+            "answer": (
+                "Hi! I'm CaféPilot, your café operations assistant. "
+                "I can help check ingredient availability for catering orders. "
+                "What would you like to prepare?"
+                ),
+            "tool_history": [],
+        }
+
+    # STEP 3: Python automatically executes the catering calculation.
+    try:
+        report = evaluate_catering_order(validated["items"])
+        answer = build_readiness_summary(report)
+
+    except (ValueError, KeyError, TypeError, OSError) as error:
+        logger.exception("Catering readiness calculation failed")
+
+        return {
+            "status": "calculation_failed",
+            "answer": (
+                "I couldn't complete the inventory assessment. "
+                "Please try again or check the inventory data."
+            ),
+            "tool_history": [],
+        }
+
+    # Record the tool execution for transparency and debugging.
+    tool_history = [
         {
-            "role": "system",
-            "content": SYSTEM_PROMPT
-        },
-        {
-            "role": "user",
-            "content": user_message
+            "tool": "check_catering_readiness",
+            "executed_by": "python_orchestrator",
+            "result": report,
         }
     ]
 
-    tool_history = []
-
-    # Retrieve current menu deterministically before asking
-    # the model to map a natural-language product name.
-    menu_result = execute_tool("get_menu", {})
-
-    tool_history.append({
-        "tool": "get_menu",
-        "result": menu_result
-    })
-
-    # Supply the actual catalog as context rather than
-    # requiring the owner to know internal product IDs.
-    messages.append({
-        "role": "system",
-        "content": (
-            "Current CafePilot menu retrieved from get_menu:\n"
-            + json.dumps(menu_result)
-            + "\nUse this catalog to resolve product IDs. "
-              "If the request has enough details, call "
-              "check_catering_readiness. "
-              "Do not ask the user for a product ID."
-        )
-    })
-
-    # Limit model/tool rounds to prevent infinite execution.
-    for _ in range(5):
-
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            tools=[CATERING_TOOL],
-            tool_choice="auto"
-        )
-
-        assistant_message = response.choices[0].message
-
-        tool_calls = assistant_message.tool_calls or []
-
-        # The model has completed its response.
-        if not tool_calls:
-            return {
-                "answer": assistant_message.content or "",
-                "tool_history": tool_history
-            }
-
-        # Preserve the assistant tool-call message.
-        messages.append(assistant_message)
-
-        # Execute each requested tool.
-        for tool_call in tool_calls:
-
-            try:
-                arguments = json.loads(
-                    tool_call.function.arguments
-                )
-
-                result = execute_tool(
-                    tool_call.function.name,
-                    arguments
-                )
-
-            except json.JSONDecodeError:
-                result = {
-                    "error": "Invalid JSON in tool arguments"
-                }
-
-            tool_history.append({
-                "tool": tool_call.function.name,
-                "result": result
-            })
-
-            # Send real Python results back to the model.
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps(result)
-            })
-
+    # STEP 4: Return the validated result and explanation.
     return {
-        "answer": (
-            "I couldn't complete this request within the "
-            "allowed tool-call steps. Please try again."
-        ),
-        "tool_history": tool_history
+        "status": report["status"],
+        "answer": answer,
+        "validated_order": validated["items"],
+        "tool_history": tool_history,
     }

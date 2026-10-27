@@ -1,13 +1,24 @@
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import uuid4
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.modules.inventory.models import InventoryItem, StockCount, StockCountLine
+from backend.modules.inventory.models import (
+    InventoryItem,
+    InventoryMovement,
+    StockCount,
+    StockCountLine,
+)
 from backend.modules.inventory.repository import InventoryRepository
-from backend.modules.inventory.schemas import StockCountCreate, StockCountVerify
+from backend.modules.inventory.schemas import (
+    InventoryMovementCreate,
+    StockCountCreate,
+    StockCountVerify,
+)
 
 DEFAULT_CAFE_ID = "CAFE001"
 
@@ -32,6 +43,10 @@ class StockCountValidationError(ValueError):
     pass
 
 
+class InventoryMovementConflictError(RuntimeError):
+    pass
+
+
 @dataclass(frozen=True)
 class StockCountSummary:
     count_id: str
@@ -42,6 +57,23 @@ class StockCountSummary:
     counted_by: str | None
     is_synthetic: bool
     item_count: int
+
+
+@dataclass(frozen=True)
+class InventoryMovementResult:
+    movement_id: str
+    cafe_id: str
+    ingredient_id: str
+    base_unit: str
+    movement_type: str
+    quantity_delta: Decimal
+    is_estimated: bool
+    source_type: str
+    source_id: str
+    occurred_at: datetime
+    recorded_at: datetime
+    recorded_by: str | None
+    reason: str | None
 
 
 class InventoryService:
@@ -158,3 +190,106 @@ class InventoryService:
         if self._database_session.in_transaction():
             return self._database_session.begin_nested()
         return self._database_session.begin()
+
+    def create_movement(
+        self,
+        request: InventoryMovementCreate,
+    ) -> tuple[InventoryMovementResult, bool]:
+        with self._transaction():
+            self._require_cafe(request.cafe_id)
+            item = self._repository.get_item(request.cafe_id, request.ingredient_id)
+            if item is None:
+                raise InventoryItemNotFoundError(request.ingredient_id)
+
+            existing = self._repository.get_movement_by_identity(
+                request.ingredient_id,
+                request.source_type,
+                request.source_id,
+            )
+            if existing is not None:
+                return self._resolve_movement_identity(existing, request), False
+
+            movement = InventoryMovement(
+                movement_id=f"movement_{uuid4().hex}",
+                cafe_id=request.cafe_id,
+                ingredient_id=request.ingredient_id,
+                movement_type=request.movement_type,
+                quantity_delta=request.quantity_delta,
+                is_estimated=False,
+                source_type=request.source_type,
+                source_id=request.source_id,
+                occurred_at=request.occurred_at,
+                recorded_at=datetime.now(timezone.utc),
+                recorded_by=request.recorded_by,
+                reason=request.reason,
+            )
+            try:
+                with self._database_session.begin_nested():
+                    self._repository.create_movement(movement)
+            except IntegrityError:
+                existing = self._repository.get_movement_by_identity(
+                    request.ingredient_id,
+                    request.source_type,
+                    request.source_id,
+                )
+                if existing is None:
+                    raise
+                return self._resolve_movement_identity(existing, request), False
+
+            return self._movement_result(movement, item), True
+
+    def list_movements(
+        self,
+        cafe_id: str = DEFAULT_CAFE_ID,
+        ingredient_id: str | None = None,
+        movement_type: str | None = None,
+    ) -> list[InventoryMovementResult]:
+        self._require_cafe(cafe_id)
+        return [
+            self._movement_result(movement, item)
+            for movement, item in self._repository.list_movements(
+                cafe_id,
+                ingredient_id,
+                movement_type,
+            )
+        ]
+
+    def _resolve_movement_identity(
+        self,
+        existing: tuple[InventoryMovement, InventoryItem],
+        request: InventoryMovementCreate,
+    ) -> InventoryMovementResult:
+        movement, item = existing
+        if (
+            movement.cafe_id != request.cafe_id
+            or movement.movement_type != request.movement_type
+            or movement.quantity_delta != request.quantity_delta
+            or movement.occurred_at != request.occurred_at
+            or movement.recorded_by != request.recorded_by
+            or movement.reason != request.reason
+        ):
+            raise InventoryMovementConflictError(
+                "source event identity conflicts with an existing movement"
+            )
+        return self._movement_result(movement, item)
+
+    @staticmethod
+    def _movement_result(
+        movement: InventoryMovement,
+        item: InventoryItem,
+    ) -> InventoryMovementResult:
+        return InventoryMovementResult(
+            movement_id=movement.movement_id,
+            cafe_id=movement.cafe_id,
+            ingredient_id=movement.ingredient_id,
+            base_unit=item.base_unit,
+            movement_type=movement.movement_type,
+            quantity_delta=movement.quantity_delta,
+            is_estimated=movement.is_estimated,
+            source_type=movement.source_type,
+            source_id=movement.source_id,
+            occurred_at=movement.occurred_at,
+            recorded_at=movement.recorded_at,
+            recorded_by=movement.recorded_by,
+            reason=movement.reason,
+        )

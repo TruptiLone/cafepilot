@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 MAX_INVENTORY_QUANTITY = Decimal("999999999999999.999")
 
@@ -119,3 +119,69 @@ class StockCountSummaryResponse(BaseModel):
     counted_by: str | None
     is_synthetic: bool
     item_count: int
+
+
+class InventoryMovementCreate(BaseModel):
+    cafe_id: str = "CAFE001"
+    ingredient_id: str
+    movement_type: Literal["RECEIPT", "WASTE", "ADJUSTMENT"]
+    quantity_delta: Decimal
+    source_type: str = Field(min_length=1)
+    source_id: str = Field(min_length=1)
+    occurred_at: datetime
+    recorded_by: str | None = None
+    reason: str | None = None
+
+    @field_validator("source_type", "source_id")
+    @classmethod
+    def validate_source_identity(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("source identity values must not be blank")
+        return value
+
+    @field_validator("quantity_delta")
+    @classmethod
+    def validate_quantity_delta(cls, value: Decimal) -> Decimal:
+        _validate_quantity(value.copy_abs())
+        if value == 0:
+            raise ValueError("quantity_delta must be nonzero")
+        return value
+
+    @field_validator("occurred_at")
+    @classmethod
+    def validate_occurred_at(cls, value: datetime) -> datetime:
+        validated_value = _validate_observation_timestamp(value)
+        assert validated_value is not None
+        return validated_value
+
+    @model_validator(mode="after")
+    def validate_movement(self) -> "InventoryMovementCreate":
+        if self.movement_type == "RECEIPT" and self.quantity_delta <= 0:
+            raise ValueError("RECEIPT requires a positive quantity_delta")
+        if self.movement_type == "WASTE" and self.quantity_delta >= 0:
+            raise ValueError("WASTE requires a negative quantity_delta")
+        if self.movement_type == "ADJUSTMENT" and self.quantity_delta == 0:
+            raise ValueError("ADJUSTMENT requires a nonzero quantity_delta")
+        if self.movement_type in {"WASTE", "ADJUSTMENT"} and not (
+            self.reason and self.reason.strip()
+        ):
+            raise ValueError(f"{self.movement_type} requires a reason")
+        return self
+
+
+class InventoryMovementResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    movement_id: str
+    cafe_id: str
+    ingredient_id: str
+    base_unit: str
+    movement_type: str
+    quantity_delta: Decimal
+    is_estimated: bool
+    source_type: str
+    source_id: str
+    occurred_at: datetime
+    recorded_at: datetime
+    recorded_by: str | None
+    reason: str | None

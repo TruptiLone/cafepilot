@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from backend.db.session import get_db
 from backend.modules.inventory.schemas import InventoryItemResponse
 from backend.modules.inventory.schemas import (
+    InventoryMovementCreate,
+    InventoryMovementResponse,
     StockCountCreate,
     StockCountResponse,
     StockCountSummaryResponse,
@@ -13,6 +15,7 @@ from backend.modules.inventory.service import (
     DEFAULT_CAFE_ID,
     CafeNotFoundError,
     InventoryItemNotFoundError,
+    InventoryMovementConflictError,
     InventoryService,
     StockCountConflictError,
     StockCountNotFoundError,
@@ -135,3 +138,47 @@ def get_stock_count(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     except StockCountNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock count not found") from error
+
+
+@router.post(
+    "/movements",
+    response_model=InventoryMovementResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_inventory_movement(
+    request: InventoryMovementCreate,
+    response: Response,
+    database_session: Session = Depends(get_db),
+) -> InventoryMovementResponse:
+    """Create an internal/demo-only accepted inventory event; authentication is pending."""
+    try:
+        movement, created = InventoryService(database_session).create_movement(request)
+        if not created:
+            response.status_code = status.HTTP_200_OK
+        return movement
+    except CafeNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+    except InventoryItemNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Inventory item not found for cafe",
+        ) from error
+    except InventoryMovementConflictError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@router.get("/movements", response_model=list[InventoryMovementResponse])
+def list_inventory_movements(
+    cafe_id: str = Query(DEFAULT_CAFE_ID),
+    ingredient_id: str | None = Query(default=None),
+    movement_type: str | None = Query(default=None),
+    database_session: Session = Depends(get_db),
+) -> list[InventoryMovementResponse]:
+    try:
+        return InventoryService(database_session).list_movements(
+            cafe_id,
+            ingredient_id,
+            movement_type,
+        )
+    except CafeNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error

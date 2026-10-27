@@ -6,7 +6,12 @@ from sqlalchemy import Select, func, select, update
 from sqlalchemy.orm import Session, contains_eager
 
 from backend.models.cafe import Cafe
-from backend.modules.inventory.models import InventoryItem, StockCount, StockCountLine
+from backend.modules.inventory.models import (
+    InventoryItem,
+    InventoryMovement,
+    StockCount,
+    StockCountLine,
+)
 
 
 class InventoryRepository:
@@ -101,3 +106,46 @@ class InventoryRepository:
         )
         self._database_session.flush()
         return result.rowcount == 1
+
+    def create_movement(self, movement: InventoryMovement) -> None:
+        self._database_session.add(movement)
+        self._database_session.flush()
+
+    def get_movement_by_identity(
+        self,
+        ingredient_id: str,
+        source_type: str,
+        source_id: str,
+    ) -> tuple[InventoryMovement, InventoryItem] | None:
+        statement = (
+            select(InventoryMovement, InventoryItem)
+            .join(InventoryItem, InventoryMovement.ingredient_id == InventoryItem.ingredient_id)
+            .where(
+                InventoryMovement.ingredient_id == ingredient_id,
+                InventoryMovement.source_type == source_type,
+                InventoryMovement.source_id == source_id,
+            )
+        )
+        return self._database_session.execute(statement).one_or_none()
+
+    def list_movements(
+        self,
+        cafe_id: str,
+        ingredient_id: str | None = None,
+        movement_type: str | None = None,
+    ) -> list[tuple[InventoryMovement, InventoryItem]]:
+        statement = (
+            select(InventoryMovement, InventoryItem)
+            .join(InventoryItem, InventoryMovement.ingredient_id == InventoryItem.ingredient_id)
+            .where(InventoryMovement.cafe_id == cafe_id)
+            .order_by(
+                InventoryMovement.occurred_at.desc(),
+                InventoryMovement.recorded_at.desc(),
+                InventoryMovement.movement_id.desc(),
+            )
+        )
+        if ingredient_id is not None:
+            statement = statement.where(InventoryMovement.ingredient_id == ingredient_id)
+        if movement_type is not None:
+            statement = statement.where(InventoryMovement.movement_type == movement_type)
+        return list(self._database_session.execute(statement))

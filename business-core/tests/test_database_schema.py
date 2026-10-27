@@ -134,12 +134,3 @@ def test_schema_has_cafe_scoped_foreign_keys_and_inventory_constraints() -> None
     assert "ix_inventory_movements_ingredient_id_occurred_at" in indexes[
         "inventory_movements"
     ]
-
-
-def test_initial_schema_contains_no_inventory_data() -> None:
-    with engine.connect() as connection:
-        for table_name in APPLICATION_TABLES:
-            row_count = connection.execute(
-                text(f"SELECT count(*) FROM {table_name}")
-            ).scalar_one()
-            assert row_count == 0

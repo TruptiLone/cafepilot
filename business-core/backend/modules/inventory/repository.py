@@ -149,3 +149,53 @@ class InventoryRepository:
         if movement_type is not None:
             statement = statement.where(InventoryMovement.movement_type == movement_type)
         return list(self._database_session.execute(statement))
+
+    def list_stock_items(
+        self,
+        cafe_id: str,
+        ingredient_id: str | None = None,
+    ) -> list[InventoryItem]:
+        statement = select(InventoryItem).where(InventoryItem.cafe_id == cafe_id)
+        if ingredient_id is not None:
+            statement = statement.where(InventoryItem.ingredient_id == ingredient_id)
+        statement = statement.order_by(InventoryItem.name, InventoryItem.ingredient_id)
+        return list(self._database_session.scalars(statement))
+
+    def list_verified_count_lines(
+        self,
+        cafe_id: str,
+        ingredient_id: str | None = None,
+    ) -> list[tuple[StockCountLine, StockCount]]:
+        statement = (
+            select(StockCountLine, StockCount)
+            .join(StockCount, StockCountLine.count_id == StockCount.count_id)
+            .where(
+                StockCount.cafe_id == cafe_id,
+                StockCount.status == "verified",
+                StockCount.counted_at.is_not(None),
+            )
+            .order_by(
+                StockCountLine.ingredient_id,
+                StockCount.counted_at.desc(),
+                StockCount.recorded_at.desc(),
+                StockCount.count_id.desc(),
+                StockCountLine.count_line_id.desc(),
+            )
+        )
+        if ingredient_id is not None:
+            statement = statement.where(StockCountLine.ingredient_id == ingredient_id)
+        return list(self._database_session.execute(statement))
+
+    def list_eligible_stock_movements(
+        self,
+        cafe_id: str,
+        calculated_at: datetime,
+        ingredient_id: str | None = None,
+    ) -> list[InventoryMovement]:
+        statement = select(InventoryMovement).where(
+            InventoryMovement.cafe_id == cafe_id,
+            InventoryMovement.occurred_at <= calculated_at,
+        )
+        if ingredient_id is not None:
+            statement = statement.where(InventoryMovement.ingredient_id == ingredient_id)
+        return list(self._database_session.scalars(statement))

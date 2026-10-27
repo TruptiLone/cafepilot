@@ -32,5 +32,9 @@ Base URL (local Business Core): `http://127.0.0.1:8001`
 | `GET` | `/api/v1/inventory/counts` | List physical stock-count sessions | Completed (INV-02) |
 | `GET` | `/api/v1/inventory/counts/{count_id}` | Get a count and its ingredient lines | Completed (INV-02) |
 | `POST` | `/api/v1/inventory/counts/{count_id}/verify` | Verify a draft count with an explicit observation time | Completed (INV-02) |
+| `POST` | `/api/v1/inventory/movements` | Record an accepted delivery, waste, or adjustment | Completed (INV-03) |
+| `GET` | `/api/v1/inventory/movements` | List inventory movements | Completed (INV-03) |
+| `GET` | `/api/v1/inventory/stock` | List read-only stock estimates from verified counts and later movements | Completed (INV-04) |
+| `GET` | `/api/v1/inventory/stock/{ingredient_id}` | Get a read-only stock estimate for one ingredient | Completed (INV-04) |
 
-**Next update:** Add inventory-movement and stock-estimation endpoints after INV-03 and INV-04 are designed and reviewed.
+**Next update:** Add future inventory APIs as milestones are designed and reviewed.

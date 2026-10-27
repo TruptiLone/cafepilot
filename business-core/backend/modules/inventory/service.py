@@ -76,6 +76,23 @@ class InventoryMovementResult:
     reason: str | None
 
 
+@dataclass(frozen=True)
+class StockEstimateResult:
+    ingredient_id: str
+    name: str
+    base_unit: str
+    stock_status: str
+    estimated_quantity: Decimal | None
+    latest_verified_count_id: str | None
+    latest_verified_counted_at: datetime | None
+    movement_delta: Decimal | None
+    included_movement_count: int
+    anchor_is_synthetic: bool | None
+    has_estimated_movements: bool
+    calculated_at: datetime
+    reason: str | None
+
+
 class InventoryService:
     def __init__(self, database_session: Session) -> None:
         self._database_session = database_session
@@ -292,4 +309,97 @@ class InventoryService:
             recorded_at=movement.recorded_at,
             recorded_by=movement.recorded_by,
             reason=movement.reason,
+        )
+
+    def list_stock_estimates(
+        self,
+        cafe_id: str = DEFAULT_CAFE_ID,
+        ingredient_id: str | None = None,
+    ) -> list[StockEstimateResult]:
+        self._require_cafe(cafe_id)
+        items = self._repository.list_stock_items(cafe_id, ingredient_id)
+        if ingredient_id is not None and not items:
+            raise InventoryItemNotFoundError(ingredient_id)
+
+        calculated_at = datetime.now(timezone.utc)
+        anchors: dict[str, tuple[StockCountLine, StockCount]] = {}
+        for line, count in self._repository.list_verified_count_lines(cafe_id, ingredient_id):
+            anchors.setdefault(line.ingredient_id, (line, count))
+
+        movements_by_ingredient: dict[str, list[InventoryMovement]] = {}
+        for movement in self._repository.list_eligible_stock_movements(
+            cafe_id,
+            calculated_at,
+            ingredient_id,
+        ):
+            movements_by_ingredient.setdefault(movement.ingredient_id, []).append(movement)
+
+        return [
+            self._stock_estimate(item, anchors.get(item.ingredient_id), movements_by_ingredient, calculated_at)
+            for item in items
+        ]
+
+    def get_stock_estimate(
+        self,
+        ingredient_id: str,
+        cafe_id: str = DEFAULT_CAFE_ID,
+    ) -> StockEstimateResult:
+        return self.list_stock_estimates(cafe_id, ingredient_id)[0]
+
+    @staticmethod
+    def _stock_estimate(
+        item: InventoryItem,
+        anchor: tuple[StockCountLine, StockCount] | None,
+        movements_by_ingredient: dict[str, list[InventoryMovement]],
+        calculated_at: datetime,
+    ) -> StockEstimateResult:
+        if anchor is None:
+            return StockEstimateResult(
+                ingredient_id=item.ingredient_id,
+                name=item.name,
+                base_unit=item.base_unit,
+                stock_status="unknown",
+                estimated_quantity=None,
+                latest_verified_count_id=None,
+                latest_verified_counted_at=None,
+                movement_delta=None,
+                included_movement_count=0,
+                anchor_is_synthetic=None,
+                has_estimated_movements=False,
+                calculated_at=calculated_at,
+                reason="No verified physical count is available.",
+            )
+
+        line, count = anchor
+        included_movements = [
+            movement
+            for movement in movements_by_ingredient.get(item.ingredient_id, [])
+            if movement.occurred_at > count.counted_at
+        ]
+        movement_delta = sum(
+            (movement.quantity_delta for movement in included_movements),
+            Decimal("0"),
+        )
+        estimated_quantity = line.counted_quantity + movement_delta
+        stock_status = "inconsistent" if estimated_quantity < 0 else "known"
+        return StockEstimateResult(
+            ingredient_id=item.ingredient_id,
+            name=item.name,
+            base_unit=item.base_unit,
+            stock_status=stock_status,
+            estimated_quantity=estimated_quantity,
+            latest_verified_count_id=count.count_id,
+            latest_verified_counted_at=count.counted_at,
+            movement_delta=movement_delta,
+            included_movement_count=len(included_movements),
+            anchor_is_synthetic=count.is_synthetic,
+            has_estimated_movements=any(
+                movement.is_estimated for movement in included_movements
+            ),
+            calculated_at=calculated_at,
+            reason=(
+                "Estimated quantity is negative; investigate the count or movements."
+                if stock_status == "inconsistent"
+                else None
+            ),
         )

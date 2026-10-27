@@ -6,6 +6,7 @@ from backend.modules.inventory.schemas import InventoryItemResponse
 from backend.modules.inventory.schemas import (
     InventoryMovementCreate,
     InventoryMovementResponse,
+    StockEstimateResponse,
     StockCountCreate,
     StockCountResponse,
     StockCountSummaryResponse,
@@ -182,3 +183,31 @@ def list_inventory_movements(
         )
     except CafeNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+
+
+@router.get("/stock", response_model=list[StockEstimateResponse])
+def list_stock_estimates(
+    cafe_id: str = Query(DEFAULT_CAFE_ID),
+    ingredient_id: str | None = Query(default=None),
+    database_session: Session = Depends(get_db),
+) -> list[StockEstimateResponse]:
+    try:
+        return InventoryService(database_session).list_stock_estimates(cafe_id, ingredient_id)
+    except CafeNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+    except InventoryItemNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found") from error
+
+
+@router.get("/stock/{ingredient_id}", response_model=StockEstimateResponse)
+def get_stock_estimate(
+    ingredient_id: str,
+    cafe_id: str = Query(DEFAULT_CAFE_ID),
+    database_session: Session = Depends(get_db),
+) -> StockEstimateResponse:
+    try:
+        return InventoryService(database_session).get_stock_estimate(ingredient_id, cafe_id)
+    except CafeNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+    except InventoryItemNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found") from error

@@ -185,3 +185,21 @@ class InventoryMovementResponse(BaseModel):
     recorded_at: datetime
     recorded_by: str | None
     reason: str | None
+
+
+class StockEstimateResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    ingredient_id: str
+    name: str
+    base_unit: str
+    stock_status: Literal["known", "unknown", "inconsistent"]
+    estimated_quantity: Decimal | None
+    latest_verified_count_id: str | None
+    latest_verified_counted_at: datetime | None
+    movement_delta: Decimal | None
+    included_movement_count: int
+    anchor_is_synthetic: bool | None
+    has_estimated_movements: bool
+    calculated_at: datetime
+    reason: str | None

@@ -1,8 +1,12 @@
-from sqlalchemy import Select, select
-from sqlalchemy.orm import Session
+from collections.abc import Sequence
+
+from datetime import datetime
+
+from sqlalchemy import Select, func, select, update
+from sqlalchemy.orm import Session, contains_eager
 
 from backend.models.cafe import Cafe
-from backend.modules.inventory.models import InventoryItem
+from backend.modules.inventory.models import InventoryItem, StockCount, StockCountLine
 
 
 class InventoryRepository:
@@ -35,3 +39,65 @@ class InventoryRepository:
             InventoryItem.ingredient_id == ingredient_id,
         )
         return self._database_session.scalar(statement)
+
+    def get_items(self, cafe_id: str, ingredient_ids: set[str]) -> list[InventoryItem]:
+        statement = select(InventoryItem).where(
+            InventoryItem.cafe_id == cafe_id,
+            InventoryItem.ingredient_id.in_(ingredient_ids),
+        )
+        return list(self._database_session.scalars(statement))
+
+    def create_count(self, count: StockCount, lines: Sequence[StockCountLine]) -> None:
+        self._database_session.add(count)
+        self._database_session.add_all(lines)
+        self._database_session.flush()
+
+    def list_counts(
+        self,
+        cafe_id: str,
+        status: str | None = None,
+    ) -> list[tuple[StockCount, int]]:
+        statement = (
+            select(StockCount, func.count(StockCountLine.count_line_id))
+            .outerjoin(StockCountLine, StockCount.count_id == StockCountLine.count_id)
+            .where(StockCount.cafe_id == cafe_id)
+            .group_by(StockCount.count_id)
+            .order_by(StockCount.recorded_at.desc(), StockCount.count_id.desc())
+        )
+        if status is not None:
+            statement = statement.where(StockCount.status == status)
+        return [(count, int(item_count)) for count, item_count in self._database_session.execute(statement)]
+
+    def get_count(self, cafe_id: str, count_id: str) -> StockCount | None:
+        statement = (
+            select(StockCount)
+            .outerjoin(StockCountLine, StockCount.count_id == StockCountLine.count_id)
+            .options(contains_eager(StockCount.lines))
+            .where(
+                StockCount.cafe_id == cafe_id,
+                StockCount.count_id == count_id,
+            )
+            .order_by(StockCountLine.ingredient_id)
+        )
+        return self._database_session.execute(statement).unique().scalar_one_or_none()
+
+    def verify_count(
+        self,
+        cafe_id: str,
+        count_id: str,
+        counted_at: datetime | None,
+    ) -> bool:
+        values: dict[str, object] = {"status": "verified"}
+        if counted_at is not None:
+            values["counted_at"] = func.coalesce(StockCount.counted_at, counted_at)
+        result = self._database_session.execute(
+            update(StockCount)
+            .where(
+                StockCount.cafe_id == cafe_id,
+                StockCount.count_id == count_id,
+                StockCount.status == "draft",
+            )
+            .values(**values)
+        )
+        self._database_session.flush()
+        return result.rowcount == 1

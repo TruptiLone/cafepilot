@@ -1,9 +1,11 @@
 from sqlalchemy import text
+import pytest
 
 from backend.db import session
 from backend.db.session import SessionLocal
 
 
+@pytest.mark.database
 def test_session_factory_executes_a_query() -> None:
     with SessionLocal() as database_session:
         assert database_session.execute(text("SELECT 1")).scalar_one() == 1

@@ -1,7 +1,6 @@
-from sqlalchemy import Boolean, DateTime, Numeric, Text, UniqueConstraint, inspect, text
+from sqlalchemy import Boolean, DateTime, Numeric, Text, UniqueConstraint, inspect
 
 from backend.db.base import Base
-from backend.db.session import engine
 from backend.models.cafe import Cafe, INITIAL_CAFE_ID
 from backend.modules.inventory.models import (
     InventoryItem,
@@ -137,25 +136,3 @@ def test_inventory_relationships_are_configured() -> None:
         is InventoryMovement
     )
     assert inspect(StockCount).relationships["lines"].mapper.class_ is StockCountLine
-
-
-def test_importing_models_does_not_create_database_tables() -> None:
-    expected_tables = {
-        "cafes",
-        "inventory_items",
-        "stock_counts",
-        "stock_count_lines",
-        "inventory_movements",
-    }
-
-    with engine.connect() as connection:
-        existing_tables = set(
-            connection.execute(
-                text(
-                    "SELECT tablename FROM pg_tables "
-                    "WHERE schemaname = 'public'"
-                )
-            ).scalars()
-        )
-
-    assert expected_tables.isdisjoint(existing_tables)

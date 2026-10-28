@@ -10,6 +10,8 @@ from sqlalchemy import (
     Integer,
     Text,
     UniqueConstraint,
+    false,
+    text,
     true,
 )
 from sqlalchemy.orm import Mapped, foreign, mapped_column, relationship
@@ -42,6 +44,248 @@ class MenuProduct(Base):
         back_populates="product",
         primaryjoin=lambda: MenuProduct.product_id == foreign(SaleItem.product_id),
         foreign_keys=lambda: [SaleItem.product_id],
+    )
+    variations: Mapped[list["ProductVariation"]] = relationship(
+        back_populates="product"
+    )
+    modifier_group_links: Mapped[list["ProductModifierGroup"]] = relationship(
+        back_populates="product",
+        viewonly=True,
+    )
+
+
+class ProductVariation(Base):
+    __tablename__ = "product_variations"
+    __table_args__ = (
+        CheckConstraint(
+            "code IN ('REG', 'LRG')",
+            name="ck_product_variations_code",
+        ),
+        CheckConstraint(
+            "size_oz IS NULL OR size_oz > 0",
+            name="ck_product_variations_size_positive",
+        ),
+        CheckConstraint(
+            "price_cents >= 0",
+            name="ck_product_variations_price_nonnegative",
+        ),
+        ForeignKeyConstraint(
+            ["product_id", "cafe_id"],
+            ["menu_products.product_id", "menu_products.cafe_id"],
+            name="fk_product_variations_product_cafe",
+        ),
+        UniqueConstraint(
+            "variation_id",
+            "cafe_id",
+            name="uq_product_variations_variation_cafe",
+        ),
+        UniqueConstraint(
+            "cafe_id",
+            "product_id",
+            "code",
+            name="uq_product_variations_cafe_product_code",
+        ),
+        Index(
+            "ix_product_variations_cafe_id_product_id_active",
+            "cafe_id",
+            "product_id",
+            "active",
+        ),
+    )
+
+    variation_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cafe_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("cafes.cafe_id"),
+        nullable=False,
+    )
+    product_id: Mapped[str] = mapped_column(Text, nullable=False)
+    code: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    size_oz: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=true(),
+        nullable=False,
+    )
+
+    product: Mapped["MenuProduct"] = relationship(back_populates="variations")
+
+
+class ModifierGroup(Base):
+    __tablename__ = "modifier_groups"
+    __table_args__ = (
+        CheckConstraint(
+            "selection_type IN ('single', 'multiple')",
+            name="ck_modifier_groups_selection_type",
+        ),
+        CheckConstraint(
+            "min_select >= 0",
+            name="ck_modifier_groups_min_select_nonnegative",
+        ),
+        CheckConstraint(
+            "max_select >= 1",
+            name="ck_modifier_groups_max_select_positive",
+        ),
+        CheckConstraint(
+            "max_select >= min_select",
+            name="ck_modifier_groups_selection_range",
+        ),
+        UniqueConstraint(
+            "group_id",
+            "cafe_id",
+            name="uq_modifier_groups_group_cafe",
+        ),
+        UniqueConstraint(
+            "cafe_id",
+            "name",
+            name="uq_modifier_groups_cafe_name",
+        ),
+        Index("ix_modifier_groups_cafe_id_active", "cafe_id", "active"),
+    )
+
+    group_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cafe_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("cafes.cafe_id"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    selection_type: Mapped[str] = mapped_column(Text, nullable=False)
+    min_select: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default=text("0"),
+        nullable=False,
+    )
+    max_select: Mapped[int] = mapped_column(Integer, nullable=False)
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=true(),
+        nullable=False,
+    )
+
+    modifiers: Mapped[list["Modifier"]] = relationship(back_populates="group")
+    product_links: Mapped[list["ProductModifierGroup"]] = relationship(
+        back_populates="group",
+        viewonly=True,
+    )
+
+
+class Modifier(Base):
+    __tablename__ = "modifiers"
+    __table_args__ = (
+        CheckConstraint(
+            "price_cents >= 0",
+            name="ck_modifiers_price_nonnegative",
+        ),
+        ForeignKeyConstraint(
+            ["group_id", "cafe_id"],
+            ["modifier_groups.group_id", "modifier_groups.cafe_id"],
+            name="fk_modifiers_group_cafe",
+        ),
+        UniqueConstraint(
+            "modifier_id",
+            "cafe_id",
+            name="uq_modifiers_modifier_cafe",
+        ),
+        UniqueConstraint(
+            "cafe_id",
+            "group_id",
+            "name",
+            name="uq_modifiers_cafe_group_name",
+        ),
+        Index(
+            "ix_modifiers_cafe_id_group_id_active",
+            "cafe_id",
+            "group_id",
+            "active",
+        ),
+        Index(
+            "uq_modifiers_cafe_group_default",
+            "cafe_id",
+            "group_id",
+            unique=True,
+            postgresql_where=text("is_default"),
+        ),
+    )
+
+    modifier_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cafe_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("cafes.cafe_id"),
+        nullable=False,
+    )
+    group_id: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    is_default: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
+        nullable=False,
+    )
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=true(),
+        nullable=False,
+    )
+
+    group: Mapped["ModifierGroup"] = relationship(back_populates="modifiers")
+
+
+class ProductModifierGroup(Base):
+    __tablename__ = "product_modifier_groups"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["product_id", "cafe_id"],
+            ["menu_products.product_id", "menu_products.cafe_id"],
+            name="fk_product_modifier_groups_product_cafe",
+        ),
+        ForeignKeyConstraint(
+            ["group_id", "cafe_id"],
+            ["modifier_groups.group_id", "modifier_groups.cafe_id"],
+            name="fk_product_modifier_groups_group_cafe",
+        ),
+        UniqueConstraint(
+            "cafe_id",
+            "product_id",
+            "group_id",
+            name="uq_product_modifier_groups_cafe_product_group",
+        ),
+        Index(
+            "ix_product_modifier_groups_cafe_id_group_id",
+            "cafe_id",
+            "group_id",
+        ),
+    )
+
+    product_modifier_group_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cafe_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("cafes.cafe_id"),
+        nullable=False,
+    )
+    product_id: Mapped[str] = mapped_column(Text, nullable=False)
+    group_id: Mapped[str] = mapped_column(Text, nullable=False)
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        server_default=true(),
+        nullable=False,
+    )
+
+    product: Mapped["MenuProduct"] = relationship(
+        back_populates="modifier_group_links",
+        viewonly=True,
+    )
+    group: Mapped["ModifierGroup"] = relationship(
+        back_populates="product_links",
+        viewonly=True,
     )
 
 

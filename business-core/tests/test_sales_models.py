@@ -3,7 +3,15 @@ from sqlalchemy import Boolean, DateTime, Integer, Text, UniqueConstraint, inspe
 from backend.db.base import Base
 from backend.models.cafe import Cafe
 from backend.modules.inventory.models import InventoryItem, InventoryMovement, StockCount
-from backend.modules.sales.models import MenuProduct, Sale, SaleItem
+from backend.modules.sales.models import (
+    MenuProduct,
+    Modifier,
+    ModifierGroup,
+    ProductModifierGroup,
+    ProductVariation,
+    Sale,
+    SaleItem,
+)
 
 
 def _constraint_columns(table, constraint_type):
@@ -23,9 +31,16 @@ def _check_constraint_sql(table) -> set[str]:
 
 
 def test_sales_tables_are_registered_in_shared_metadata() -> None:
-    assert {"cafes", "menu_products", "sales", "sale_items"}.issubset(
-        Base.metadata.tables
-    )
+    assert {
+        "cafes",
+        "menu_products",
+        "product_variations",
+        "modifier_groups",
+        "modifiers",
+        "product_modifier_groups",
+        "sales",
+        "sale_items",
+    }.issubset(Base.metadata.tables)
 
 
 def test_sales_columns_constraints_and_indexes_are_defined() -> None:
@@ -65,10 +80,74 @@ def test_sales_columns_constraints_and_indexes_are_defined() -> None:
     assert "ix_sales_cafe_id_sold_at" in {index.name for index in sales.indexes}
 
 
+def test_sales_catalog_constraints_and_indexes_are_defined() -> None:
+    variations = Base.metadata.tables["product_variations"]
+    groups = Base.metadata.tables["modifier_groups"]
+    modifiers = Base.metadata.tables["modifiers"]
+    mappings = Base.metadata.tables["product_modifier_groups"]
+
+    assert variations.primary_key.columns.keys() == ["variation_id"]
+    assert groups.primary_key.columns.keys() == ["group_id"]
+    assert modifiers.primary_key.columns.keys() == ["modifier_id"]
+    assert mappings.primary_key.columns.keys() == ["product_modifier_group_id"]
+    assert ("cafe_id", "product_id", "code") in _constraint_columns(
+        variations,
+        UniqueConstraint,
+    )
+    assert ("cafe_id", "name") in _constraint_columns(groups, UniqueConstraint)
+    assert ("cafe_id", "group_id", "name") in _constraint_columns(
+        modifiers,
+        UniqueConstraint,
+    )
+    assert ("cafe_id", "product_id", "group_id") in _constraint_columns(
+        mappings,
+        UniqueConstraint,
+    )
+    assert "price_cents >= 0" in _check_constraint_sql(variations)
+    assert "selection_type IN ('single', 'multiple')" in _check_constraint_sql(
+        groups
+    )
+    assert "max_select >= min_select" in _check_constraint_sql(groups)
+    assert "price_cents >= 0" in _check_constraint_sql(modifiers)
+    assert "fk_product_variations_product_cafe" in {
+        constraint.name for constraint in variations.foreign_key_constraints
+    }
+    assert "fk_modifiers_group_cafe" in {
+        constraint.name for constraint in modifiers.foreign_key_constraints
+    }
+    assert {
+        "fk_product_modifier_groups_product_cafe",
+        "fk_product_modifier_groups_group_cafe",
+    }.issubset(
+        {constraint.name for constraint in mappings.foreign_key_constraints}
+    )
+    assert "ix_product_variations_cafe_id_product_id_active" in {
+        index.name for index in variations.indexes
+    }
+    assert "uq_modifiers_cafe_group_default" in {
+        index.name for index in modifiers.indexes
+    }
+
+
 def test_sales_relationships_configure_without_overlap_warnings() -> None:
     assert inspect(Cafe).relationships["menu_products"].mapper.class_ is MenuProduct
     assert inspect(Cafe).relationships["sales"].mapper.class_ is Sale
     assert inspect(MenuProduct).relationships["sale_items"].mapper.class_ is SaleItem
+    assert (
+        inspect(MenuProduct).relationships["variations"].mapper.class_
+        is ProductVariation
+    )
+    assert inspect(ProductVariation).relationships["product"].mapper.class_ is MenuProduct
+    assert inspect(ModifierGroup).relationships["modifiers"].mapper.class_ is Modifier
+    assert inspect(Modifier).relationships["group"].mapper.class_ is ModifierGroup
+    assert (
+        inspect(ProductModifierGroup).relationships["product"].mapper.class_
+        is MenuProduct
+    )
+    assert (
+        inspect(ProductModifierGroup).relationships["group"].mapper.class_
+        is ModifierGroup
+    )
     assert inspect(Sale).relationships["items"].mapper.class_ is SaleItem
     assert inspect(SaleItem).relationships["sale"].mapper.class_ is Sale
     assert inspect(SaleItem).relationships["product"].mapper.class_ is MenuProduct

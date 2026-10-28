@@ -8,6 +8,10 @@ APPLICATION_TABLES = {
     "employees",
     "inventory_items",
     "menu_products",
+    "modifier_groups",
+    "modifiers",
+    "product_modifier_groups",
+    "product_variations",
     "sale_items",
     "sales",
     "shifts",
@@ -15,7 +19,7 @@ APPLICATION_TABLES = {
     "stock_count_lines",
     "inventory_movements",
 }
-REVISION = "3411712f6af3"
+REVISION = "a6f3c2d91b47"
 
 pytestmark = pytest.mark.database
 
@@ -196,6 +200,77 @@ def test_sales_schema_has_expected_constraints_and_indexes() -> None:
         index["name"]
         for index in inspect(engine).get_indexes("sales", schema="public")
     }
+
+
+def test_sales_catalog_schema_has_expected_constraints_and_indexes() -> None:
+    inspector = inspect(engine)
+    variation_checks = {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints(
+            "product_variations",
+            schema="public",
+        )
+    }
+    group_checks = {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints(
+            "modifier_groups",
+            schema="public",
+        )
+    }
+    modifier_checks = {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints("modifiers", schema="public")
+    }
+    variation_foreign_keys = _foreign_keys_by_name("product_variations")
+    modifier_foreign_keys = _foreign_keys_by_name("modifiers")
+    mapping_foreign_keys = _foreign_keys_by_name("product_modifier_groups")
+    variation_uniques = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints(
+            "product_variations",
+            schema="public",
+        )
+    }
+    mapping_uniques = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints(
+            "product_modifier_groups",
+            schema="public",
+        )
+    }
+    modifier_indexes = {
+        index["name"]: index
+        for index in inspector.get_indexes("modifiers", schema="public")
+    }
+
+    assert {
+        "ck_product_variations_code",
+        "ck_product_variations_size_positive",
+        "ck_product_variations_price_nonnegative",
+    }.issubset(variation_checks)
+    assert {
+        "ck_modifier_groups_selection_type",
+        "ck_modifier_groups_min_select_nonnegative",
+        "ck_modifier_groups_max_select_positive",
+        "ck_modifier_groups_selection_range",
+    }.issubset(group_checks)
+    assert "ck_modifiers_price_nonnegative" in modifier_checks
+    assert variation_foreign_keys["fk_product_variations_product_cafe"][
+        "constrained_columns"
+    ] == ["product_id", "cafe_id"]
+    assert modifier_foreign_keys["fk_modifiers_group_cafe"][
+        "constrained_columns"
+    ] == ["group_id", "cafe_id"]
+    assert mapping_foreign_keys["fk_product_modifier_groups_product_cafe"][
+        "constrained_columns"
+    ] == ["product_id", "cafe_id"]
+    assert mapping_foreign_keys["fk_product_modifier_groups_group_cafe"][
+        "constrained_columns"
+    ] == ["group_id", "cafe_id"]
+    assert ("cafe_id", "product_id", "code") in variation_uniques
+    assert ("cafe_id", "product_id", "group_id") in mapping_uniques
+    assert modifier_indexes["uq_modifiers_cafe_group_default"]["unique"]
 
 
 def test_staffing_schema_has_expected_constraints_and_indexes() -> None:

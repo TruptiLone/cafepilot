@@ -2,17 +2,13 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import AppShell from "./components/AppShell";
 import InventoryPage from "./pages/InventoryPage";
 import PagePlaceholder from "./pages/PagePlaceholder";
+import SalesPage from "./pages/SalesPage";
 
 const pages = {
   dashboard: {
     title: "Dashboard",
     description:
       "A clear overview of café performance across inventory, sales, and staffing.",
-  },
-  sales: {
-    title: "Sales",
-    description:
-      "Review completed sales, product performance, and business trends.",
   },
   staffing: {
     title: "Staffing",
@@ -26,6 +22,7 @@ function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route path="inventory" element={<InventoryPage />} />
+        <Route path="sales" element={<SalesPage />} />
         {Object.entries(pages).map(([path, page]) => (
           <Route
             key={path}

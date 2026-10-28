@@ -1,22 +1,27 @@
 type ErrorStateProps = {
+  heading?: string;
   message: string;
   onRetry: () => void;
 };
 
-export function LoadingState() {
+export function LoadingState({ label = "inventory data" }: { label?: string }) {
   return (
     <div className="data-state" role="status">
       <span className="loading-indicator" aria-hidden="true" />
-      <strong>Loading inventory data</strong>
+      <strong>Loading {label}</strong>
       <p>Connecting to CaféPilot Business Core…</p>
     </div>
   );
 }
 
-export function ErrorState({ message, onRetry }: ErrorStateProps) {
+export function ErrorState({
+  heading = "Inventory data is unavailable",
+  message,
+  onRetry,
+}: ErrorStateProps) {
   return (
     <div className="data-state data-state--error" role="alert">
-      <strong>Inventory data is unavailable</strong>
+      <strong>{heading}</strong>
       <p>{message}</p>
       <button className="secondary-button" type="button" onClick={onRetry}>
         Try again

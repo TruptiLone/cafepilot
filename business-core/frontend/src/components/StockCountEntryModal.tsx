@@ -282,6 +282,10 @@ function StockCountEntryModal({
             <div className="form-submit-error" role="alert">
               <strong>Draft count was not saved</strong>
               <span>{submitError}</span>
+              <small>
+                If the outcome is uncertain, check Stock Counts history before
+                retrying so an existing draft is not overlooked.
+              </small>
             </div>
           )}
 

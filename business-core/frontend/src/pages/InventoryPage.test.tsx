@@ -364,6 +364,31 @@ describe("InventoryPage", () => {
     expect(screen.getByText("Add at least one ingredient to the count.")).not.toBeNull();
   });
 
+  it("warns users to check count history before retrying an uncertain save", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn((input: RequestInfo | URL, options?: RequestInit) => {
+      const path = String(input);
+      if (options?.method === "POST" && path.endsWith("/counts")) {
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      if (path.includes("/items")) return jsonResponse(responses.items);
+      if (path.includes("/counts")) return jsonResponse(responses.counts);
+      if (path.includes("/movements")) return jsonResponse(responses.movements);
+      return jsonResponse(responses.stock);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryPage />);
+
+    await openCountForm(user);
+    await user.selectOptions(screen.getByLabelText("Ingredient 1"), "OAT_MILK");
+    await user.type(screen.getByLabelText("Counted Quantity 1"), "1.000");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText("Failed to fetch")).not.toBeNull();
+    expect(screen.getByText(/check Stock Counts history before retrying/)).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "New Count" })).not.toBeNull();
+  });
+
   it("verifies a draft with an explicit cafe-local observation time", async () => {
     const user = userEvent.setup();
     let verified = false;

@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.db.session import engine, get_db
 from backend.main import app
 from backend.models.cafe import Cafe
-from backend.modules.sales.models import MenuProduct, Sale, SaleItem
+from backend.modules.sales.models import MenuProduct, ProductVariation, Sale, SaleItem
 
 TEST_CAFE_ID = "TEST_SALES_API_CAFE"
 OTHER_CAFE_ID = "TEST_SALES_API_OTHER_CAFE"
@@ -86,6 +86,47 @@ def sales_catalog(database_session: Session) -> None:
         ]
     )
     database_session.flush()
+    database_session.add_all(
+        [
+            ProductVariation(
+                variation_id="TEST_SALES_COFFEE_REG",
+                cafe_id=TEST_CAFE_ID,
+                product_id="TEST_SALES_COFFEE",
+                code="REG",
+                name="Regular",
+                size_oz=None,
+                price_cents=500,
+            ),
+            ProductVariation(
+                variation_id="TEST_SALES_TEA_REG",
+                cafe_id=TEST_CAFE_ID,
+                product_id="TEST_SALES_TEA",
+                code="REG",
+                name="Regular",
+                size_oz=None,
+                price_cents=300,
+            ),
+            ProductVariation(
+                variation_id="TEST_SALES_MUFFIN_REG",
+                cafe_id=TEST_CAFE_ID,
+                product_id="TEST_SALES_MUFFIN",
+                code="REG",
+                name="Regular",
+                size_oz=None,
+                price_cents=400,
+            ),
+            ProductVariation(
+                variation_id="TEST_SALES_OTHER_REG",
+                cafe_id=OTHER_CAFE_ID,
+                product_id="TEST_SALES_OTHER",
+                code="REG",
+                name="Regular",
+                size_oz=None,
+                price_cents=999,
+            ),
+        ]
+    )
+    database_session.flush()
 
 
 def _sale_payload(**overrides) -> dict:
@@ -139,8 +180,44 @@ def test_sale_uses_server_totals_and_preserves_historical_prices(
         "TEST_SALES_COFFEE": (500, 1000),
         "TEST_SALES_MUFFIN": (400, 400),
     }
+    stored_sale = database_session.get(Sale, body["sale_id"])
+    assert (
+        stored_sale.source,
+        stored_sale.external_id,
+        stored_sale.subtotal_cents,
+        stored_sale.discount_cents,
+        stored_sale.tax_cents,
+    ) == ("pos", None, 1400, 0, 0)
+    stored_items = list(
+        database_session.scalars(
+            select(SaleItem).where(SaleItem.sale_id == body["sale_id"])
+        )
+    )
+    assert {
+        item.product_id: (
+            item.variation_id,
+            item.product_name,
+            item.variation_name,
+            item.modifier_unit_cents,
+        )
+        for item in stored_items
+    } == {
+        "TEST_SALES_COFFEE": (
+            "TEST_SALES_COFFEE_REG",
+            "Test Coffee",
+            "Regular",
+            0,
+        ),
+        "TEST_SALES_MUFFIN": (
+            "TEST_SALES_MUFFIN_REG",
+            "Test Muffin",
+            "Regular",
+            0,
+        ),
+    }
 
     database_session.get(MenuProduct, "TEST_SALES_COFFEE").price_cents = 750
+    database_session.get(MenuProduct, "TEST_SALES_COFFEE").name = "Renamed Coffee"
     database_session.flush()
     detail = client.get(
         f"/api/v1/sales/{body['sale_id']}",
@@ -152,6 +229,7 @@ def test_sale_uses_server_totals_and_preserves_historical_prices(
         item for item in detail.json()["items"] if item["product_id"] == "TEST_SALES_COFFEE"
     )
     assert coffee["unit_price_cents"] == 500
+    assert coffee["product_name"] == "Test Coffee"
 
 
 @pytest.mark.database
@@ -299,6 +377,11 @@ def test_history_filters_and_report_use_cafe_timezone_and_completed_sales_only(
         sold_at=datetime(2025, 1, 2, 18, tzinfo=timezone.utc),
         recorded_at=datetime(2025, 1, 2, 18, tzinfo=timezone.utc),
         status="void",
+        source="pos",
+        external_id=None,
+        subtotal_cents=500,
+        discount_cents=0,
+        tax_cents=0,
         total_cents=500,
     )
     database_session.add(void_sale)
@@ -308,8 +391,12 @@ def test_history_filters_and_report_use_cafe_timezone_and_completed_sales_only(
             sale_id=void_sale.sale_id,
             cafe_id=TEST_CAFE_ID,
             product_id="TEST_SALES_COFFEE",
+            variation_id="TEST_SALES_COFFEE_REG",
+            product_name="Test Coffee",
+            variation_name="Regular",
             quantity=1,
             unit_price_cents=500,
+            modifier_unit_cents=0,
             line_total_cents=500,
         )
     )

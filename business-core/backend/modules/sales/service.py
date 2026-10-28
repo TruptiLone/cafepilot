@@ -130,25 +130,37 @@ class SalesService:
                 return self._resolve_sale_identity(existing_rows, request), False
 
             product_ids = {item.product_id for item in request.items}
-            products = self._repository.get_active_products(request.cafe_id, product_ids)
-            products_by_id = {product.product_id: product for product in products}
-            missing_ids = product_ids - products_by_id.keys()
+            catalog_rows = self._repository.get_active_regular_catalog(
+                request.cafe_id,
+                product_ids,
+            )
+            catalog_by_product_id = {
+                product.product_id: (product, variation)
+                for product, variation in catalog_rows
+            }
+            missing_ids = product_ids - catalog_by_product_id.keys()
             if missing_ids:
                 raise ProductNotFoundError(next(iter(missing_ids)))
 
             sale_id = f"sale_{uuid4().hex}"
-            sale_items = [
-                SaleItem(
-                    sale_item_id=f"sale_item_{uuid4().hex}",
-                    sale_id=sale_id,
-                    cafe_id=request.cafe_id,
-                    product_id=item.product_id,
-                    quantity=item.quantity,
-                    unit_price_cents=products_by_id[item.product_id].price_cents,
-                    line_total_cents=item.quantity * products_by_id[item.product_id].price_cents,
+            sale_items = []
+            for item in request.items:
+                product, variation = catalog_by_product_id[item.product_id]
+                sale_items.append(
+                    SaleItem(
+                        sale_item_id=f"sale_item_{uuid4().hex}",
+                        sale_id=sale_id,
+                        cafe_id=request.cafe_id,
+                        product_id=item.product_id,
+                        variation_id=variation.variation_id,
+                        product_name=product.name,
+                        variation_name=variation.name,
+                        quantity=item.quantity,
+                        unit_price_cents=product.price_cents,
+                        modifier_unit_cents=0,
+                        line_total_cents=item.quantity * product.price_cents,
+                    )
                 )
-                for item in request.items
-            ]
             if any(item.line_total_cents > MAX_INTEGER for item in sale_items):
                 raise SalesValidationError("sale item total exceeds supported range")
             total_cents = sum(item.line_total_cents for item in sale_items)
@@ -158,9 +170,14 @@ class SalesService:
                 sale_id=sale_id,
                 cafe_id=request.cafe_id,
                 source_id=request.source_id,
+                source="pos",
+                external_id=None,
                 sold_at=request.sold_at.astimezone(timezone.utc),
                 recorded_at=datetime.now(timezone.utc),
                 status="completed",
+                subtotal_cents=total_cents,
+                discount_cents=0,
+                tax_cents=0,
                 total_cents=total_cents,
             )
             try:
@@ -231,8 +248,8 @@ class SalesService:
         for sale, item, product in rows:
             sales[sale.sale_id] = sale
             product_bucket = products.setdefault(
-                product.product_id,
-                _ProductAggregate(name=product.name),
+                item.product_id,
+                _ProductAggregate(name=item.product_name),
             )
             product_bucket.quantity += item.quantity
             product_bucket.revenue_cents += item.line_total_cents
@@ -307,7 +324,7 @@ class SalesService:
             items=[
                 SaleItemResult(
                     product_id=item.product_id,
-                    product_name=product.name,
+                    product_name=item.product_name,
                     quantity=item.quantity,
                     unit_price_cents=item.unit_price_cents,
                     line_total_cents=item.line_total_cents,

@@ -4,7 +4,7 @@ from sqlalchemy import and_, func, select
 from sqlalchemy.orm import Session
 
 from backend.models.cafe import Cafe
-from backend.modules.sales.models import MenuProduct, Sale, SaleItem
+from backend.modules.sales.models import MenuProduct, ProductVariation, Sale, SaleItem
 
 
 class SalesRepository:
@@ -28,6 +28,30 @@ class SalesRepository:
             MenuProduct.active.is_(True),
         )
         return list(self._database_session.scalars(statement))
+
+    def get_active_regular_catalog(
+        self,
+        cafe_id: str,
+        product_ids: set[str],
+    ) -> list[tuple[MenuProduct, ProductVariation]]:
+        statement = (
+            select(MenuProduct, ProductVariation)
+            .join(
+                ProductVariation,
+                and_(
+                    MenuProduct.product_id == ProductVariation.product_id,
+                    MenuProduct.cafe_id == ProductVariation.cafe_id,
+                ),
+            )
+            .where(
+                MenuProduct.cafe_id == cafe_id,
+                MenuProduct.product_id.in_(product_ids),
+                MenuProduct.active.is_(True),
+                ProductVariation.code == "REG",
+                ProductVariation.active.is_(True),
+            )
+        )
+        return list(self._database_session.execute(statement))
 
     def create_sale(self, sale: Sale, items: list[SaleItem]) -> None:
         self._database_session.add(sale)

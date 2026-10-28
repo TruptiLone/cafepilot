@@ -11,6 +11,7 @@ from backend.modules.sales.models import (
     ProductVariation,
     Sale,
     SaleItem,
+    SaleItemModifier,
 )
 
 
@@ -40,6 +41,7 @@ def test_sales_tables_are_registered_in_shared_metadata() -> None:
         "product_modifier_groups",
         "sales",
         "sale_items",
+        "sale_item_modifiers",
     }.issubset(Base.metadata.tables)
 
 
@@ -47,6 +49,7 @@ def test_sales_columns_constraints_and_indexes_are_defined() -> None:
     products = Base.metadata.tables["menu_products"]
     sales = Base.metadata.tables["sales"]
     items = Base.metadata.tables["sale_items"]
+    item_modifiers = Base.metadata.tables["sale_item_modifiers"]
 
     assert isinstance(products.c.product_id.type, Text)
     assert isinstance(products.c.price_cents.type, Integer)
@@ -62,22 +65,51 @@ def test_sales_columns_constraints_and_indexes_are_defined() -> None:
     )
     assert ("cafe_id", "source_id") in _constraint_columns(sales, UniqueConstraint)
     assert ("sale_id", "cafe_id") in _constraint_columns(sales, UniqueConstraint)
-    assert ("sale_id", "product_id") in _constraint_columns(
+    assert ("sale_item_id", "cafe_id") in _constraint_columns(
+        items, UniqueConstraint
+    )
+    assert ("sale_id", "product_id") not in _constraint_columns(
         items, UniqueConstraint
     )
     assert {
         "fk_sale_items_sale_cafe",
         "fk_sale_items_product_cafe",
+        "fk_sale_items_variation_cafe",
     } == {constraint.name for constraint in items.foreign_key_constraints}
     assert "price_cents >= 0" in _check_constraint_sql(products)
     assert "quantity > 0" in _check_constraint_sql(items)
-    assert "line_total_cents = quantity * unit_price_cents" in _check_constraint_sql(
-        items
+    assert (
+        "line_total_cents = quantity * (unit_price_cents + modifier_unit_cents)"
+        in _check_constraint_sql(items)
     )
+    assert "modifier_unit_cents >= 0" in _check_constraint_sql(items)
+    assert {
+        "fk_sale_item_modifiers_item_cafe",
+        "fk_sale_item_modifiers_modifier_cafe",
+        None,
+    } == {
+        constraint.name for constraint in item_modifiers.foreign_key_constraints
+    }
+    assert (
+        "cafe_id",
+        "sale_item_id",
+        "modifier_id",
+    ) in _constraint_columns(item_modifiers, UniqueConstraint)
+    assert "price_cents >= 0" in _check_constraint_sql(item_modifiers)
+    assert "quantity > 0" in _check_constraint_sql(item_modifiers)
     assert "ix_menu_products_cafe_id_active" in {
         index.name for index in products.indexes
     }
     assert "ix_sales_cafe_id_sold_at" in {index.name for index in sales.indexes}
+    assert "uq_sales_cafe_source_external" in {
+        index.name for index in sales.indexes
+    }
+    assert "ix_sale_items_cafe_id_sale_id_variation_id" in {
+        index.name for index in items.indexes
+    }
+    assert "ix_sale_item_modifiers_cafe_id_sale_item_id" in {
+        index.name for index in item_modifiers.indexes
+    }
 
 
 def test_sales_catalog_constraints_and_indexes_are_defined() -> None:

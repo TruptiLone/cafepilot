@@ -16,7 +16,7 @@ from backend.modules.inventory.models import (
     StockCount,
     StockCountLine,
 )
-from backend.modules.sales.models import MenuProduct, Sale, SaleItem
+from backend.modules.sales.models import MenuProduct, ProductVariation, Sale, SaleItem
 from backend.modules.staffing.models import Employee, Shift
 
 CAFE_ID = "CAFE001"
@@ -199,6 +199,7 @@ def _build_inventory_plan(cafe_timezone: ZoneInfo) -> tuple[tuple[dict, ...], tu
 def _build_sales_plan(
     cafe_timezone: ZoneInfo,
     products: tuple[MenuProduct, ...],
+    regular_variations: dict[str, ProductVariation],
 ) -> tuple[tuple[dict, ...], tuple[dict, ...]]:
     sales: list[dict[str, object]] = []
     sale_items: list[dict[str, object]] = []
@@ -221,6 +222,7 @@ def _build_sales_plan(
             total_cents = 0
             for item_index, product_index in enumerate(product_indexes, start=1):
                 product = products[product_index]
+                variation = regular_variations[product.product_id]
                 quantity = 2 if item_index == 1 and sale_index % 9 == 0 else 1
                 line_total = quantity * product.price_cents
                 total_cents += line_total
@@ -230,8 +232,12 @@ def _build_sales_plan(
                         "sale_id": sale_id,
                         "cafe_id": CAFE_ID,
                         "product_id": product.product_id,
+                        "variation_id": variation.variation_id,
+                        "product_name": product.name,
+                        "variation_name": variation.name,
                         "quantity": quantity,
                         "unit_price_cents": product.price_cents,
+                        "modifier_unit_cents": 0,
                         "line_total_cents": line_total,
                     }
                 )
@@ -240,9 +246,14 @@ def _build_sales_plan(
                     "sale_id": sale_id,
                     "cafe_id": CAFE_ID,
                     "source_id": f"DEMO_POS_{sale_date:%Y%m%d}_{sale_index:03d}",
+                    "source": "generated",
+                    "external_id": f"DEMO_POS_{sale_date:%Y%m%d}_{sale_index:03d}",
                     "sold_at": sold_at,
                     "recorded_at": sold_at + timedelta(minutes=2 + sale_index % 4),
                     "status": "completed",
+                    "subtotal_cents": total_cents,
+                    "discount_cents": 0,
+                    "tax_cents": 0,
                     "total_cents": total_cents,
                 }
             )
@@ -280,7 +291,12 @@ def _build_staffing_plan(cafe_timezone: ZoneInfo) -> tuple[tuple[dict, ...], tup
     return employees, tuple(shifts)
 
 
-def build_demo_plan(cafe: Cafe, inventory_items: tuple[InventoryItem, ...], products: tuple[MenuProduct, ...]) -> DemoPlan:
+def build_demo_plan(
+    cafe: Cafe,
+    inventory_items: tuple[InventoryItem, ...],
+    products: tuple[MenuProduct, ...],
+    variations: tuple[ProductVariation, ...],
+) -> DemoPlan:
     ingredient_ids = {item.ingredient_id for item in inventory_items}
     expected_ingredients = set(BASELINE_QUANTITIES) | {UNKNOWN_INGREDIENT_ID}
     if not expected_ingredients.issubset(ingredient_ids):
@@ -289,6 +305,13 @@ def build_demo_plan(cafe: Cafe, inventory_items: tuple[InventoryItem, ...], prod
     active_products = tuple(sorted((product for product in products if product.active), key=lambda product: product.product_id))
     if len(active_products) != 18:
         raise DemoSeedError("CAFE001 must have exactly 18 active menu products")
+    regular_variations = {
+        variation.product_id: variation
+        for variation in variations
+        if variation.active and variation.code == "REG"
+    }
+    if set(regular_variations) != {product.product_id for product in active_products}:
+        raise DemoSeedError("CAFE001 products must each have one active REG variation")
 
     try:
         cafe_timezone = ZoneInfo(cafe.timezone)
@@ -296,7 +319,11 @@ def build_demo_plan(cafe: Cafe, inventory_items: tuple[InventoryItem, ...], prod
         raise DemoSeedError(f"Invalid café timezone: {cafe.timezone}") from error
 
     counts, count_lines, movements = _build_inventory_plan(cafe_timezone)
-    sales, sale_items = _build_sales_plan(cafe_timezone, active_products)
+    sales, sale_items = _build_sales_plan(
+        cafe_timezone,
+        active_products,
+        regular_variations,
+    )
     employees, shifts = _build_staffing_plan(cafe_timezone)
     return DemoPlan(
         counts=counts,
@@ -446,7 +473,12 @@ def seed_demo_operations(session: Session) -> DemoSeedResult:
         products = tuple(
             session.scalars(select(MenuProduct).where(MenuProduct.cafe_id == CAFE_ID))
         )
-        plan = build_demo_plan(cafe, inventory_items, products)
+        variations = tuple(
+            session.scalars(
+                select(ProductVariation).where(ProductVariation.cafe_id == CAFE_ID)
+            )
+        )
+        plan = build_demo_plan(cafe, inventory_items, products, variations)
 
         counts_created, count_lines_created = _seed_counts(session, plan)
         movements_created = _seed_movements(session, plan)

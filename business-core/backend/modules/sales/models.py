@@ -293,18 +293,70 @@ class Sale(Base):
     __tablename__ = "sales"
     __table_args__ = (
         CheckConstraint("status IN ('completed', 'void')", name="ck_sales_status"),
+        CheckConstraint(
+            "source IN ('pos', 'generated', 'csv_import')",
+            name="ck_sales_source",
+        ),
         CheckConstraint("total_cents >= 0", name="ck_sales_total_nonnegative"),
+        CheckConstraint(
+            "subtotal_cents >= 0",
+            name="ck_sales_subtotal_nonnegative",
+        ),
+        CheckConstraint(
+            "discount_cents >= 0",
+            name="ck_sales_discount_nonnegative",
+        ),
+        CheckConstraint(
+            "discount_cents <= subtotal_cents",
+            name="ck_sales_discount_within_subtotal",
+        ),
+        CheckConstraint("tax_cents >= 0", name="ck_sales_tax_nonnegative"),
+        CheckConstraint(
+            "total_cents = subtotal_cents - discount_cents + tax_cents",
+            name="ck_sales_total_matches_components",
+        ),
         UniqueConstraint("cafe_id", "source_id", name="uq_sales_cafe_source"),
         UniqueConstraint("sale_id", "cafe_id", name="uq_sales_sale_cafe"),
         Index("ix_sales_cafe_id_sold_at", "cafe_id", "sold_at"),
+        Index(
+            "uq_sales_cafe_source_external",
+            "cafe_id",
+            "source",
+            "external_id",
+            unique=True,
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
     )
 
     sale_id: Mapped[str] = mapped_column(Text, primary_key=True)
     cafe_id: Mapped[str] = mapped_column(Text, ForeignKey("cafes.cafe_id"), nullable=False)
     source_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(
+        Text,
+        default="pos",
+        server_default=text("'pos'"),
+        nullable=False,
+    )
+    external_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     sold_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
+    subtotal_cents: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    discount_cents: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default=text("0"),
+        nullable=False,
+    )
+    tax_cents: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default=text("0"),
+        nullable=False,
+    )
     total_cents: Mapped[int] = mapped_column(Integer, nullable=False)
 
     cafe: Mapped["Cafe"] = relationship(back_populates="sales")
@@ -322,8 +374,12 @@ class SaleItem(Base):
         CheckConstraint("unit_price_cents >= 0", name="ck_sale_items_unit_price_nonnegative"),
         CheckConstraint("line_total_cents >= 0", name="ck_sale_items_line_total_nonnegative"),
         CheckConstraint(
-            "line_total_cents = quantity * unit_price_cents",
+            "line_total_cents = quantity * (unit_price_cents + modifier_unit_cents)",
             name="ck_sale_items_line_total_matches",
+        ),
+        CheckConstraint(
+            "modifier_unit_cents >= 0",
+            name="ck_sale_items_modifier_unit_nonnegative",
         ),
         ForeignKeyConstraint(
             ["sale_id", "cafe_id"],
@@ -335,15 +391,39 @@ class SaleItem(Base):
             ["menu_products.product_id", "menu_products.cafe_id"],
             name="fk_sale_items_product_cafe",
         ),
-        UniqueConstraint("sale_id", "product_id", name="uq_sale_items_sale_product"),
+        ForeignKeyConstraint(
+            ["variation_id", "cafe_id"],
+            ["product_variations.variation_id", "product_variations.cafe_id"],
+            name="fk_sale_items_variation_cafe",
+        ),
+        UniqueConstraint(
+            "sale_item_id",
+            "cafe_id",
+            name="uq_sale_items_item_cafe",
+        ),
+        Index(
+            "ix_sale_items_cafe_id_sale_id_variation_id",
+            "cafe_id",
+            "sale_id",
+            "variation_id",
+        ),
     )
 
     sale_item_id: Mapped[str] = mapped_column(Text, primary_key=True)
     sale_id: Mapped[str] = mapped_column(Text, nullable=False)
     cafe_id: Mapped[str] = mapped_column(Text, nullable=False)
     product_id: Mapped[str] = mapped_column(Text, nullable=False)
+    variation_id: Mapped[str] = mapped_column(Text, nullable=False)
+    product_name: Mapped[str] = mapped_column(Text, nullable=False)
+    variation_name: Mapped[str] = mapped_column(Text, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     unit_price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    modifier_unit_cents: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        server_default=text("0"),
+        nullable=False,
+    )
     line_total_cents: Mapped[int] = mapped_column(Integer, nullable=False)
 
     sale: Mapped["Sale"] = relationship(
@@ -355,4 +435,56 @@ class SaleItem(Base):
         back_populates="sale_items",
         primaryjoin=lambda: foreign(SaleItem.product_id) == MenuProduct.product_id,
         foreign_keys=lambda: [SaleItem.product_id],
+    )
+
+
+class SaleItemModifier(Base):
+    __tablename__ = "sale_item_modifiers"
+    __table_args__ = (
+        CheckConstraint(
+            "price_cents >= 0",
+            name="ck_sale_item_modifiers_price_nonnegative",
+        ),
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_sale_item_modifiers_quantity_positive",
+        ),
+        ForeignKeyConstraint(
+            ["sale_item_id", "cafe_id"],
+            ["sale_items.sale_item_id", "sale_items.cafe_id"],
+            name="fk_sale_item_modifiers_item_cafe",
+        ),
+        ForeignKeyConstraint(
+            ["modifier_id", "cafe_id"],
+            ["modifiers.modifier_id", "modifiers.cafe_id"],
+            name="fk_sale_item_modifiers_modifier_cafe",
+        ),
+        UniqueConstraint(
+            "cafe_id",
+            "sale_item_id",
+            "modifier_id",
+            name="uq_sale_item_modifiers_cafe_item_modifier",
+        ),
+        Index(
+            "ix_sale_item_modifiers_cafe_id_sale_item_id",
+            "cafe_id",
+            "sale_item_id",
+        ),
+    )
+
+    sale_item_modifier_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cafe_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("cafes.cafe_id"),
+        nullable=False,
+    )
+    sale_item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    modifier_id: Mapped[str] = mapped_column(Text, nullable=False)
+    modifier_name: Mapped[str] = mapped_column(Text, nullable=False)
+    price_cents: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        server_default=text("1"),
+        nullable=False,
     )

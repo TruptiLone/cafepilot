@@ -13,13 +13,14 @@ APPLICATION_TABLES = {
     "product_modifier_groups",
     "product_variations",
     "sale_items",
+    "sale_item_modifiers",
     "sales",
     "shifts",
     "stock_counts",
     "stock_count_lines",
     "inventory_movements",
 }
-REVISION = "a6f3c2d91b47"
+REVISION = "d4e8f1a2c6b9"
 
 pytestmark = pytest.mark.database
 
@@ -146,6 +147,24 @@ def test_schema_has_cafe_scoped_foreign_keys_and_inventory_constraints() -> None
 
 
 def test_sales_schema_has_expected_constraints_and_indexes() -> None:
+    cafe_columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("cafes", schema="public")
+    }
+    cafe_checks = {
+        constraint["name"]
+        for constraint in inspect(engine).get_check_constraints(
+            "cafes", schema="public"
+        )
+    }
+    sale_columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("sales", schema="public")
+    }
+    item_columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("sale_items", schema="public")
+    }
     product_checks = {
         constraint["name"]
         for constraint in inspect(engine).get_check_constraints(
@@ -163,6 +182,7 @@ def test_sales_schema_has_expected_constraints_and_indexes() -> None:
         )
     }
     item_foreign_keys = _foreign_keys_by_name("sale_items")
+    modifier_foreign_keys = _foreign_keys_by_name("sale_item_modifiers")
     sale_unique_constraints = {
         tuple(constraint["column_names"])
         for constraint in inspect(engine).get_unique_constraints("sales", schema="public")
@@ -173,15 +193,54 @@ def test_sales_schema_has_expected_constraints_and_indexes() -> None:
             "sale_items", schema="public"
         )
     }
+    modifier_checks = {
+        constraint["name"]
+        for constraint in inspect(engine).get_check_constraints(
+            "sale_item_modifiers", schema="public"
+        )
+    }
+    modifier_unique_constraints = {
+        tuple(constraint["column_names"])
+        for constraint in inspect(engine).get_unique_constraints(
+            "sale_item_modifiers", schema="public"
+        )
+    }
+    sale_indexes = {
+        index["name"]: index
+        for index in inspect(engine).get_indexes("sales", schema="public")
+    }
 
+    assert cafe_columns["tax_rate_bps"]["default"] == "0"
+    assert "ck_cafes_tax_rate_bps_range" in cafe_checks
     assert "ck_menu_products_price_nonnegative" in product_checks
-    assert {"ck_sales_status", "ck_sales_total_nonnegative"}.issubset(sale_checks)
+    assert {
+        "ck_sales_status",
+        "ck_sales_source",
+        "ck_sales_total_nonnegative",
+        "ck_sales_subtotal_nonnegative",
+        "ck_sales_discount_nonnegative",
+        "ck_sales_discount_within_subtotal",
+        "ck_sales_tax_nonnegative",
+        "ck_sales_total_matches_components",
+    }.issubset(sale_checks)
     assert {
         "ck_sale_items_quantity_positive",
         "ck_sale_items_unit_price_nonnegative",
         "ck_sale_items_line_total_nonnegative",
         "ck_sale_items_line_total_matches",
+        "ck_sale_items_modifier_unit_nonnegative",
     }.issubset(item_checks)
+    assert sale_columns["source"]["nullable"] is False
+    assert sale_columns["source"]["default"] == "'pos'::text"
+    assert sale_columns["external_id"]["nullable"] is True
+    assert sale_columns["subtotal_cents"]["nullable"] is False
+    assert sale_columns["subtotal_cents"]["default"] is None
+    assert sale_columns["discount_cents"]["default"] == "0"
+    assert sale_columns["tax_cents"]["default"] == "0"
+    assert item_columns["variation_id"]["nullable"] is False
+    assert item_columns["product_name"]["nullable"] is False
+    assert item_columns["variation_name"]["nullable"] is False
+    assert item_columns["modifier_unit_cents"]["default"] == "0"
     assert item_foreign_keys["fk_sale_items_sale_cafe"]["constrained_columns"] == [
         "sale_id",
         "cafe_id",
@@ -190,15 +249,47 @@ def test_sales_schema_has_expected_constraints_and_indexes() -> None:
         "product_id",
         "cafe_id",
     ]
+    assert item_foreign_keys["fk_sale_items_variation_cafe"][
+        "constrained_columns"
+    ] == ["variation_id", "cafe_id"]
+    assert modifier_foreign_keys["fk_sale_item_modifiers_item_cafe"][
+        "constrained_columns"
+    ] == ["sale_item_id", "cafe_id"]
+    assert modifier_foreign_keys["fk_sale_item_modifiers_modifier_cafe"][
+        "constrained_columns"
+    ] == ["modifier_id", "cafe_id"]
     assert ("cafe_id", "source_id") in sale_unique_constraints
-    assert ("sale_id", "product_id") in item_unique_constraints
+    assert ("sale_item_id", "cafe_id") in item_unique_constraints
+    assert ("sale_id", "product_id") not in item_unique_constraints
+    assert {
+        "ck_sale_item_modifiers_price_nonnegative",
+        "ck_sale_item_modifiers_quantity_positive",
+    }.issubset(modifier_checks)
+    assert (
+        "cafe_id",
+        "sale_item_id",
+        "modifier_id",
+    ) in modifier_unique_constraints
     assert "ix_menu_products_cafe_id_active" in {
         index["name"]
         for index in inspect(engine).get_indexes("menu_products", schema="public")
     }
-    assert "ix_sales_cafe_id_sold_at" in {
+    assert "ix_sales_cafe_id_sold_at" in sale_indexes
+    assert sale_indexes["uq_sales_cafe_source_external"]["unique"]
+    assert sale_indexes["uq_sales_cafe_source_external"]["column_names"] == [
+        "cafe_id",
+        "source",
+        "external_id",
+    ]
+    assert "ix_sale_items_cafe_id_sale_id_variation_id" in {
         index["name"]
-        for index in inspect(engine).get_indexes("sales", schema="public")
+        for index in inspect(engine).get_indexes("sale_items", schema="public")
+    }
+    assert "ix_sale_item_modifiers_cafe_id_sale_item_id" in {
+        index["name"]
+        for index in inspect(engine).get_indexes(
+            "sale_item_modifiers", schema="public"
+        )
     }
 
 

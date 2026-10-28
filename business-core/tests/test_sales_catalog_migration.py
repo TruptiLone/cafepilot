@@ -16,6 +16,7 @@ M1_TABLES = {
     "product_modifier_groups",
 }
 M1_REVISION = "a6f3c2d91b47"
+HEAD_REVISION = "d4e8f1a2c6b9"
 PREVIOUS_REVISION = "3411712f6af3"
 
 
@@ -27,6 +28,8 @@ def test_m1_upgrade_and_downgrade_preserve_v1_on_disposable_database() -> None:
         pytest.fail("migration test database name must clearly identify a test database")
 
     migration_config = Config("alembic.ini")
+    engine.dispose()
+    command.downgrade(migration_config, M1_REVISION)
     engine.dispose()
     with engine.begin() as connection:
         connection.execute(
@@ -85,7 +88,7 @@ def test_m1_upgrade_and_downgrade_preserve_v1_on_disposable_database() -> None:
                 M1_REVISION
             )
     finally:
-        command.upgrade(migration_config, M1_REVISION)
+        command.upgrade(migration_config, HEAD_REVISION)
         engine.dispose()
         with engine.begin() as connection:
             connection.execute(
@@ -93,6 +96,12 @@ def test_m1_upgrade_and_downgrade_preserve_v1_on_disposable_database() -> None:
             )
             connection.execute(
                 text("DELETE FROM sales WHERE sale_id = 'TEST_M1_MIGRATION_SALE'")
+            )
+            connection.execute(
+                text(
+                    "DELETE FROM product_variations "
+                    "WHERE product_id = 'TEST_M1_MIGRATION_PRODUCT'"
+                )
             )
             connection.execute(
                 text(

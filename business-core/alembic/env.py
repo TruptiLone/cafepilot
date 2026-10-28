@@ -20,6 +20,7 @@ from backend.modules.sales.models import (
     ProductVariation,
     Sale,
     SaleItem,
+    SaleItemModifier,
 )
 from backend.modules.staffing.models import Employee, Shift
 

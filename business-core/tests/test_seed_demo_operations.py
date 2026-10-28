@@ -14,7 +14,13 @@ from backend.modules.inventory.models import (
     StockCount,
     StockCountLine,
 )
-from backend.modules.sales.models import MenuProduct, Sale, SaleItem
+from backend.modules.sales.models import (
+    MenuProduct,
+    ProductVariation,
+    Sale,
+    SaleItem,
+    SaleItemModifier,
+)
 from backend.modules.staffing.models import Employee, Shift
 from scripts.seed_demo_operations import (
     CAFE_ID,
@@ -26,6 +32,7 @@ from scripts.seed_demo_operations import (
 )
 from scripts.seed_inventory import load_inventory_catalog, seed_inventory
 from scripts.seed_sales import load_sales_catalog, seed_sales
+from scripts.seed_sales_catalog import seed_sales_catalog
 
 
 @pytest.fixture
@@ -61,6 +68,7 @@ def demo_seed_prerequisites(database_session: Session) -> None:
 
     seed_inventory(database_session, inventory_catalog)
     seed_sales(database_session, sales_catalog)
+    seed_sales_catalog(database_session, sales_catalog)
 
     assert all(
         database_session.get(InventoryItem, item.ingredient_id) is not None
@@ -213,6 +221,15 @@ def test_demo_sales_use_database_prices_and_reports_are_meaningful(
             select(MenuProduct).where(MenuProduct.cafe_id == CAFE_ID)
         )
     }
+    regular_variations = {
+        variation.product_id: variation
+        for variation in database_session.scalars(
+            select(ProductVariation).where(
+                ProductVariation.cafe_id == CAFE_ID,
+                ProductVariation.code == "REG",
+            )
+        )
+    }
     sales = list(
         database_session.scalars(
             select(Sale).where(Sale.sale_id.startswith(DEMO_PREFIX, autoescape=True))
@@ -231,13 +248,32 @@ def test_demo_sales_use_database_prices_and_reports_are_meaningful(
 
     assert len(sales) == 126
     assert len(items) == 210
+    assert all(
+        sale.source == "generated"
+        and sale.external_id == sale.source_id
+        and sale.subtotal_cents == sale.total_cents
+        and sale.discount_cents == 0
+        and sale.tax_cents == 0
+        for sale in sales
+    )
     assert all(item.unit_price_cents == prices[item.product_id] for item in items)
+    assert all(
+        item.variation_id == regular_variations[item.product_id].variation_id
+        and item.product_name
+        == database_session.get(MenuProduct, item.product_id).name
+        and item.variation_name == regular_variations[item.product_id].name
+        and item.modifier_unit_cents == 0
+        for item in items
+    )
     assert all(
         sale.total_cents
         == sum(item.line_total_cents for item in items_by_sale[sale.sale_id])
         for sale in sales
     )
     assert {item.product_id for item in items} == set(prices)
+    assert database_session.scalar(
+        select(func.count()).select_from(SaleItemModifier)
+    ) == 0
     assert database_session.scalar(
         select(func.count())
         .select_from(InventoryMovement)

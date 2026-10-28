@@ -372,6 +372,12 @@ h1 {
   font-size: 1.2rem;
 }
 
+.success-message--warning {
+  color: #755d1c;
+  background: #fbf5e2;
+  border-color: #eee0b5;
+}
+
 .inventory-panel {
   overflow: hidden;
   background: #fff;
@@ -544,6 +550,22 @@ h1 {
   background: #eaeae6;
 }
 
+.text-button--accent {
+  color: #fff;
+  background: #34332e;
+  border-color: #34332e;
+}
+
+.text-button--accent:hover {
+  background: #4a4942;
+}
+
+.table-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
 .data-badge {
   display: inline-flex;
   align-items: center;
@@ -704,6 +726,10 @@ h1 {
   box-shadow: -22px 0 70px rgba(24, 24, 21, 0.13);
 }
 
+.entry-modal--wide {
+  width: min(660px, 100%);
+}
+
 .entry-modal__header {
   display: flex;
   align-items: flex-start;
@@ -850,6 +876,168 @@ h1 {
   justify-content: flex-end;
   gap: 10px;
   padding-top: 6px;
+}
+
+.count-lines-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.count-lines-heading > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.count-lines-heading strong {
+  color: #34332f;
+  font-size: 0.84rem;
+}
+
+.count-lines-heading span {
+  color: #85827a;
+  font-size: 0.72rem;
+}
+
+.count-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.count-line {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) minmax(150px, 0.65fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 15px;
+  background: #fafaf8;
+  border: 1px solid #e8e7e2;
+  border-radius: 12px;
+}
+
+.remove-line-button {
+  align-self: end;
+  min-height: 43px;
+  padding: 8px 10px;
+  color: #8a3631;
+  background: #fff;
+  border: 1px solid #e8d7d3;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.remove-line-button:hover {
+  background: #fff4f2;
+}
+
+.inline-form-error {
+  color: #8a3631;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.baseline-warning {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 22px 32px 0;
+  padding: 13px 14px;
+  color: #705c27;
+  background: #faf5e7;
+  border: 1px solid #eee2bf;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.verification-content {
+  padding: 24px 32px 34px;
+}
+
+.panel-loading {
+  padding: 36px 0;
+  color: #77756e;
+  text-align: center;
+}
+
+.verification-summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px 16px;
+  padding: 14px;
+  background: #f8f8f6;
+  border: 1px solid #e8e7e2;
+  border-radius: 10px;
+  font-size: 0.77rem;
+}
+
+.verification-summary span {
+  color: #85827a;
+}
+
+.verification-summary strong {
+  overflow-wrap: anywhere;
+}
+
+.verification-lines {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid #e8e7e2;
+  border-radius: 10px;
+}
+
+.verification-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #ecebe7;
+  font-size: 0.8rem;
+}
+
+.verification-line:last-child {
+  border-bottom: 0;
+}
+
+.verification-line > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.verification-line span {
+  color: #85827a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.67rem;
+}
+
+.verification-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 22px;
+}
+
+.confirmation-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: #4e4c46;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.confirmation-field input {
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  accent-color: #34332e;
 }
 
 .count-detail {
@@ -1038,6 +1226,33 @@ h1 {
 
   .entry-form {
     padding: 22px;
+  }
+
+  .baseline-warning {
+    margin: 18px 22px 0;
+  }
+
+  .verification-content {
+    padding: 22px;
+  }
+
+  .count-lines-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .count-line {
+    grid-template-columns: 1fr;
+  }
+
+  .remove-line-button {
+    align-self: flex-start;
+    min-height: 36px;
+  }
+
+  .table-actions {
+    align-items: flex-end;
+    flex-direction: column;
   }
 
   .placeholder-card {

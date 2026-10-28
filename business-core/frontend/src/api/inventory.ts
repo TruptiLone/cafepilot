@@ -33,6 +33,22 @@ export type StockCountDetail = Omit<StockCountSummary, "item_count"> & {
   lines: StockCountLine[];
 };
 
+export type StockCountCreate = {
+  cafe_id: string;
+  status: "draft";
+  counted_at: null;
+  counted_by: string | null;
+  is_synthetic: true;
+  items: {
+    ingredient_id: string;
+    counted_quantity: string;
+  }[];
+};
+
+export type StockCountVerify = {
+  counted_at: string;
+};
+
 export type InventoryMovement = {
   movement_id: string;
   cafe_id: string;
@@ -165,4 +181,26 @@ export function createInventoryMovement(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(movement),
   });
+}
+
+export function createStockCount(count: StockCountCreate): Promise<StockCountDetail> {
+  return requestJson<StockCountDetail>("/api/v1/inventory/counts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(count),
+  });
+}
+
+export function verifyStockCount(
+  countId: string,
+  verification: StockCountVerify,
+): Promise<StockCountDetail> {
+  return requestJson<StockCountDetail>(
+    `/api/v1/inventory/counts/${encodeURIComponent(countId)}/verify?${cafeQuery}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(verification),
+    },
+  );
 }

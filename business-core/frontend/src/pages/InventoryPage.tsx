@@ -3,6 +3,7 @@ import {
   getInventoryData,
   getInventoryMovements,
   getStockCountDetail,
+  getStockCounts,
   getStockEstimates,
   type InventoryData,
   type InventoryMovement,
@@ -10,9 +11,12 @@ import {
 } from "../api/inventory";
 import { EmptyState, ErrorState, LoadingState } from "../components/DataState";
 import MovementEntryModal from "../components/MovementEntryModal";
+import StockCountEntryModal from "../components/StockCountEntryModal";
+import StockCountVerifyModal from "../components/StockCountVerifyModal";
 import StatusBadge from "../components/StatusBadge";
 
 type InventoryTab = "ingredients" | "counts" | "movements" | "stock";
+type PageNotice = { kind: "success" | "warning"; message: string };
 
 const tabs: { id: InventoryTab; label: string }[] = [
   { id: "ingredients", label: "Ingredients" },
@@ -60,7 +64,9 @@ function InventoryPage() {
   const [countDetailError, setCountDetailError] = useState<string | null>(null);
   const [isCountDetailLoading, setIsCountDetailLoading] = useState(false);
   const [isMovementEntryOpen, setIsMovementEntryOpen] = useState(false);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [isCountEntryOpen, setIsCountEntryOpen] = useState(false);
+  const [verificationCountId, setVerificationCountId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<PageNotice | null>(null);
   const countDetailController = useRef<AbortController | null>(null);
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
@@ -136,18 +142,81 @@ function InventoryPage() {
     }
   };
 
-  const handleMovementSaved = async (_movement: InventoryMovement) => {
-    const [movements, stock] = await Promise.all([
-      getInventoryMovements(),
-      getStockEstimates(),
-    ]);
-    setData((currentData) =>
-      currentData ? { ...currentData, movements, stock } : currentData,
-    );
-    setSuccessMessage(
-      "Movement saved. Stock Movements and Current Stock have been refreshed.",
-    );
+  const handleMovementSaved = (_movement: InventoryMovement) => {
     setIsMovementEntryOpen(false);
+    setNotice({ kind: "success", message: "Movement saved. Refreshing inventory data…" });
+    void (async () => {
+      try {
+        const [movements, stock] = await Promise.all([
+          getInventoryMovements(),
+          getStockEstimates(),
+        ]);
+        setData((currentData) =>
+          currentData ? { ...currentData, movements, stock } : currentData,
+        );
+        setNotice({
+          kind: "success",
+          message: "Movement saved. Stock Movements and Current Stock were refreshed.",
+        });
+      } catch {
+        setNotice({
+          kind: "warning",
+          message:
+            "Movement was saved, but the tables could not be refreshed. Reload the page to see the latest data.",
+        });
+      }
+    })();
+  };
+
+  const handleCountCreated = (count: StockCountDetail) => {
+    setIsCountEntryOpen(false);
+    setNotice({ kind: "success", message: "Draft count saved. Refreshing count history…" });
+    void (async () => {
+      try {
+        const counts = await getStockCounts();
+        setData((currentData) =>
+          currentData ? { ...currentData, counts } : currentData,
+        );
+        setNotice({
+          kind: "success",
+          message: `Draft count ${count.count_id} saved and count history refreshed.`,
+        });
+      } catch {
+        setNotice({
+          kind: "warning",
+          message:
+            "The draft count was saved, but count history could not be refreshed. Reload the page to see it.",
+        });
+      }
+    })();
+  };
+
+  const handleCountVerified = (count: StockCountDetail) => {
+    setVerificationCountId(null);
+    setSelectedCountId(null);
+    setCountDetail(null);
+    setNotice({ kind: "success", message: "Count verified. Refreshing inventory data…" });
+    void (async () => {
+      try {
+        const [counts, stock] = await Promise.all([
+          getStockCounts(),
+          getStockEstimates(),
+        ]);
+        setData((currentData) =>
+          currentData ? { ...currentData, counts, stock } : currentData,
+        );
+        setNotice({
+          kind: "success",
+          message: `Count ${count.count_id} verified. Stock Counts and Current Stock were refreshed.`,
+        });
+      } catch {
+        setNotice({
+          kind: "warning",
+          message:
+            "The count was verified, but the tables could not be refreshed. Reload the page to see the latest data.",
+        });
+      }
+    })();
   };
 
   return (
@@ -172,13 +241,16 @@ function InventoryPage() {
         saved separately to this local database. Times use America/Los_Angeles.
       </div>
 
-      {successMessage && (
-        <div className="success-message" role="status">
-          <span>{successMessage}</span>
+      {notice && (
+        <div
+          className={`success-message success-message--${notice.kind}`}
+          role={notice.kind === "warning" ? "alert" : "status"}
+        >
+          <span>{notice.message}</span>
           <button
             type="button"
-            aria-label="Dismiss success message"
-            onClick={() => setSuccessMessage(null)}
+            aria-label="Dismiss message"
+            onClick={() => setNotice(null)}
           >
             ×
           </button>
@@ -215,6 +287,24 @@ function InventoryPage() {
           id={`inventory-panel-${activeTab}`}
           role="tabpanel"
         >
+          {!isLoading && !error && data && activeTab === "counts" && (
+            <div className="inventory-toolbar">
+              <div>
+                <strong>Physical Stock Counts</strong>
+                <span>Draft observations and verified inventory baselines</span>
+              </div>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => {
+                  setNotice(null);
+                  setIsCountEntryOpen(true);
+                }}
+              >
+                <span aria-hidden="true">+</span> New Count
+              </button>
+            </div>
+          )}
           {!isLoading && !error && data && activeTab === "movements" && (
             <div className="inventory-toolbar">
               <div>
@@ -225,7 +315,7 @@ function InventoryPage() {
                 className="primary-button"
                 type="button"
                 onClick={() => {
-                  setSuccessMessage(null);
+                  setNotice(null);
                   setIsMovementEntryOpen(true);
                 }}
               >
@@ -251,6 +341,10 @@ function InventoryPage() {
                   isDetailLoading={isCountDetailLoading}
                   itemLookup={itemLookup}
                   onToggleDetail={toggleCountDetail}
+                  onVerify={(countId) => {
+                    setNotice(null);
+                    setVerificationCountId(countId);
+                  }}
                 />
               )}
               {activeTab === "movements" && (
@@ -267,6 +361,23 @@ function InventoryPage() {
           items={data.items.filter((item) => item.active)}
           onCancel={() => setIsMovementEntryOpen(false)}
           onSaved={handleMovementSaved}
+        />
+      )}
+
+      {isCountEntryOpen && data && (
+        <StockCountEntryModal
+          items={data.items.filter((item) => item.active)}
+          onCancel={() => setIsCountEntryOpen(false)}
+          onSaved={handleCountCreated}
+        />
+      )}
+
+      {verificationCountId && data && (
+        <StockCountVerifyModal
+          countId={verificationCountId}
+          items={data.items}
+          onCancel={() => setVerificationCountId(null)}
+          onVerified={handleCountVerified}
         />
       )}
     </section>
@@ -309,6 +420,7 @@ type CountTableProps = {
   isDetailLoading: boolean;
   itemLookup: Map<string, InventoryData["items"][number]>;
   onToggleDetail: (countId: string) => void;
+  onVerify: (countId: string) => void;
 };
 
 function CountsTable({
@@ -319,6 +431,7 @@ function CountsTable({
   isDetailLoading,
   itemLookup,
   onToggleDetail,
+  onVerify,
 }: CountTableProps) {
   if (!data.counts.length) return <EmptyState label="stock counts" />;
   return (
@@ -343,14 +456,25 @@ function CountsTable({
               <td>{count.counted_by ?? "—"}</td>
               <td>{count.item_count}</td>
               <td className="action-cell">
-                <button
-                  className="text-button"
-                  type="button"
-                  aria-expanded={selectedCountId === count.count_id}
-                  onClick={() => onToggleDetail(count.count_id)}
-                >
-                  {selectedCountId === count.count_id ? "Close" : "View details"}
-                </button>
+                <div className="table-actions">
+                  <button
+                    className="text-button"
+                    type="button"
+                    aria-expanded={selectedCountId === count.count_id}
+                    onClick={() => onToggleDetail(count.count_id)}
+                  >
+                    {selectedCountId === count.count_id ? "Close" : "View details"}
+                  </button>
+                  {count.status === "draft" && (
+                    <button
+                      className="text-button text-button--accent"
+                      type="button"
+                      onClick={() => onVerify(count.count_id)}
+                    >
+                      Verify
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           ))}

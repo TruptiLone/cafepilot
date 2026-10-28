@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import InventoryPage from "./InventoryPage";
@@ -14,6 +14,17 @@ const responses = {
       reorder_point: null,
       par_level: null,
       is_perishable: false,
+      active: true,
+    },
+    {
+      ingredient_id: "WHOLE_MILK",
+      cafe_id: "CAFE001",
+      name: "Whole Milk",
+      category: "dairy",
+      base_unit: "mL",
+      reorder_point: null,
+      par_level: null,
+      is_perishable: true,
       active: true,
     },
   ],
@@ -79,6 +90,27 @@ const responses = {
       },
     ],
   },
+  draftDetail: {
+    count_id: "DRAFT_COUNT_1",
+    cafe_id: "CAFE001",
+    status: "draft",
+    counted_at: null,
+    recorded_at: "2025-01-08T17:05:00Z",
+    counted_by: "EMP_UI_TEST",
+    is_synthetic: true,
+    lines: [
+      {
+        count_line_id: "DRAFT_LINE_1",
+        ingredient_id: "OAT_MILK",
+        counted_quantity: "0.000",
+      },
+      {
+        count_line_id: "DRAFT_LINE_2",
+        ingredient_id: "WHOLE_MILK",
+        counted_quantity: "12.345",
+      },
+    ],
+  },
 };
 
 function jsonResponse(body: unknown, ok = true) {
@@ -126,6 +158,12 @@ async function enterValidReceipt(user: ReturnType<typeof userEvent.setup>) {
     target: { value: "2025-01-08T09:00" },
   });
   await user.type(screen.getByLabelText(/Recorded By/), "EMP_UI_TEST");
+}
+
+async function openCountForm(user: ReturnType<typeof userEvent.setup>) {
+  expect(await screen.findByText("OAT_MILK")).not.toBeNull();
+  await user.click(screen.getByRole("tab", { name: /Stock Counts/ }));
+  await user.click(screen.getByRole("button", { name: /New Count/ }));
 }
 
 describe("InventoryPage", () => {
@@ -217,6 +255,212 @@ describe("InventoryPage", () => {
       reason: "Weekly delivery",
     });
     expect(request.source_id).toMatch(/^MANUAL_[A-F0-9]{32}$/);
+  });
+
+  it("reports a saved movement separately when the table refresh fails", async () => {
+    const user = userEvent.setup();
+    let movementReads = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL, options?: RequestInit) => {
+      const path = String(input);
+      if (options?.method === "POST") return jsonResponse(responses.movements[0]);
+      if (path.includes("/items")) return jsonResponse(responses.items);
+      if (path.includes("/counts")) return jsonResponse(responses.counts);
+      if (path.includes("/movements")) {
+        movementReads += 1;
+        return movementReads === 1
+          ? jsonResponse(responses.movements)
+          : Promise.reject(new TypeError("Refresh failed"));
+      }
+      return jsonResponse(responses.stock);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryPage />);
+
+    await openMovementForm(user);
+    await enterValidReceipt(user);
+    await user.click(screen.getByRole("button", { name: "Save Entry" }));
+
+    expect(await screen.findByText(/Movement was saved, but the tables could not be refreshed/)).not.toBeNull();
+    expect(screen.queryByRole("dialog", { name: "New Entry" })).toBeNull();
+    expect(screen.queryByText("Entry was not confirmed")).toBeNull();
+  });
+
+  it("creates a synthetic multi-ingredient draft count and accepts zero quantity", async () => {
+    const user = userEvent.setup();
+    let countCreated = false;
+    const draftSummary = {
+      count_id: responses.draftDetail.count_id,
+      cafe_id: responses.draftDetail.cafe_id,
+      status: responses.draftDetail.status,
+      counted_at: responses.draftDetail.counted_at,
+      recorded_at: responses.draftDetail.recorded_at,
+      counted_by: responses.draftDetail.counted_by,
+      is_synthetic: responses.draftDetail.is_synthetic,
+      item_count: responses.draftDetail.lines.length,
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, options?: RequestInit) => {
+      const path = String(input);
+      if (options?.method === "POST" && path.endsWith("/counts")) {
+        countCreated = true;
+        return jsonResponse(responses.draftDetail);
+      }
+      if (path.includes("/items")) return jsonResponse(responses.items);
+      if (path.includes("/counts")) {
+        return jsonResponse(countCreated ? [draftSummary, ...responses.counts] : responses.counts);
+      }
+      if (path.includes("/movements")) return jsonResponse(responses.movements);
+      return jsonResponse(responses.stock);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryPage />);
+
+    await openCountForm(user);
+    await user.type(screen.getByLabelText(/Counted By/), "EMP_UI_TEST");
+    await user.selectOptions(screen.getByLabelText("Ingredient 1"), "OAT_MILK");
+    await user.type(screen.getByLabelText("Counted Quantity 1"), "0");
+    await user.click(screen.getByRole("button", { name: /Add Ingredient/ }));
+
+    const secondIngredient = screen.getByLabelText("Ingredient 2");
+    expect(
+      (within(secondIngredient).getByRole("option", { name: "Oat Milk" }) as HTMLOptionElement)
+        .disabled,
+    ).toBe(true);
+    await user.selectOptions(secondIngredient, "WHOLE_MILK");
+    await user.type(screen.getByLabelText("Counted Quantity 2"), "12.345");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(await screen.findByText(/DRAFT_COUNT_1 saved and count history refreshed/)).not.toBeNull();
+    const postCall = fetchMock.mock.calls.find(
+      (call) => call[1]?.method === "POST" && String(call[0]).endsWith("/counts"),
+    );
+    expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+      cafe_id: "CAFE001",
+      status: "draft",
+      counted_at: null,
+      counted_by: "EMP_UI_TEST",
+      is_synthetic: true,
+      items: [
+        { ingredient_id: "OAT_MILK", counted_quantity: "0" },
+        { ingredient_id: "WHOLE_MILK", counted_quantity: "12.345" },
+      ],
+    });
+  });
+
+  it("validates draft count lines before sending them", async () => {
+    const user = userEvent.setup();
+    const fetchMock = mockSuccessfulApi();
+    render(<InventoryPage />);
+
+    await openCountForm(user);
+    await user.selectOptions(screen.getByLabelText("Ingredient 1"), "OAT_MILK");
+    await user.type(screen.getByLabelText("Counted Quantity 1"), "-1.000");
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+
+    expect(screen.getByText(/nonnegative number with no more than three decimal places/)).not.toBeNull();
+    expect(fetchMock.mock.calls.filter((call) => call[1]?.method === "POST")).toHaveLength(0);
+
+    await user.click(screen.getByRole("button", { name: "Remove ingredient 1" }));
+    await user.click(screen.getByRole("button", { name: "Save Draft" }));
+    expect(screen.getByText("Add at least one ingredient to the count.")).not.toBeNull();
+  });
+
+  it("verifies a draft with an explicit cafe-local observation time", async () => {
+    const user = userEvent.setup();
+    let verified = false;
+    const draftSummary = {
+      ...responses.counts[0],
+      count_id: "DRAFT_COUNT_1",
+      status: "draft",
+      counted_at: null,
+      counted_by: "EMP_UI_TEST",
+      item_count: 2,
+    };
+    const verifiedDetail = {
+      ...responses.draftDetail,
+      status: "verified",
+      counted_at: "2025-01-08T17:00:00.000Z",
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, options?: RequestInit) => {
+      const path = String(input);
+      if (options?.method === "POST" && path.includes("/verify?")) {
+        verified = true;
+        return jsonResponse(verifiedDetail);
+      }
+      if (path.includes("/counts/DRAFT_COUNT_1")) return jsonResponse(responses.draftDetail);
+      if (path.includes("/items")) return jsonResponse(responses.items);
+      if (path.includes("/counts")) {
+        return jsonResponse([
+          verified ? { ...draftSummary, status: "verified", counted_at: verifiedDetail.counted_at } : draftSummary,
+          ...responses.counts,
+        ]);
+      }
+      if (path.includes("/movements")) return jsonResponse(responses.movements);
+      return jsonResponse(responses.stock);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryPage />);
+
+    expect(await screen.findByText("OAT_MILK")).not.toBeNull();
+    await user.click(screen.getByRole("tab", { name: /Stock Counts/ }));
+    await user.click(screen.getByRole("button", { name: "Verify" }));
+    expect(await screen.findByText(/Verification establishes a new inventory baseline/)).not.toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/Actual Observation Date and Time/), {
+      target: { value: "2099-01-08T09:00" },
+    });
+    await user.click(screen.getByLabelText(/I reviewed these physical quantities/));
+    await user.click(screen.getByRole("button", { name: "Verify Count" }));
+    expect(screen.getByText("Observation date and time cannot be in the future.")).not.toBeNull();
+
+    fireEvent.change(screen.getByLabelText(/Actual Observation Date and Time/), {
+      target: { value: "2025-01-08T09:00" },
+    });
+    await user.click(screen.getByRole("button", { name: "Verify Count" }));
+
+    expect(await screen.findByText(/Count DRAFT_COUNT_1 verified/)).not.toBeNull();
+    const postCall = fetchMock.mock.calls.find(
+      (call) => call[1]?.method === "POST" && String(call[0]).includes("/verify?"),
+    );
+    expect(String(postCall?.[0])).toContain("cafe_id=CAFE001");
+    expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+      counted_at: "2025-01-08T17:00:00.000Z",
+    });
+  });
+
+  it("keeps the verification form open when the backend reports a conflict", async () => {
+    const user = userEvent.setup();
+    const draftSummary = {
+      ...responses.counts[0],
+      count_id: "DRAFT_COUNT_1",
+      status: "draft",
+      counted_at: null,
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, options?: RequestInit) => {
+      const path = String(input);
+      if (options?.method === "POST" && path.includes("/verify?")) {
+        return jsonResponse({ detail: "Stock count is already verified" }, false);
+      }
+      if (path.includes("/counts/DRAFT_COUNT_1")) return jsonResponse(responses.draftDetail);
+      if (path.includes("/items")) return jsonResponse(responses.items);
+      if (path.includes("/counts")) return jsonResponse([draftSummary]);
+      if (path.includes("/movements")) return jsonResponse(responses.movements);
+      return jsonResponse(responses.stock);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<InventoryPage />);
+
+    expect(await screen.findByText("OAT_MILK")).not.toBeNull();
+    await user.click(screen.getByRole("tab", { name: /Stock Counts/ }));
+    await user.click(screen.getByRole("button", { name: "Verify" }));
+    await screen.findByLabelText(/Actual Observation Date and Time/);
+    fireEvent.change(screen.getByLabelText(/Actual Observation Date and Time/), {
+      target: { value: "2025-01-08T09:00" },
+    });
+    await user.click(screen.getByLabelText(/I reviewed these physical quantities/));
+    await user.click(screen.getByRole("button", { name: "Verify Count" }));
+
+    expect(await screen.findByText("Stock count is already verified")).not.toBeNull();
+    expect(screen.getByRole("dialog", { name: "Verify Count" })).not.toBeNull();
   });
 
   it("rejects invalid movement signs and missing required reasons", async () => {

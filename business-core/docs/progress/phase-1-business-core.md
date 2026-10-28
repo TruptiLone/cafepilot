@@ -50,6 +50,8 @@ The application shell now provides four functional navigation sections:
 
 These screenshots show actual API-backed local views at a 1280-pixel desktop width. No operational record was submitted, modified, or cancelled while capturing them.
 
+The Dashboard Ingredient Catalog KPI uses the default `GET /api/v1/inventory/items` behavior, so it counts active ingredients only. Inactive records are included only when a caller explicitly requests `include_inactive=true`.
+
 ## Inventory frontend workflows
 
 The Inventory screen reads live Business Core API responses for `CAFE001` and provides:
@@ -97,7 +99,7 @@ The opt-in demo dataset represents operations for `CAFE001` from **January 6–1
 | `employees` | 7 |
 | scheduled `shifts` | 35 |
 
-The dataset includes a partial count, an ingredient with unknown stock, realistic sales variation, and staffing coverage gaps. Sales ingredient usage is computable from recipes, but completed Sales do not automatically deduct Inventory.
+The dataset includes a partial count, an ingredient with unknown stock, realistic sales variation, and staffing coverage gaps. Qualifying new POS sales with complete recipe mappings post estimated `SALE_USAGE` inventory movements atomically with the sale. The January 2025 generated demo sales were not retroactively deducted.
 
 ## Technical stack
 

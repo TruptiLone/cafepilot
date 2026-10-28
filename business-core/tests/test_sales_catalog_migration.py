@@ -16,7 +16,7 @@ M1_TABLES = {
     "product_modifier_groups",
 }
 M1_REVISION = "a6f3c2d91b47"
-HEAD_REVISION = "d4e8f1a2c6b9"
+HEAD_REVISION = "f7a3c9e4b812"
 PREVIOUS_REVISION = "3411712f6af3"
 
 

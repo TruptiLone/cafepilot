@@ -11,6 +11,7 @@ from backend.db.session import engine
 
 M1_REVISION = "a6f3c2d91b47"
 M2_REVISION = "d4e8f1a2c6b9"
+HEAD_REVISION = "f7a3c9e4b812"
 CAFE_ID = "TEST_M2_MIGRATION_CAFE"
 PRODUCT_ID = "TEST_M2_MIGRATION_PRODUCT"
 SALE_ID = "DEMO_SALE_M2_MIGRATION"
@@ -151,7 +152,7 @@ def test_m2_upgrade_downgrade_and_reupgrade_preserve_v1_history() -> None:
                 M2_REVISION
             )
     finally:
-        command.upgrade(migration_config, M2_REVISION)
+        command.upgrade(migration_config, HEAD_REVISION)
         engine.dispose()
         with engine.begin() as connection:
             connection.execute(

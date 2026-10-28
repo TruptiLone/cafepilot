@@ -7,8 +7,10 @@ from backend.modules.sales.models import (
     MenuProduct,
     Modifier,
     ModifierGroup,
+    ModifierRecipeEffect,
     ProductModifierGroup,
     ProductVariation,
+    RecipeLine,
     Sale,
     SaleItem,
     SaleItemModifier,
@@ -42,6 +44,8 @@ def test_sales_tables_are_registered_in_shared_metadata() -> None:
         "sales",
         "sale_items",
         "sale_item_modifiers",
+        "recipe_lines",
+        "modifier_recipe_effects",
     }.issubset(Base.metadata.tables)
 
 
@@ -74,7 +78,7 @@ def test_sales_columns_constraints_and_indexes_are_defined() -> None:
     assert {
         "fk_sale_items_sale_cafe",
         "fk_sale_items_product_cafe",
-        "fk_sale_items_variation_cafe",
+        "fk_sale_items_variation_product_cafe",
     } == {constraint.name for constraint in items.foreign_key_constraints}
     assert "price_cents >= 0" in _check_constraint_sql(products)
     assert "quantity > 0" in _check_constraint_sql(items)
@@ -126,6 +130,11 @@ def test_sales_catalog_constraints_and_indexes_are_defined() -> None:
         variations,
         UniqueConstraint,
     )
+    assert (
+        "variation_id",
+        "product_id",
+        "cafe_id",
+    ) in _constraint_columns(variations, UniqueConstraint)
     assert ("cafe_id", "name") in _constraint_columns(groups, UniqueConstraint)
     assert ("cafe_id", "group_id", "name") in _constraint_columns(
         modifiers,
@@ -158,6 +167,47 @@ def test_sales_catalog_constraints_and_indexes_are_defined() -> None:
     }
     assert "uq_modifiers_cafe_group_default" in {
         index.name for index in modifiers.indexes
+    }
+
+
+def test_sales_recipe_constraints_and_indexes_are_defined() -> None:
+    recipes = Base.metadata.tables["recipe_lines"]
+    effects = Base.metadata.tables["modifier_recipe_effects"]
+
+    assert recipes.primary_key.columns.keys() == ["recipe_line_id"]
+    assert effects.primary_key.columns.keys() == ["modifier_recipe_effect_id"]
+    assert (
+        "cafe_id",
+        "variation_id",
+        "effective_from",
+        "ingredient_id",
+    ) in _constraint_columns(recipes, UniqueConstraint)
+    assert (
+        "cafe_id",
+        "modifier_id",
+        "effect",
+        "target_ingredient_id",
+        "ingredient_id",
+    ) in _constraint_columns(effects, UniqueConstraint)
+    assert {
+        "fk_recipe_lines_variation_cafe",
+        "fk_recipe_lines_ingredient_cafe",
+        None,
+    } == {constraint.name for constraint in recipes.foreign_key_constraints}
+    assert {
+        "fk_modifier_recipe_effects_modifier_cafe",
+        "fk_modifier_recipe_effects_target_ingredient_cafe",
+        "fk_modifier_recipe_effects_ingredient_cafe",
+        None,
+    } == {constraint.name for constraint in effects.foreign_key_constraints}
+    assert "quantity > 0" in _check_constraint_sql(recipes)
+    assert "unit IN ('g', 'mL', 'each')" in _check_constraint_sql(recipes)
+    assert "effect IN ('replace', 'add')" in _check_constraint_sql(effects)
+    assert "ix_recipe_lines_cafe_variation_effective" in {
+        index.name for index in recipes.indexes
+    }
+    assert "uq_modifier_recipe_effects_add" in {
+        index.name for index in effects.indexes
     }
 
 

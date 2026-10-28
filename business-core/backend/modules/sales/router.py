@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.session import get_db
 from backend.modules.sales.schemas import (
+    IngredientUsageResponse,
     MenuProductResponse,
     SaleCreate,
     SaleResponse,
@@ -102,3 +103,31 @@ def get_sale(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     except SaleNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sale not found") from error
+
+
+@router.get(
+    "/{sale_id}/ingredient-usage",
+    response_model=IngredientUsageResponse,
+)
+def get_ingredient_usage(
+    sale_id: str,
+    cafe_id: str = Query(DEFAULT_CAFE_ID),
+    database_session: Session = Depends(get_db),
+) -> IngredientUsageResponse:
+    try:
+        return SalesService(database_session).get_ingredient_usage(sale_id, cafe_id)
+    except CafeNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cafe not found",
+        ) from error
+    except SaleNotFoundError as error:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sale not found",
+        ) from error
+    except SalesValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(error),
+        ) from error

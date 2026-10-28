@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     Boolean,
@@ -8,6 +9,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     Text,
     UniqueConstraint,
     false,
@@ -78,6 +80,12 @@ class ProductVariation(Base):
             "variation_id",
             "cafe_id",
             name="uq_product_variations_variation_cafe",
+        ),
+        UniqueConstraint(
+            "variation_id",
+            "product_id",
+            "cafe_id",
+            name="uq_product_variations_variation_product_cafe",
         ),
         UniqueConstraint(
             "cafe_id",
@@ -392,9 +400,13 @@ class SaleItem(Base):
             name="fk_sale_items_product_cafe",
         ),
         ForeignKeyConstraint(
-            ["variation_id", "cafe_id"],
-            ["product_variations.variation_id", "product_variations.cafe_id"],
-            name="fk_sale_items_variation_cafe",
+            ["variation_id", "product_id", "cafe_id"],
+            [
+                "product_variations.variation_id",
+                "product_variations.product_id",
+                "product_variations.cafe_id",
+            ],
+            name="fk_sale_items_variation_product_cafe",
         ),
         UniqueConstraint(
             "sale_item_id",
@@ -488,3 +500,118 @@ class SaleItemModifier(Base):
         server_default=text("1"),
         nullable=False,
     )
+
+
+class RecipeLine(Base):
+    __tablename__ = "recipe_lines"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_recipe_lines_quantity_positive"),
+        CheckConstraint(
+            "unit IN ('g', 'mL', 'each')",
+            name="ck_recipe_lines_unit",
+        ),
+        ForeignKeyConstraint(
+            ["variation_id", "cafe_id"],
+            ["product_variations.variation_id", "product_variations.cafe_id"],
+            name="fk_recipe_lines_variation_cafe",
+        ),
+        ForeignKeyConstraint(
+            ["ingredient_id", "cafe_id"],
+            ["inventory_items.ingredient_id", "inventory_items.cafe_id"],
+            name="fk_recipe_lines_ingredient_cafe",
+        ),
+        UniqueConstraint(
+            "cafe_id",
+            "variation_id",
+            "effective_from",
+            "ingredient_id",
+            name="uq_recipe_lines_cafe_variation_effective_ingredient",
+        ),
+        Index(
+            "ix_recipe_lines_cafe_variation_effective",
+            "cafe_id",
+            "variation_id",
+            text("effective_from DESC"),
+        ),
+    )
+
+    recipe_line_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cafe_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("cafes.cafe_id"),
+        nullable=False,
+    )
+    variation_id: Mapped[str] = mapped_column(Text, nullable=False)
+    ingredient_id: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False)
+    unit: Mapped[str] = mapped_column(Text, nullable=False)
+    effective_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+
+class ModifierRecipeEffect(Base):
+    __tablename__ = "modifier_recipe_effects"
+    __table_args__ = (
+        CheckConstraint(
+            "effect IN ('replace', 'add')",
+            name="ck_modifier_recipe_effects_effect",
+        ),
+        CheckConstraint(
+            "(effect = 'replace' AND target_ingredient_id IS NOT NULL "
+            "AND quantity IS NULL AND unit IS NULL) OR "
+            "(effect = 'add' AND target_ingredient_id IS NULL "
+            "AND quantity > 0 AND unit IN ('g', 'mL', 'each'))",
+            name="ck_modifier_recipe_effects_fields",
+        ),
+        ForeignKeyConstraint(
+            ["modifier_id", "cafe_id"],
+            ["modifiers.modifier_id", "modifiers.cafe_id"],
+            name="fk_modifier_recipe_effects_modifier_cafe",
+        ),
+        ForeignKeyConstraint(
+            ["target_ingredient_id", "cafe_id"],
+            ["inventory_items.ingredient_id", "inventory_items.cafe_id"],
+            name="fk_modifier_recipe_effects_target_ingredient_cafe",
+        ),
+        ForeignKeyConstraint(
+            ["ingredient_id", "cafe_id"],
+            ["inventory_items.ingredient_id", "inventory_items.cafe_id"],
+            name="fk_modifier_recipe_effects_ingredient_cafe",
+        ),
+        UniqueConstraint(
+            "cafe_id",
+            "modifier_id",
+            "effect",
+            "target_ingredient_id",
+            "ingredient_id",
+            name="uq_modifier_recipe_effects_identity",
+        ),
+        Index(
+            "uq_modifier_recipe_effects_add",
+            "cafe_id",
+            "modifier_id",
+            "ingredient_id",
+            unique=True,
+            postgresql_where=text("effect = 'add'"),
+        ),
+        Index(
+            "ix_modifier_recipe_effects_cafe_modifier",
+            "cafe_id",
+            "modifier_id",
+        ),
+    )
+
+    modifier_recipe_effect_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cafe_id: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("cafes.cafe_id"),
+        nullable=False,
+    )
+    modifier_id: Mapped[str] = mapped_column(Text, nullable=False)
+    effect: Mapped[str] = mapped_column(Text, nullable=False)
+    target_ingredient_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ingredient_id: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    unit: Mapped[str | None] = mapped_column(Text, nullable=True)

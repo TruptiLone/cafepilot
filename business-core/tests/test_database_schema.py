@@ -12,6 +12,7 @@ APPLICATION_TABLES = {
     "modifiers",
     "product_modifier_groups",
     "product_variations",
+    "recipe_lines",
     "sale_items",
     "sale_item_modifiers",
     "sales",
@@ -19,8 +20,9 @@ APPLICATION_TABLES = {
     "stock_counts",
     "stock_count_lines",
     "inventory_movements",
+    "modifier_recipe_effects",
 }
-REVISION = "d4e8f1a2c6b9"
+REVISION = "f7a3c9e4b812"
 
 pytestmark = pytest.mark.database
 
@@ -249,9 +251,9 @@ def test_sales_schema_has_expected_constraints_and_indexes() -> None:
         "product_id",
         "cafe_id",
     ]
-    assert item_foreign_keys["fk_sale_items_variation_cafe"][
+    assert item_foreign_keys["fk_sale_items_variation_product_cafe"][
         "constrained_columns"
-    ] == ["variation_id", "cafe_id"]
+    ] == ["variation_id", "product_id", "cafe_id"]
     assert modifier_foreign_keys["fk_sale_item_modifiers_item_cafe"][
         "constrained_columns"
     ] == ["sale_item_id", "cafe_id"]
@@ -362,6 +364,85 @@ def test_sales_catalog_schema_has_expected_constraints_and_indexes() -> None:
     assert ("cafe_id", "product_id", "code") in variation_uniques
     assert ("cafe_id", "product_id", "group_id") in mapping_uniques
     assert modifier_indexes["uq_modifiers_cafe_group_default"]["unique"]
+
+
+def test_sales_recipe_schema_has_expected_constraints_and_indexes() -> None:
+    inspector = inspect(engine)
+    recipe_columns = {
+        column["name"]: column
+        for column in inspector.get_columns("recipe_lines", schema="public")
+    }
+    effect_columns = {
+        column["name"]: column
+        for column in inspector.get_columns(
+            "modifier_recipe_effects", schema="public"
+        )
+    }
+    recipe_checks = {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints(
+            "recipe_lines", schema="public"
+        )
+    }
+    effect_checks = {
+        constraint["name"]
+        for constraint in inspector.get_check_constraints(
+            "modifier_recipe_effects", schema="public"
+        )
+    }
+    recipe_foreign_keys = _foreign_keys_by_name("recipe_lines")
+    effect_foreign_keys = _foreign_keys_by_name("modifier_recipe_effects")
+    recipe_uniques = {
+        tuple(constraint["column_names"])
+        for constraint in inspector.get_unique_constraints(
+            "recipe_lines", schema="public"
+        )
+    }
+    effect_indexes = {
+        index["name"]: index
+        for index in inspector.get_indexes(
+            "modifier_recipe_effects", schema="public"
+        )
+    }
+
+    assert isinstance(recipe_columns["quantity"]["type"], Numeric)
+    assert recipe_columns["quantity"]["type"].precision == 18
+    assert recipe_columns["quantity"]["type"].scale == 3
+    assert recipe_columns["effective_from"]["type"].timezone
+    assert isinstance(effect_columns["quantity"]["type"], Numeric)
+    assert effect_columns["quantity"]["type"].precision == 18
+    assert effect_columns["quantity"]["type"].scale == 3
+    assert {
+        "ck_recipe_lines_quantity_positive",
+        "ck_recipe_lines_unit",
+    }.issubset(recipe_checks)
+    assert {
+        "ck_modifier_recipe_effects_effect",
+        "ck_modifier_recipe_effects_fields",
+    }.issubset(effect_checks)
+    assert recipe_foreign_keys["fk_recipe_lines_variation_cafe"][
+        "constrained_columns"
+    ] == ["variation_id", "cafe_id"]
+    assert recipe_foreign_keys["fk_recipe_lines_ingredient_cafe"][
+        "constrained_columns"
+    ] == ["ingredient_id", "cafe_id"]
+    assert effect_foreign_keys["fk_modifier_recipe_effects_modifier_cafe"][
+        "constrained_columns"
+    ] == ["modifier_id", "cafe_id"]
+    assert effect_foreign_keys[
+        "fk_modifier_recipe_effects_target_ingredient_cafe"
+    ]["constrained_columns"] == ["target_ingredient_id", "cafe_id"]
+    assert effect_foreign_keys["fk_modifier_recipe_effects_ingredient_cafe"][
+        "constrained_columns"
+    ] == ["ingredient_id", "cafe_id"]
+    assert (
+        "cafe_id",
+        "variation_id",
+        "effective_from",
+        "ingredient_id",
+    ) in recipe_uniques
+    assert effect_indexes["uq_modifier_recipe_effects_add"]["unique"]
+    assert "ix_modifier_recipe_effects_cafe_modifier" in effect_indexes
 
 
 def test_staffing_schema_has_expected_constraints_and_indexes() -> None:

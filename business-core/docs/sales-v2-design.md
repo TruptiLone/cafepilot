@@ -1,6 +1,6 @@
 # CaféPilot — Sales V2 Design (design only)
 
-**Status:** Proposed, awaiting approval · **Date:** 2026-10-28 · **Deadline:** 2026-11-04 · **Implementation budget:** approximately two working days
+**Status:** Four open-question defaults accepted on 2026-10-28; implementation not started · **Date:** 2026-10-28 · **Deadline:** 2026-11-04 · **Implementation budget:** approximately two working days
 
 **Scope:** Extend the existing Business Core Sales V1 in place. This document proposes schemas, APIs, migrations, tests, and importer contracts; it creates **no** migrations, models, routes, or application implementation. PostgreSQL target is **17**, not the PostgreSQL 18 used in the Perplexity example.
 
@@ -449,11 +449,13 @@ Each commit updates tests and docs for its own scope. **Do not start UI screens 
 
 **Deferred design note—refunds:** A future refund record should reference the original sale/line and separate merchandise, tax, and tip (if ever introduced); include **ingredients_consumed BOOL NOT NULL DEFAULT TRUE**. A refund does not put prepared milk/beans back in Inventory. No refund schema is part of V2.
 
-## 11. Open questions (recommended defaults)
+## 11. Confirmed defaults (accepted 2026-10-28)
 
-1. **Syrup extra recipes/prices:** Per menu.json the extra syrup prices are unspecified. **Default:** Vanilla and Caramel each +50 cents, +15 mL per drink; require explicit confirmation before implementing effects.
-2. **Tax setting for demo:** Existing cafes has no tax rate and law/location-specific sales tax isn't modeled. **Default:** tax_rate_bps=0 for CAFE001; 875 bps only in automated calculation tests, no claim of applicable real tax.
-3. **Extra-shot applicability versus a single shared Extras group:** Recipe rules allow extra shot for COF002–COF007, while milk/syrup beverages differ. **Default:** initial Extras group only COF003–COF007; COF002 extra shot can be added after a per-modifier applicability enhancement.
-4. **Historical dataset placement:** Should the 55k generated sales load into CAFE001 alongside January 2025 history? **Default:** yes, clearly labeled source=generated, with date-window filters and no SALE_USAGE postings.
+The owner replied **"Default"** to the four open questions in the design review. The following decisions are **confirmed for subsequent implementation planning**, but this document remains design-only and does not itself authorize code or schema changes.
 
-Once approved, implementation may proceed in the above order. **No implementation has been performed as part of this document.**
+1. **Vanilla and Caramel:** +50 cents and +15 mL of the corresponding syrup per drink.
+2. **Demo sales tax:** Set CAFE001's `tax_rate_bps` to **0** (0%); use **875 bps (8.75%) only in arithmetic tests**. This is not a claim about the café's legally applicable tax.
+3. **Extras applicability:** Apply the initial Extras modifier group only to **COF003–COF007**. Defer COF002 extra-shot support.
+4. **Generated sales placement:** Load the planned ~55,000 synthetic sales (Nov 2025–Oct 2026) into **CAFE001**, with `source='generated'`, stable import identifiers, and **no historical SALE_USAGE ledger postings**.
+
+**Next step:** Review the design and explicitly approve an implementation milestone before authoring migrations, models, endpoints, or seeding code.

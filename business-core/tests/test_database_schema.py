@@ -5,15 +5,17 @@ from backend.db.session import engine
 
 APPLICATION_TABLES = {
     "cafes",
+    "employees",
     "inventory_items",
     "menu_products",
     "sale_items",
     "sales",
+    "shifts",
     "stock_counts",
     "stock_count_lines",
     "inventory_movements",
 }
-REVISION = "76fdeb7269e5"
+REVISION = "3411712f6af3"
 
 pytestmark = pytest.mark.database
 
@@ -25,7 +27,7 @@ def _foreign_keys_by_name(table_name: str) -> dict[str, dict]:
     }
 
 
-def test_initial_inventory_schema_is_installed_at_head() -> None:
+def test_application_schema_is_installed_at_head() -> None:
     tables = set(inspect(engine).get_table_names(schema="public"))
 
     assert tables == APPLICATION_TABLES | {"alembic_version"}
@@ -194,3 +196,54 @@ def test_sales_schema_has_expected_constraints_and_indexes() -> None:
         index["name"]
         for index in inspect(engine).get_indexes("sales", schema="public")
     }
+
+
+def test_staffing_schema_has_expected_constraints_and_indexes() -> None:
+    employee_columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("employees", schema="public")
+    }
+    shift_columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("shifts", schema="public")
+    }
+    shift_checks = {
+        constraint["name"]
+        for constraint in inspect(engine).get_check_constraints("shifts", schema="public")
+    }
+    shift_foreign_keys = _foreign_keys_by_name("shifts")
+
+    assert employee_columns["active"]["default"] == "true"
+    assert employee_columns["created_at"]["type"].timezone
+    assert shift_columns["start_at"]["type"].timezone
+    assert shift_columns["end_at"]["type"].timezone
+    assert shift_columns["created_at"]["type"].timezone
+    assert {"ck_shifts_start_before_end", "ck_shifts_status"}.issubset(shift_checks)
+    assert shift_foreign_keys["fk_shifts_employee_cafe"]["constrained_columns"] == [
+        "employee_id",
+        "cafe_id",
+    ]
+    assert "ix_employees_cafe_id_active" in {
+        index["name"]
+        for index in inspect(engine).get_indexes("employees", schema="public")
+    }
+    assert "ix_shifts_cafe_id_start_at" in {
+        index["name"]
+        for index in inspect(engine).get_indexes("shifts", schema="public")
+    }
+
+    with engine.connect() as connection:
+        exclusion_definition = connection.execute(
+            text(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conname = 'excl_shifts_employee_scheduled_overlap'"
+            )
+        ).scalar_one()
+        assert connection.execute(
+            text("SELECT 1 FROM pg_extension WHERE extname = 'btree_gist'")
+        ).scalar_one() == 1
+
+    assert "EXCLUDE USING gist" in exclusion_definition
+    assert "employee_id WITH =" in exclusion_definition
+    assert "tstzrange(start_at, end_at" in exclusion_definition
+    assert "status = 'scheduled'" in exclusion_definition

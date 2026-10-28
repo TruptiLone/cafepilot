@@ -13,6 +13,7 @@ from backend.modules.inventory.models import (
     StockCountLine,
 )
 from backend.modules.sales.models import MenuProduct, Sale, SaleItem
+from backend.modules.staffing.models import Employee, Shift
 
 config = context.config
 

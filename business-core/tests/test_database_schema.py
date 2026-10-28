@@ -6,11 +6,14 @@ from backend.db.session import engine
 APPLICATION_TABLES = {
     "cafes",
     "inventory_items",
+    "menu_products",
+    "sale_items",
+    "sales",
     "stock_counts",
     "stock_count_lines",
     "inventory_movements",
 }
-REVISION = "7bb527674985"
+REVISION = "76fdeb7269e5"
 
 pytestmark = pytest.mark.database
 
@@ -134,3 +137,60 @@ def test_schema_has_cafe_scoped_foreign_keys_and_inventory_constraints() -> None
     assert "ix_inventory_movements_ingredient_id_occurred_at" in indexes[
         "inventory_movements"
     ]
+
+
+def test_sales_schema_has_expected_constraints_and_indexes() -> None:
+    product_checks = {
+        constraint["name"]
+        for constraint in inspect(engine).get_check_constraints(
+            "menu_products", schema="public"
+        )
+    }
+    sale_checks = {
+        constraint["name"]
+        for constraint in inspect(engine).get_check_constraints("sales", schema="public")
+    }
+    item_checks = {
+        constraint["name"]
+        for constraint in inspect(engine).get_check_constraints(
+            "sale_items", schema="public"
+        )
+    }
+    item_foreign_keys = _foreign_keys_by_name("sale_items")
+    sale_unique_constraints = {
+        tuple(constraint["column_names"])
+        for constraint in inspect(engine).get_unique_constraints("sales", schema="public")
+    }
+    item_unique_constraints = {
+        tuple(constraint["column_names"])
+        for constraint in inspect(engine).get_unique_constraints(
+            "sale_items", schema="public"
+        )
+    }
+
+    assert "ck_menu_products_price_nonnegative" in product_checks
+    assert {"ck_sales_status", "ck_sales_total_nonnegative"}.issubset(sale_checks)
+    assert {
+        "ck_sale_items_quantity_positive",
+        "ck_sale_items_unit_price_nonnegative",
+        "ck_sale_items_line_total_nonnegative",
+        "ck_sale_items_line_total_matches",
+    }.issubset(item_checks)
+    assert item_foreign_keys["fk_sale_items_sale_cafe"]["constrained_columns"] == [
+        "sale_id",
+        "cafe_id",
+    ]
+    assert item_foreign_keys["fk_sale_items_product_cafe"]["constrained_columns"] == [
+        "product_id",
+        "cafe_id",
+    ]
+    assert ("cafe_id", "source_id") in sale_unique_constraints
+    assert ("sale_id", "product_id") in item_unique_constraints
+    assert "ix_menu_products_cafe_id_active" in {
+        index["name"]
+        for index in inspect(engine).get_indexes("menu_products", schema="public")
+    }
+    assert "ix_sales_cafe_id_sold_at" in {
+        index["name"]
+        for index in inspect(engine).get_indexes("sales", schema="public")
+    }

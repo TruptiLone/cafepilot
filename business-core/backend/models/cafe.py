@@ -25,3 +25,5 @@ class Cafe(Base):
     inventory_movements: Mapped[list["InventoryMovement"]] = relationship(
         back_populates="cafe"
     )
+    menu_products: Mapped[list["MenuProduct"]] = relationship(back_populates="cafe")
+    sales: Mapped[list["Sale"]] = relationship(back_populates="cafe")

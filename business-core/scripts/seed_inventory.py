@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from backend.db.session import SessionLocal
 from backend.models.cafe import Cafe
 from backend.modules.inventory.models import InventoryItem
+from backend.modules.sales import models as sales_models
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 SOURCE_PATH = REPOSITORY_ROOT / "data" / "inventory.json"

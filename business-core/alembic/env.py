@@ -12,6 +12,7 @@ from backend.modules.inventory.models import (
     StockCount,
     StockCountLine,
 )
+from backend.modules.sales.models import MenuProduct, Sale, SaleItem
 
 config = context.config
 

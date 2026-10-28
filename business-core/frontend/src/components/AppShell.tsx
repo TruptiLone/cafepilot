@@ -1,0 +1,93 @@
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import Brand from "./Brand";
+import {
+  CloseIcon,
+  DashboardIcon,
+  InventoryIcon,
+  MenuIcon,
+  SalesIcon,
+  StaffingIcon,
+} from "./Icons";
+
+const navigation = [
+  { label: "Dashboard", path: "/dashboard", icon: DashboardIcon },
+  { label: "Inventory", path: "/inventory", icon: InventoryIcon },
+  { label: "Sales", path: "/sales", icon: SalesIcon },
+  { label: "Staffing", path: "/staffing", icon: StaffingIcon },
+];
+
+function AppShell() {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    setIsMenuOpen(false);
+  }, [location.pathname]);
+
+  return (
+    <div className="app-frame">
+      <header className="app-header">
+        <Brand />
+        <button
+          className="icon-button mobile-menu-button"
+          type="button"
+          aria-label="Open navigation"
+          aria-expanded={isMenuOpen}
+          onClick={() => setIsMenuOpen(true)}
+        >
+          <MenuIcon />
+        </button>
+      </header>
+
+      <div className="app-body">
+        <button
+          className={`navigation-scrim${isMenuOpen ? " is-visible" : ""}`}
+          type="button"
+          aria-label="Close navigation"
+          onClick={() => setIsMenuOpen(false)}
+        />
+
+        <aside className={`sidebar${isMenuOpen ? " is-open" : ""}`}>
+          <div className="sidebar__mobile-header">
+            <Brand compact />
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="Close navigation"
+              onClick={() => setIsMenuOpen(false)}
+            >
+              <CloseIcon />
+            </button>
+          </div>
+
+          <nav className="navigation" aria-label="Primary navigation">
+            {navigation.map(({ label, path, icon: Icon }) => (
+              <NavLink
+                key={path}
+                className={({ isActive }) =>
+                  `navigation__link${isActive ? " is-active" : ""}`
+                }
+                to={path}
+              >
+                <Icon />
+                <span>{label}</span>
+              </NavLink>
+            ))}
+          </nav>
+
+          <div className="sidebar__footer">
+            <span className="sidebar__footer-label">Active café</span>
+            <strong>CAFE001</strong>
+          </div>
+        </aside>
+
+        <main className="main-content">
+          <Outlet />
+        </main>
+      </div>
+    </div>
+  );
+}
+
+export default AppShell;

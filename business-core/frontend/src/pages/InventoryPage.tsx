@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getInventoryData,
+  getInventoryMovements,
   getStockCountDetail,
+  getStockEstimates,
   type InventoryData,
+  type InventoryMovement,
   type StockCountDetail,
 } from "../api/inventory";
 import { EmptyState, ErrorState, LoadingState } from "../components/DataState";
+import MovementEntryModal from "../components/MovementEntryModal";
 import StatusBadge from "../components/StatusBadge";
 
 type InventoryTab = "ingredients" | "counts" | "movements" | "stock";
@@ -55,6 +59,9 @@ function InventoryPage() {
   const [countDetail, setCountDetail] = useState<StockCountDetail | null>(null);
   const [countDetailError, setCountDetailError] = useState<string | null>(null);
   const [isCountDetailLoading, setIsCountDetailLoading] = useState(false);
+  const [isMovementEntryOpen, setIsMovementEntryOpen] = useState(false);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const countDetailController = useRef<AbortController | null>(null);
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
     setIsLoading(true);
@@ -80,7 +87,10 @@ function InventoryPage() {
   useEffect(() => {
     const controller = new AbortController();
     void loadInventory(controller.signal);
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+      countDetailController.current?.abort();
+    };
   }, [loadInventory]);
 
   const itemLookup = useMemo(
@@ -90,26 +100,54 @@ function InventoryPage() {
 
   const toggleCountDetail = async (countId: string) => {
     if (selectedCountId === countId) {
+      countDetailController.current?.abort();
+      countDetailController.current = null;
       setSelectedCountId(null);
       setCountDetail(null);
+      setIsCountDetailLoading(false);
       return;
     }
 
+    countDetailController.current?.abort();
+    const controller = new AbortController();
+    countDetailController.current = controller;
     setSelectedCountId(countId);
     setCountDetail(null);
     setCountDetailError(null);
     setIsCountDetailLoading(true);
     try {
-      setCountDetail(await getStockCountDetail(countId));
+      const detail = await getStockCountDetail(countId, controller.signal);
+      if (countDetailController.current === controller && !controller.signal.aborted) {
+        setCountDetail(detail);
+      }
     } catch (requestError) {
-      setCountDetailError(
-        requestError instanceof Error
-          ? requestError.message
-          : "The count details could not be loaded.",
-      );
+      if (!(requestError instanceof DOMException && requestError.name === "AbortError")) {
+        setCountDetailError(
+          requestError instanceof Error
+            ? requestError.message
+            : "The count details could not be loaded.",
+        );
+      }
     } finally {
-      setIsCountDetailLoading(false);
+      if (countDetailController.current === controller) {
+        countDetailController.current = null;
+        setIsCountDetailLoading(false);
+      }
     }
+  };
+
+  const handleMovementSaved = async (_movement: InventoryMovement) => {
+    const [movements, stock] = await Promise.all([
+      getInventoryMovements(),
+      getStockEstimates(),
+    ]);
+    setData((currentData) =>
+      currentData ? { ...currentData, movements, stock } : currentData,
+    );
+    setSuccessMessage(
+      "Movement saved. Stock Movements and Current Stock have been refreshed.",
+    );
+    setIsMovementEntryOpen(false);
   };
 
   return (
@@ -125,13 +163,27 @@ function InventoryPage() {
         </div>
         <div className="demo-label">
           <span aria-hidden="true" />
-          Synthetic Demo Data
+          Local Demo Database
         </div>
       </div>
 
       <div className="historical-notice">
-        Historical demo records · January 6–12, 2025 · Times shown in America/Los_Angeles
+        Seeded history is synthetic and dated January 6–12, 2025. New entries are
+        saved separately to this local database. Times use America/Los_Angeles.
       </div>
+
+      {successMessage && (
+        <div className="success-message" role="status">
+          <span>{successMessage}</span>
+          <button
+            type="button"
+            aria-label="Dismiss success message"
+            onClick={() => setSuccessMessage(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div className="inventory-panel">
         <div className="inventory-tabs" role="tablist" aria-label="Inventory views">
@@ -163,6 +215,24 @@ function InventoryPage() {
           id={`inventory-panel-${activeTab}`}
           role="tabpanel"
         >
+          {!isLoading && !error && data && activeTab === "movements" && (
+            <div className="inventory-toolbar">
+              <div>
+                <strong>Stock Movements</strong>
+                <span>Append-only inventory events</span>
+              </div>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => {
+                  setSuccessMessage(null);
+                  setIsMovementEntryOpen(true);
+                }}
+              >
+                <span aria-hidden="true">+</span> New Entry
+              </button>
+            </div>
+          )}
           {isLoading && <LoadingState />}
           {!isLoading && error && (
             <ErrorState message={error} onRetry={() => void loadInventory()} />
@@ -191,6 +261,14 @@ function InventoryPage() {
           )}
         </div>
       </div>
+
+      {isMovementEntryOpen && data && (
+        <MovementEntryModal
+          items={data.items.filter((item) => item.active)}
+          onCancel={() => setIsMovementEntryOpen(false)}
+          onSaved={handleMovementSaved}
+        />
+      )}
     </section>
   );
 }

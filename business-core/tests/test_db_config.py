@@ -1,4 +1,20 @@
+import pytest
+
 from backend.db.config import Settings
+
+POSTGRES_ENVIRONMENT_VARIABLES = (
+    "POSTGRES_DB",
+    "POSTGRES_USER",
+    "POSTGRES_PASSWORD",
+    "POSTGRES_HOST",
+    "POSTGRES_PORT",
+)
+
+
+@pytest.fixture(autouse=True)
+def isolate_settings_from_postgres_environment(monkeypatch) -> None:
+    for variable_name in POSTGRES_ENVIRONMENT_VARIABLES:
+        monkeypatch.delenv(variable_name, raising=False)
 
 
 def test_settings_builds_a_postgresql_psycopg_url_with_special_characters(

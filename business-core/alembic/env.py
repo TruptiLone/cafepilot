@@ -4,7 +4,7 @@ from alembic import context
 from sqlalchemy import create_engine, pool
 
 from backend.db.base import Base
-from backend.db.config import get_settings
+from backend.db.config import get_database_connect_args, get_settings
 from backend.models.cafe import Cafe
 from backend.modules.inventory.models import (
     InventoryItem,
@@ -38,6 +38,7 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     connectable = create_engine(
         get_settings().database_url,
+        connect_args=get_database_connect_args(),
         poolclass=pool.NullPool,
     )
 

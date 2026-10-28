@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import URL
 
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+UTC_CONNECTION_OPTIONS = "-c timezone=UTC"
 
 
 class Settings(BaseSettings):
@@ -36,3 +37,7 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_database_connect_args() -> dict[str, str]:
+    return {"options": UTC_CONNECTION_OPTIONS}

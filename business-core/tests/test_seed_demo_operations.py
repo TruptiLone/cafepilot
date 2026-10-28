@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from backend.db.session import engine, get_db
 from backend.main import app
 from backend.modules.inventory.models import (
+    InventoryItem,
     InventoryMovement,
     StockCount,
     StockCountLine,
@@ -23,6 +24,8 @@ from scripts.seed_demo_operations import (
     DemoSeedResult,
     seed_demo_operations,
 )
+from scripts.seed_inventory import load_inventory_catalog, seed_inventory
+from scripts.seed_sales import load_sales_catalog, seed_sales
 
 
 @pytest.fixture
@@ -46,6 +49,27 @@ def client(database_session: Session) -> TestClient:
             yield test_client
     finally:
         app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def demo_seed_prerequisites(database_session: Session) -> None:
+    inventory_catalog = load_inventory_catalog()
+    sales_catalog = load_sales_catalog()
+
+    assert inventory_catalog.cafe_id == CAFE_ID
+    assert sales_catalog.cafe_id == CAFE_ID
+
+    seed_inventory(database_session, inventory_catalog)
+    seed_sales(database_session, sales_catalog)
+
+    assert all(
+        database_session.get(InventoryItem, item.ingredient_id) is not None
+        for item in inventory_catalog.items
+    )
+    assert all(
+        database_session.get(MenuProduct, product.product_id) is not None
+        for product in sales_catalog.products
+    )
 
 
 def _clear_demo_records(session: Session) -> None:
@@ -85,6 +109,7 @@ def _clear_demo_records(session: Session) -> None:
 @pytest.mark.database
 def test_demo_seed_creates_expected_records_and_is_idempotent(
     database_session: Session,
+    demo_seed_prerequisites: None,
 ) -> None:
     _clear_demo_records(database_session)
 
@@ -117,6 +142,7 @@ def test_demo_seed_creates_expected_records_and_is_idempotent(
 def test_demo_inventory_is_synthetic_chronological_and_preserves_unknown_stock(
     database_session: Session,
     client: TestClient,
+    demo_seed_prerequisites: None,
 ) -> None:
     _clear_demo_records(database_session)
     seed_demo_operations(database_session)
@@ -176,6 +202,7 @@ def test_demo_inventory_is_synthetic_chronological_and_preserves_unknown_stock(
 def test_demo_sales_use_database_prices_and_reports_are_meaningful(
     database_session: Session,
     client: TestClient,
+    demo_seed_prerequisites: None,
 ) -> None:
     _clear_demo_records(database_session)
     seed_demo_operations(database_session)
@@ -239,6 +266,7 @@ def test_demo_sales_use_database_prices_and_reports_are_meaningful(
 def test_demo_staffing_has_no_overlap_and_exposes_coverage_gaps(
     database_session: Session,
     client: TestClient,
+    demo_seed_prerequisites: None,
 ) -> None:
     _clear_demo_records(database_session)
     seed_demo_operations(database_session)
@@ -287,6 +315,7 @@ def test_demo_staffing_has_no_overlap_and_exposes_coverage_gaps(
 @pytest.mark.database
 def test_demo_seed_conflict_rolls_back_every_new_record(
     database_session: Session,
+    demo_seed_prerequisites: None,
 ) -> None:
     _clear_demo_records(database_session)
     database_session.add(

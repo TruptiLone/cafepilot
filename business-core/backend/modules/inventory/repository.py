@@ -164,6 +164,7 @@ class InventoryRepository:
     def list_verified_count_lines(
         self,
         cafe_id: str,
+        as_of: datetime,
         ingredient_id: str | None = None,
     ) -> list[tuple[StockCountLine, StockCount]]:
         statement = (
@@ -173,6 +174,8 @@ class InventoryRepository:
                 StockCount.cafe_id == cafe_id,
                 StockCount.status == "verified",
                 StockCount.counted_at.is_not(None),
+                StockCount.counted_at <= as_of,
+                StockCount.recorded_at <= as_of,
             )
             .order_by(
                 StockCountLine.ingredient_id,
@@ -189,12 +192,13 @@ class InventoryRepository:
     def list_eligible_stock_movements(
         self,
         cafe_id: str,
-        calculated_at: datetime,
+        as_of: datetime,
         ingredient_id: str | None = None,
     ) -> list[InventoryMovement]:
         statement = select(InventoryMovement).where(
             InventoryMovement.cafe_id == cafe_id,
-            InventoryMovement.occurred_at <= calculated_at,
+            InventoryMovement.occurred_at <= as_of,
+            InventoryMovement.recorded_at <= as_of,
         )
         if ingredient_id is not None:
             statement = statement.where(InventoryMovement.ingredient_id == ingredient_id)

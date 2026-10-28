@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
@@ -18,6 +20,7 @@ from backend.modules.inventory.service import (
     InventoryItemNotFoundError,
     InventoryMovementConflictError,
     InventoryService,
+    StockEstimateValidationError,
     StockCountConflictError,
     StockCountNotFoundError,
     StockCountValidationError,
@@ -189,25 +192,39 @@ def list_inventory_movements(
 def list_stock_estimates(
     cafe_id: str = Query(DEFAULT_CAFE_ID),
     ingredient_id: str | None = Query(default=None),
+    as_of: datetime | None = Query(default=None),
     database_session: Session = Depends(get_db),
 ) -> list[StockEstimateResponse]:
     try:
-        return InventoryService(database_session).list_stock_estimates(cafe_id, ingredient_id)
+        return InventoryService(database_session).list_stock_estimates(
+            cafe_id,
+            ingredient_id,
+            as_of,
+        )
     except CafeNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     except InventoryItemNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found") from error
+    except StockEstimateValidationError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 
 
 @router.get("/stock/{ingredient_id}", response_model=StockEstimateResponse)
 def get_stock_estimate(
     ingredient_id: str,
     cafe_id: str = Query(DEFAULT_CAFE_ID),
+    as_of: datetime | None = Query(default=None),
     database_session: Session = Depends(get_db),
 ) -> StockEstimateResponse:
     try:
-        return InventoryService(database_session).get_stock_estimate(ingredient_id, cafe_id)
+        return InventoryService(database_session).get_stock_estimate(
+            ingredient_id,
+            cafe_id,
+            as_of,
+        )
     except CafeNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     except InventoryItemNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found") from error
+    except StockEstimateValidationError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error

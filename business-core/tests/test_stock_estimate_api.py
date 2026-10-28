@@ -101,6 +101,7 @@ def _movement(
     quantity: str,
     occurred_at: datetime,
     *,
+    recorded_at: datetime | None = None,
     is_estimated: bool = False,
     movement_type: str = "ADJUSTMENT",
 ) -> None:
@@ -115,7 +116,7 @@ def _movement(
             source_type="stock_estimate_test",
             source_id=movement_id,
             occurred_at=occurred_at,
-            recorded_at=_at(20),
+            recorded_at=recorded_at or _at(20),
         )
     )
     session.flush()
@@ -171,6 +172,7 @@ def test_verified_count_uses_only_later_signed_movements(
     assert body["latest_verified_count_id"] == "anchor"
     assert body["anchor_is_synthetic"] is True
     assert body["has_estimated_movements"] is True
+    assert body["as_of"] == body["calculated_at"]
 
 
 @pytest.mark.database
@@ -229,3 +231,201 @@ def test_stock_routes_are_read_only_and_handle_unknown_resources(
     assert catalog.status_code == movements.status_code == counts.status_code == 200
     assert database_session.scalar(select(func.count()).select_from(InventoryMovement)) == before_movements
     assert database_session.scalar(select(func.count()).select_from(StockCount)) == before_counts
+
+
+@pytest.mark.database
+def test_as_of_selects_historical_anchor_and_excludes_late_recorded_count(
+    client: TestClient, stock_catalog: None, database_session: Session
+) -> None:
+    _count(
+        database_session,
+        "historical_anchor",
+        "verified",
+        _at(2),
+        {"TEST_STOCK_OAT": "40"},
+        recorded_at=_at(2, 1),
+    )
+    _count(
+        database_session,
+        "late_newer_anchor",
+        "verified",
+        _at(4),
+        {"TEST_STOCK_OAT": "80"},
+        recorded_at=_at(7),
+    )
+
+    response = client.get(
+        "/api/v1/inventory/stock/TEST_STOCK_OAT",
+        params={"cafe_id": TEST_CAFE_ID, "as_of": _at(5).isoformat()},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["latest_verified_count_id"] == "historical_anchor"
+    assert body["estimated_quantity"] == "40.000"
+    assert body["as_of"] == _at(5).isoformat().replace("+00:00", "Z")
+    calculated_at = datetime.fromisoformat(
+        body["calculated_at"].replace("Z", "+00:00")
+    )
+    assert calculated_at > _at(5)
+
+
+@pytest.mark.database
+def test_as_of_excludes_late_recorded_and_future_movements(
+    client: TestClient, stock_catalog: None, database_session: Session
+) -> None:
+    _count(
+        database_session,
+        "movement_anchor",
+        "verified",
+        _at(2),
+        {"TEST_STOCK_OAT": "100"},
+        recorded_at=_at(2, 1),
+    )
+    _movement(
+        database_session,
+        "known_receipt",
+        "TEST_STOCK_OAT",
+        "10",
+        _at(3),
+        recorded_at=_at(3, 1),
+        movement_type="RECEIPT",
+    )
+    _movement(
+        database_session,
+        "late_receipt",
+        "TEST_STOCK_OAT",
+        "20",
+        _at(4),
+        recorded_at=_at(8),
+        movement_type="RECEIPT",
+    )
+    _movement(
+        database_session,
+        "future_receipt",
+        "TEST_STOCK_OAT",
+        "30",
+        _at(7),
+        recorded_at=_at(4),
+        movement_type="RECEIPT",
+    )
+
+    early = client.get(
+        "/api/v1/inventory/stock/TEST_STOCK_OAT",
+        params={"cafe_id": TEST_CAFE_ID, "as_of": _at(5).isoformat()},
+    )
+    later = client.get(
+        "/api/v1/inventory/stock/TEST_STOCK_OAT",
+        params={"cafe_id": TEST_CAFE_ID, "as_of": _at(9).isoformat()},
+    )
+
+    assert early.json()["estimated_quantity"] == "110.000"
+    assert early.json()["included_movement_count"] == 1
+    assert later.json()["estimated_quantity"] == "160.000"
+    assert later.json()["included_movement_count"] == 3
+
+
+@pytest.mark.database
+def test_as_of_list_and_item_share_timezone_aware_semantics(
+    client: TestClient, stock_catalog: None, database_session: Session
+) -> None:
+    _count(
+        database_session,
+        "offset_anchor",
+        "verified",
+        datetime(2025, 1, 4, 7, tzinfo=timezone.utc),
+        {"TEST_STOCK_TEA": "0"},
+        recorded_at=datetime(2025, 1, 4, 7, 30, tzinfo=timezone.utc),
+    )
+    _movement(
+        database_session,
+        "offset_negative",
+        "TEST_STOCK_TEA",
+        "-1",
+        datetime(2025, 1, 4, 8, tzinfo=timezone.utc),
+        recorded_at=datetime(2025, 1, 4, 8, tzinfo=timezone.utc),
+    )
+    as_of = "2025-01-04T00:00:00-08:00"
+
+    list_response = client.get(
+        "/api/v1/inventory/stock",
+        params={"cafe_id": TEST_CAFE_ID, "as_of": as_of},
+    )
+    item_response = client.get(
+        "/api/v1/inventory/stock/TEST_STOCK_TEA",
+        params={"cafe_id": TEST_CAFE_ID, "as_of": as_of},
+    )
+
+    estimates = {
+        estimate["ingredient_id"]: estimate for estimate in list_response.json()
+    }
+    item = item_response.json()
+    assert list_response.status_code == item_response.status_code == 200
+    list_item = estimates["TEST_STOCK_TEA"]
+    assert {
+        key: value for key, value in list_item.items() if key != "calculated_at"
+    } == {key: value for key, value in item.items() if key != "calculated_at"}
+    assert item["stock_status"] == "inconsistent"
+    assert item["estimated_quantity"] == "-1.000"
+    assert estimates["TEST_STOCK_OAT"]["stock_status"] == "unknown"
+    assert item["as_of"] == as_of
+
+
+@pytest.mark.database
+def test_as_of_rejects_naive_and_malformed_timestamps(
+    client: TestClient, stock_catalog: None
+) -> None:
+    naive = client.get(
+        "/api/v1/inventory/stock",
+        params={"cafe_id": TEST_CAFE_ID, "as_of": "2025-01-05T12:00:00"},
+    )
+    malformed = client.get(
+        "/api/v1/inventory/stock/TEST_STOCK_OAT",
+        params={"cafe_id": TEST_CAFE_ID, "as_of": "not-a-timestamp"},
+    )
+
+    assert naive.status_code == 400
+    assert naive.json()["detail"] == "as_of must include a timezone"
+    assert malformed.status_code == 422
+
+
+@pytest.mark.database
+def test_january_demo_as_of_is_read_only_and_preserves_records(
+    client: TestClient, database_session: Session
+) -> None:
+    counts_before = database_session.scalar(
+        select(func.count()).select_from(StockCount).where(
+            StockCount.cafe_id == "CAFE001"
+        )
+    )
+    movements_before = database_session.scalar(
+        select(func.count()).select_from(InventoryMovement).where(
+            InventoryMovement.cafe_id == "CAFE001"
+        )
+    )
+
+    response = client.get(
+        "/api/v1/inventory/stock",
+        params={
+            "cafe_id": "CAFE001",
+            "as_of": "2025-01-07T23:59:59-08:00",
+        },
+    )
+
+    assert response.status_code == 200
+    estimates = {item["ingredient_id"]: item for item in response.json()}
+    assert len(estimates) == 19
+    assert estimates["COFFEE_BEANS"]["latest_verified_count_id"] == (
+        "DEMO_COUNT_BASELINE_20250106"
+    )
+    assert estimates["TEA_BAG"]["stock_status"] == "unknown"
+    assert database_session.scalar(
+        select(func.count()).select_from(StockCount).where(
+            StockCount.cafe_id == "CAFE001"
+        )
+    ) == counts_before
+    assert database_session.scalar(
+        select(func.count()).select_from(InventoryMovement).where(
+            InventoryMovement.cafe_id == "CAFE001"
+        )
+    ) == movements_before

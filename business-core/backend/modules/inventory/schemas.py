@@ -201,5 +201,6 @@ class StockEstimateResponse(BaseModel):
     included_movement_count: int
     anchor_is_synthetic: bool | None
     has_estimated_movements: bool
+    as_of: datetime
     calculated_at: datetime
     reason: str | None

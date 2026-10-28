@@ -47,6 +47,10 @@ class InventoryMovementConflictError(RuntimeError):
     pass
 
 
+class StockEstimateValidationError(ValueError):
+    pass
+
+
 @dataclass(frozen=True)
 class StockCountSummary:
     count_id: str
@@ -89,6 +93,7 @@ class StockEstimateResult:
     included_movement_count: int
     anchor_is_synthetic: bool | None
     has_estimated_movements: bool
+    as_of: datetime
     calculated_at: datetime
     reason: str | None
 
@@ -315,27 +320,39 @@ class InventoryService:
         self,
         cafe_id: str = DEFAULT_CAFE_ID,
         ingredient_id: str | None = None,
+        as_of: datetime | None = None,
     ) -> list[StockEstimateResult]:
+        calculated_at = datetime.now(timezone.utc)
+        effective_as_of = self._effective_as_of(as_of, calculated_at)
         self._require_cafe(cafe_id)
         items = self._repository.list_stock_items(cafe_id, ingredient_id)
         if ingredient_id is not None and not items:
             raise InventoryItemNotFoundError(ingredient_id)
 
-        calculated_at = datetime.now(timezone.utc)
         anchors: dict[str, tuple[StockCountLine, StockCount]] = {}
-        for line, count in self._repository.list_verified_count_lines(cafe_id, ingredient_id):
+        for line, count in self._repository.list_verified_count_lines(
+            cafe_id,
+            effective_as_of,
+            ingredient_id,
+        ):
             anchors.setdefault(line.ingredient_id, (line, count))
 
         movements_by_ingredient: dict[str, list[InventoryMovement]] = {}
         for movement in self._repository.list_eligible_stock_movements(
             cafe_id,
-            calculated_at,
+            effective_as_of,
             ingredient_id,
         ):
             movements_by_ingredient.setdefault(movement.ingredient_id, []).append(movement)
 
         return [
-            self._stock_estimate(item, anchors.get(item.ingredient_id), movements_by_ingredient, calculated_at)
+            self._stock_estimate(
+                item,
+                anchors.get(item.ingredient_id),
+                movements_by_ingredient,
+                effective_as_of,
+                calculated_at,
+            )
             for item in items
         ]
 
@@ -343,14 +360,24 @@ class InventoryService:
         self,
         ingredient_id: str,
         cafe_id: str = DEFAULT_CAFE_ID,
+        as_of: datetime | None = None,
     ) -> StockEstimateResult:
-        return self.list_stock_estimates(cafe_id, ingredient_id)[0]
+        return self.list_stock_estimates(cafe_id, ingredient_id, as_of)[0]
+
+    @staticmethod
+    def _effective_as_of(as_of: datetime | None, calculated_at: datetime) -> datetime:
+        if as_of is None:
+            return calculated_at
+        if as_of.tzinfo is None or as_of.utcoffset() is None:
+            raise StockEstimateValidationError("as_of must include a timezone")
+        return as_of
 
     @staticmethod
     def _stock_estimate(
         item: InventoryItem,
         anchor: tuple[StockCountLine, StockCount] | None,
         movements_by_ingredient: dict[str, list[InventoryMovement]],
+        as_of: datetime,
         calculated_at: datetime,
     ) -> StockEstimateResult:
         if anchor is None:
@@ -366,6 +393,7 @@ class InventoryService:
                 included_movement_count=0,
                 anchor_is_synthetic=None,
                 has_estimated_movements=False,
+                as_of=as_of,
                 calculated_at=calculated_at,
                 reason="No verified physical count is available.",
             )
@@ -396,6 +424,7 @@ class InventoryService:
             has_estimated_movements=any(
                 movement.is_estimated for movement in included_movements
             ),
+            as_of=as_of,
             calculated_at=calculated_at,
             reason=(
                 "Estimated quantity is negative; investigate the count or movements."

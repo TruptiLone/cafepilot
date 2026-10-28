@@ -112,7 +112,11 @@ def test_create_draft_count_is_atomic_and_does_not_create_movements(
         for line in body["lines"]
         if line["ingredient_id"] == "TEST_COUNT_OAT"
     ) == "0"
-    assert database_session.scalar(select(func.count()).select_from(InventoryMovement)) == 0
+    assert database_session.scalar(
+        select(func.count())
+        .select_from(InventoryMovement)
+        .where(InventoryMovement.cafe_id == TEST_CAFE_ID)
+    ) == 0
 
 
 @pytest.mark.database

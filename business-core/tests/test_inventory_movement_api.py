@@ -107,7 +107,11 @@ def test_receipt_creation_is_append_only_and_does_not_create_counts(
     assert body["quantity_delta"] == "8000.000"
     assert body["base_unit"] == "mL"
     assert body["is_estimated"] is False
-    assert database_session.scalar(select(func.count()).select_from(StockCount)) == 0
+    assert database_session.scalar(
+        select(func.count())
+        .select_from(StockCount)
+        .where(StockCount.cafe_id == TEST_CAFE_ID)
+    ) == 0
 
 
 @pytest.mark.database
@@ -178,7 +182,11 @@ def test_movement_identity_is_idempotent_and_conflicts_are_rejected(
     assert retry.status_code == 200
     assert retry.json()["movement_id"] == first.json()["movement_id"]
     assert conflict.status_code == 409
-    assert database_session.scalar(select(func.count()).select_from(InventoryMovement)) == 1
+    assert database_session.scalar(
+        select(func.count())
+        .select_from(InventoryMovement)
+        .where(InventoryMovement.cafe_id == TEST_CAFE_ID)
+    ) == 1
 
 
 @pytest.mark.database

@@ -102,9 +102,16 @@ export function getSalesHistory(signal?: AbortSignal): Promise<SaleSummary[]> {
   return requestJson<SaleSummary[]>(`/api/v1/sales?${cafeQuery}`, signal);
 }
 
-export function getSalesReport(signal?: AbortSignal): Promise<SalesReport> {
+export function getSalesReport(
+  signal?: AbortSignal,
+  startAt?: string,
+  endAt?: string,
+): Promise<SalesReport> {
+  const reportQuery = new URLSearchParams({ cafe_id: ACTIVE_CAFE_ID });
+  if (startAt) reportQuery.set("start_at", startAt);
+  if (endAt) reportQuery.set("end_at", endAt);
   return requestJson<SalesReport>(
-    `/api/v1/sales/reports/summary?${cafeQuery}`,
+    `/api/v1/sales/reports/summary?${reportQuery.toString()}`,
     signal,
   );
 }

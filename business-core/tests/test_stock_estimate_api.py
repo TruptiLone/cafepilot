@@ -393,6 +393,8 @@ def test_as_of_rejects_naive_and_malformed_timestamps(
 def test_january_demo_as_of_is_read_only_and_preserves_records(
     client: TestClient, database_session: Session
 ) -> None:
+    if database_session.get(StockCount, "DEMO_COUNT_BASELINE_20250106") is None:
+        pytest.skip("January 2025 demo data not seeded; run scripts/seed_all.sh")
     counts_before = database_session.scalar(
         select(func.count()).select_from(StockCount).where(
             StockCount.cafe_id == "CAFE001"

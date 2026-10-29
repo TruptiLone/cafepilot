@@ -201,3 +201,37 @@ class IngredientUsageResponse(BaseModel):
     is_estimated: bool
     ingredients: list[IngredientUsageItemResponse]
     missing_recipe_variations: list[str]
+
+
+class UsageProjectionRequest(BaseModel):
+    """Hypothetical product mix to expand through recipes; never written as a sale."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    cafe_id: str = "CAFE001"
+    target_at: datetime
+    items: list[SaleItemV2Create] = Field(min_length=1)
+
+    @field_validator("target_at")
+    @classmethod
+    def validate_target_at(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("target_at must include a timezone")
+        return value
+
+
+class ProjectedIngredientResponse(BaseModel):
+    ingredient_id: str
+    name: str
+    quantity: Decimal
+    unit: str
+
+
+class UsageProjectionResponse(BaseModel):
+    cafe_id: str
+    target_at: datetime
+    total_units: int
+    projection_status: Literal["computed", "partial", "unmapped"]
+    is_estimate: bool
+    ingredients: list[ProjectedIngredientResponse]
+    unmapped_variations: list[str]

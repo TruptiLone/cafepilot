@@ -11,6 +11,8 @@ from backend.modules.sales.schemas import (
     SaleResponse,
     SalesReportResponse,
     SaleSummaryResponse,
+    UsageProjectionRequest,
+    UsageProjectionResponse,
 )
 from backend.modules.sales.service import (
     DEFAULT_CAFE_ID,
@@ -47,6 +49,22 @@ def sales_summary(
         return SalesService(database_session).report(cafe_id, start_at, end_at)
     except CafeNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+    except SalesValidationError as error:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
+
+
+@router.post("/projections/usage", response_model=UsageProjectionResponse)
+def project_usage(
+    request: UsageProjectionRequest,
+    database_session: Session = Depends(get_db),
+) -> UsageProjectionResponse:
+    """Read-only: expand a hypothetical product mix into ingredient quantities."""
+    try:
+        return SalesService(database_session).project_usage(request)
+    except CafeNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+    except ProductNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Variation not found: {error}") from error
     except SalesValidationError as error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(error)) from error
 

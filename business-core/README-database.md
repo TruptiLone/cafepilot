@@ -53,6 +53,17 @@ To connect interactively using a locally installed `psql` client:
 psql -h 127.0.0.1 -p 5433 -U cafepilot -d cafe_business_db
 ```
 
+## Seed the demo data
+
+Seed scripts depend on each other and must run in this order:
+
+```bash
+cd business-core
+./scripts/seed_all.sh
+```
+
+which runs `alembic upgrade head`, then `seed_inventory → seed_sales → seed_sales_catalog → seed_sales_recipes → seed_demo_operations` with `PYTHONPATH=.`. Every script is idempotent, so re-running is safe. Tests marked `database` that read the January 2025 demo data are skipped until this has been run.
+
 ## Stop without deleting data
 
 ```bash

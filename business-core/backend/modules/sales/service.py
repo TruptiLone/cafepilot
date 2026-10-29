@@ -22,6 +22,7 @@ from backend.modules.sales.models import (
 )
 from backend.modules.sales.repository import SalesRepository
 from backend.modules.sales.schemas import (
+    UsageProjectionRequest,
     LegacySaleItemCreate,
     SaleCreate,
     SaleItemV2Create,
@@ -178,6 +179,32 @@ class _PreparedSale:
     tax_cents: int
     total_cents: int
     lines: tuple[_PreparedLine, ...]
+
+
+@dataclass(frozen=True)
+class _ProjectionRequest:
+    items: list[SaleItemV2Create]
+    sold_at: datetime
+    source: str = "projection"
+
+
+@dataclass(frozen=True)
+class ProjectedIngredientResult:
+    ingredient_id: str
+    name: str
+    quantity: Decimal
+    unit: str
+
+
+@dataclass(frozen=True)
+class UsageProjectionResult:
+    cafe_id: str
+    target_at: datetime
+    total_units: int
+    projection_status: str
+    is_estimate: bool
+    ingredients: list[ProjectedIngredientResult]
+    unmapped_variations: list[str]
 
 
 @dataclass
@@ -513,6 +540,54 @@ class SalesService:
             average_sale_value_cents=(total_revenue // len(sales) if sales else 0),
             top_products=top_products,
             hourly_sales=hourly_sales,
+        )
+
+    def project_usage(self, request: UsageProjectionRequest) -> UsageProjectionResult:
+        """Expand a hypothetical product mix through recipes. Read-only."""
+        cafe = self._require_cafe(request.cafe_id)
+        lines = self._prepare_v2_lines(
+            cafe,
+            _ProjectionRequest(items=request.items, sold_at=request.target_at),  # type: ignore[arg-type]
+        )
+        totals: dict[str, Decimal] = defaultdict(lambda: Decimal("0"))
+        units: dict[str, str] = {}
+        unmapped: list[str] = []
+        for line in lines:
+            if line.usage is None:
+                if line.variation.variation_id not in unmapped:
+                    unmapped.append(line.variation.variation_id)
+                continue
+            for ingredient_id, (quantity, unit) in line.usage.items():
+                totals[ingredient_id] += quantity
+                units[ingredient_id] = unit
+        names = {
+            item.ingredient_id: item.name
+            for item in self._repository.get_inventory_items(
+                cafe.cafe_id, set(totals)
+            )
+        }
+        if not unmapped:
+            projection_status = "computed"
+        elif totals:
+            projection_status = "partial"
+        else:
+            projection_status = "unmapped"
+        return UsageProjectionResult(
+            cafe_id=cafe.cafe_id,
+            target_at=request.target_at,
+            total_units=sum(line.quantity for line in lines),
+            projection_status=projection_status,
+            is_estimate=True,
+            ingredients=[
+                ProjectedIngredientResult(
+                    ingredient_id=ingredient_id,
+                    name=names.get(ingredient_id, ingredient_id),
+                    quantity=totals[ingredient_id].quantize(QUANTITY_SCALE),
+                    unit=units[ingredient_id],
+                )
+                for ingredient_id in sorted(totals)
+            ],
+            unmapped_variations=unmapped,
         )
 
     def _prepare_sale(self, cafe: Cafe, request: SaleCreate) -> _PreparedSale:

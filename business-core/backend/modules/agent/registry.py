@@ -1,0 +1,481 @@
+"""Action registry: the only operations the CaféPilot agent may plan or execute.
+
+Each action wraps an existing domain service method directly (no HTTP hop).
+Input and output JSON schemas are generated from Pydantic models, never hand-written.
+The planner sees ``describe_for_planner()``; the validator and executor use ``REGISTRY``.
+
+Deliberately NOT registered: ``create_sale`` (POS-only) and ``create_employee`` (HR-only).
+Every write action requires owner approval.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime
+from decimal import Decimal
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from sqlalchemy.orm import Session
+
+from backend.modules.inventory.schemas import (
+    InventoryItemResponse,
+    InventoryMovementCreate,
+    InventoryMovementResponse,
+    StockCountCreate,
+    StockCountResponse,
+    StockCountSummaryResponse,
+    StockCountVerify,
+    StockEstimateResponse,
+)
+from backend.modules.inventory.service import InventoryService
+from backend.modules.sales.schemas import (
+    MenuProductResponse,
+    SalesReportResponse,
+    SaleSummaryResponse,
+    UsageProjectionRequest,
+    UsageProjectionResponse,
+)
+from backend.modules.sales.service import SalesService
+from backend.modules.staffing.schemas import (
+    CoverageReportResponse,
+    EmployeeResponse,
+    ShiftCreate,
+    ShiftResponse,
+)
+from backend.modules.staffing.service import StaffingService
+
+SideEffect = Literal["read", "write"]
+Approval = Literal["none", "owner"]
+DEFAULT_CAFE_ID = "CAFE001"
+
+
+# ---------------------------------------------------------------------------
+# Input models for actions whose REST form uses query/path parameters
+# ---------------------------------------------------------------------------
+
+
+class _AgentInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+def _require_aware(value: datetime | None) -> datetime | None:
+    if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+        raise ValueError("timestamps must include a timezone offset")
+    return value
+
+
+class CafeScopedInput(_AgentInput):
+    cafe_id: str = DEFAULT_CAFE_ID
+
+
+class ListIngredientsInput(CafeScopedInput):
+    category: str | None = None
+    include_inactive: bool = False
+
+
+class StockEstimatesInput(CafeScopedInput):
+    ingredient_id: str | None = Field(
+        default=None, description="Omit to get every ingredient."
+    )
+    as_of: datetime | None = Field(
+        default=None,
+        description="Knowledge cutoff with timezone offset. Omit for now.",
+    )
+
+    _aware = field_validator("as_of")(_require_aware)
+
+
+class ListStockCountsInput(CafeScopedInput):
+    status: Literal["draft", "verified"] | None = None
+
+
+class StockCountIdInput(CafeScopedInput):
+    count_id: str = Field(min_length=1)
+
+
+class VerifyStockCountInput(CafeScopedInput):
+    count_id: str = Field(min_length=1)
+    counted_at: datetime | None = None
+
+    _aware = field_validator("counted_at")(_require_aware)
+
+
+class ListMovementsInput(CafeScopedInput):
+    ingredient_id: str | None = None
+    movement_type: str | None = None
+
+
+class TimeRangeInput(CafeScopedInput):
+    start_at: datetime
+    end_at: datetime
+
+    _aware = field_validator("start_at", "end_at")(_require_aware)
+
+
+class OptionalTimeRangeInput(CafeScopedInput):
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+
+    _aware = field_validator("start_at", "end_at")(_require_aware)
+
+
+class CoverageInput(TimeRangeInput):
+    required_staff: int = Field(default=2, ge=1)
+
+
+class CancelShiftInput(CafeScopedInput):
+    shift_id: str = Field(min_length=1)
+
+
+class SupplierOrderLine(_AgentInput):
+    ingredient_id: str = Field(min_length=1)
+    quantity: Decimal = Field(gt=0, description="Quantity in the ingredient's base unit.")
+    unit: str = Field(min_length=1, description="Must equal the ingredient's base unit.")
+
+
+class SupplierOrderInput(CafeScopedInput):
+    supplier_id: str = "SIM_SUPPLIER"
+    lines: list[SupplierOrderLine] = Field(min_length=1)
+    requested_delivery_at: datetime
+    note: str | None = None
+
+    _aware = field_validator("requested_delivery_at")(_require_aware)
+
+
+class SupplierOrderResponse(BaseModel):
+    order_ref: str
+    supplier_id: str
+    status: Literal["confirmed"]
+    simulated: Literal[True]
+    requested_delivery_at: datetime
+    confirmed_delivery_at: datetime
+    lines: list[SupplierOrderLine]
+    message: str
+
+
+# ---------------------------------------------------------------------------
+# Action definition
+# ---------------------------------------------------------------------------
+
+
+Handler = Callable[[Session, Any], Any]
+
+
+@dataclass(frozen=True)
+class Action:
+    name: str
+    description: str
+    domain: str
+    side_effect: SideEffect
+    input_model: type[BaseModel]
+    output_type: Any
+    handler: Handler
+    consumes: tuple[str, ...] = ()
+    produces: tuple[str, ...] = ()
+    # Each inner tuple is an any-of group; every group must be satisfied upstream.
+    requires: tuple[tuple[str, ...], ...] = ()
+    approval: Approval = "none"
+    _output_adapter: TypeAdapter = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if self.side_effect == "write" and self.approval != "owner":
+            raise ValueError(f"write action {self.name} must require owner approval")
+        object.__setattr__(self, "_output_adapter", TypeAdapter(self.output_type))
+
+    def input_schema(self) -> dict[str, Any]:
+        return self.input_model.model_json_schema()
+
+    def output_schema(self) -> dict[str, Any]:
+        return self._output_adapter.json_schema()
+
+    def run(self, session: Session, raw_args: dict[str, Any]) -> Any:
+        """Validate args, call the domain service, return JSON-safe output."""
+        params = self.input_model.model_validate(raw_args)
+        result = self.handler(session, params)
+        validated = self._output_adapter.validate_python(result, from_attributes=True)
+        return self._output_adapter.dump_python(validated, mode="json")
+
+
+# ---------------------------------------------------------------------------
+# Handlers (thin wrappers over existing services)
+# ---------------------------------------------------------------------------
+
+
+def _simulate_supplier_order(session: Session, p: SupplierOrderInput) -> SupplierOrderResponse:
+    inventory = InventoryService(session)
+    for line in p.lines:
+        item = inventory.get_item(line.ingredient_id, p.cafe_id)
+        if line.unit != item.base_unit:
+            raise ValueError(
+                f"{line.ingredient_id} must be ordered in {item.base_unit}, not {line.unit}"
+            )
+    fingerprint = json.dumps(p.model_dump(mode="json"), sort_keys=True)
+    order_ref = "SIMPO-" + hashlib.sha256(fingerprint.encode()).hexdigest()[:10].upper()
+    return SupplierOrderResponse(
+        order_ref=order_ref,
+        supplier_id=p.supplier_id,
+        status="confirmed",
+        simulated=True,
+        requested_delivery_at=p.requested_delivery_at,
+        confirmed_delivery_at=p.requested_delivery_at,
+        lines=p.lines,
+        message="Simulated supplier response. No real order was placed.",
+    )
+
+
+_ACTIONS: list[Action] = [
+    # ---- Inventory: reads
+    Action(
+        name="list_ingredients",
+        description="List the café's ingredient catalog with base units and categories.",
+        domain="inventory",
+        side_effect="read",
+        input_model=ListIngredientsInput,
+        output_type=list[InventoryItemResponse],
+        handler=lambda s, p: InventoryService(s).list_items(
+            cafe_id=p.cafe_id, category=p.category, include_inactive=p.include_inactive
+        ),
+        produces=("ingredient_catalog",),
+    ),
+    Action(
+        name="get_stock_estimates",
+        description=(
+            "Estimated stock per ingredient from the latest verified count plus later "
+            "movements. Status is known, unknown or inconsistent; unknown is never zero. "
+            "Use as_of for a point-in-time view."
+        ),
+        domain="inventory",
+        side_effect="read",
+        input_model=StockEstimatesInput,
+        output_type=list[StockEstimateResponse],
+        handler=lambda s, p: InventoryService(s).list_stock_estimates(
+            p.cafe_id, p.ingredient_id, p.as_of
+        ),
+        consumes=("ingredient_catalog",),
+        produces=("stock_estimate",),
+    ),
+    Action(
+        name="list_stock_counts",
+        description="List physical stock counts (draft or verified).",
+        domain="inventory",
+        side_effect="read",
+        input_model=ListStockCountsInput,
+        output_type=list[StockCountSummaryResponse],
+        handler=lambda s, p: InventoryService(s).list_counts(p.cafe_id, p.status),
+        produces=("stock_count_list",),
+    ),
+    Action(
+        name="get_stock_count",
+        description="Get one stock count with its counted lines.",
+        domain="inventory",
+        side_effect="read",
+        input_model=StockCountIdInput,
+        output_type=StockCountResponse,
+        handler=lambda s, p: InventoryService(s).get_count(p.count_id, p.cafe_id),
+        consumes=("stock_count_list",),
+        produces=("stock_count",),
+    ),
+    Action(
+        name="list_inventory_movements",
+        description="List receipts, waste, adjustments and estimated sale usage.",
+        domain="inventory",
+        side_effect="read",
+        input_model=ListMovementsInput,
+        output_type=list[InventoryMovementResponse],
+        handler=lambda s, p: InventoryService(s).list_movements(
+            p.cafe_id, p.ingredient_id, p.movement_type
+        ),
+        consumes=("ingredient_catalog",),
+        produces=("movement_history",),
+    ),
+    # ---- Inventory: writes
+    Action(
+        name="create_stock_count",
+        description="Record a physical stock count (draft by default).",
+        domain="inventory",
+        side_effect="write",
+        input_model=StockCountCreate,
+        output_type=StockCountResponse,
+        handler=lambda s, p: InventoryService(s).create_count(p),
+        consumes=("ingredient_catalog", "stock_estimate"),
+        produces=("stock_count",),
+        approval="owner",
+    ),
+    Action(
+        name="verify_stock_count",
+        description="Verify a draft stock count so it becomes the new stock anchor.",
+        domain="inventory",
+        side_effect="write",
+        input_model=VerifyStockCountInput,
+        output_type=StockCountResponse,
+        handler=lambda s, p: InventoryService(s).verify_count(
+            p.count_id, StockCountVerify(counted_at=p.counted_at), p.cafe_id
+        ),
+        consumes=("stock_count",),
+        produces=("verified_stock_count",),
+        requires=(("create_stock_count", "get_stock_count"),),
+        approval="owner",
+    ),
+    Action(
+        name="record_inventory_movement",
+        description="Record an accepted receipt, waste or adjustment (idempotent by source).",
+        domain="inventory",
+        side_effect="write",
+        input_model=InventoryMovementCreate,
+        output_type=InventoryMovementResponse,
+        handler=lambda s, p: InventoryService(s).create_movement(p)[0],
+        consumes=("stock_estimate", "supplier_order"),
+        produces=("inventory_movement",),
+        requires=(("get_stock_estimates",),),
+        approval="owner",
+    ),
+    # ---- Sales: reads
+    Action(
+        name="list_products",
+        description="List menu products with their variations.",
+        domain="sales",
+        side_effect="read",
+        input_model=CafeScopedInput,
+        output_type=list[MenuProductResponse],
+        handler=lambda s, p: SalesService(s).list_products(p.cafe_id),
+        produces=("menu_catalog",),
+    ),
+    Action(
+        name="list_sales",
+        description="List completed sales in an optional time range.",
+        domain="sales",
+        side_effect="read",
+        input_model=OptionalTimeRangeInput,
+        output_type=list[SaleSummaryResponse],
+        handler=lambda s, p: SalesService(s).list_sales(p.cafe_id, p.start_at, p.end_at),
+        produces=("sales_history",),
+    ),
+    Action(
+        name="sales_summary",
+        description="Revenue, units, top products and hourly sales for a time range.",
+        domain="sales",
+        side_effect="read",
+        input_model=OptionalTimeRangeInput,
+        output_type=SalesReportResponse,
+        handler=lambda s, p: SalesService(s).report(p.cafe_id, p.start_at, p.end_at),
+        produces=("sales_summary",),
+    ),
+    Action(
+        name="project_recipe_usage",
+        description=(
+            "Read-only: expand a hypothetical product mix (variation ids, quantities, "
+            "modifiers such as MILK_OAT) into ingredient quantities using recipes "
+            "effective at target_at. Writes nothing."
+        ),
+        domain="sales",
+        side_effect="read",
+        input_model=UsageProjectionRequest,
+        output_type=UsageProjectionResponse,
+        handler=lambda s, p: SalesService(s).project_usage(p),
+        consumes=("menu_catalog", "sales_summary"),
+        produces=("ingredient_demand",),
+    ),
+    # ---- Staffing: reads
+    Action(
+        name="list_employees",
+        description="List employees with their single role (e.g. barista, cashier).",
+        domain="staffing",
+        side_effect="read",
+        input_model=CafeScopedInput,
+        output_type=list[EmployeeResponse],
+        handler=lambda s, p: StaffingService(s).list_employees(p.cafe_id),
+        produces=("employee_roster",),
+    ),
+    Action(
+        name="list_shifts",
+        description="List scheduled and cancelled shifts overlapping a time range.",
+        domain="staffing",
+        side_effect="read",
+        input_model=TimeRangeInput,
+        output_type=list[ShiftResponse],
+        handler=lambda s, p: StaffingService(s).list_shifts(p.cafe_id, p.start_at, p.end_at),
+        produces=("shift_schedule",),
+    ),
+    Action(
+        name="coverage_report",
+        description=(
+            "Hourly scheduled head count versus a required_staff threshold. Counts people, "
+            "not roles; check roles with list_employees."
+        ),
+        domain="staffing",
+        side_effect="read",
+        input_model=CoverageInput,
+        output_type=CoverageReportResponse,
+        handler=lambda s, p: StaffingService(s).coverage_report(
+            p.cafe_id, p.start_at, p.end_at, p.required_staff
+        ),
+        produces=("coverage",),
+    ),
+    # ---- Staffing: writes
+    Action(
+        name="schedule_shift",
+        description="Schedule an employee for a shift. Overlapping shifts are rejected.",
+        domain="staffing",
+        side_effect="write",
+        input_model=ShiftCreate,
+        output_type=ShiftResponse,
+        handler=lambda s, p: StaffingService(s).schedule_shift(p),
+        consumes=("employee_roster", "shift_schedule", "coverage"),
+        produces=("scheduled_shift",),
+        requires=(("coverage_report",), ("list_employees",), ("list_shifts",)),
+        approval="owner",
+    ),
+    Action(
+        name="cancel_shift",
+        description="Cancel a scheduled shift.",
+        domain="staffing",
+        side_effect="write",
+        input_model=CancelShiftInput,
+        output_type=ShiftResponse,
+        handler=lambda s, p: StaffingService(s).cancel_shift(p.shift_id, p.cafe_id),
+        consumes=("shift_schedule",),
+        produces=("cancelled_shift",),
+        requires=(("list_shifts",),),
+        approval="owner",
+    ),
+    # ---- Purchasing (simulated)
+    Action(
+        name="propose_supplier_order",
+        description=(
+            "SIMULATED supplier order. Validates ingredients and base units and returns a "
+            "labeled simulated confirmation. No real order is placed."
+        ),
+        domain="purchasing",
+        side_effect="write",
+        input_model=SupplierOrderInput,
+        output_type=SupplierOrderResponse,
+        handler=_simulate_supplier_order,
+        consumes=("stock_estimate", "ingredient_demand"),
+        produces=("supplier_order",),
+        requires=(("get_stock_estimates",),),
+        approval="owner",
+    ),
+]
+
+REGISTRY: dict[str, Action] = {action.name: action for action in _ACTIONS}
+if len(REGISTRY) != len(_ACTIONS):
+    raise RuntimeError("duplicate action names in registry")
+
+
+def describe_for_planner() -> list[dict[str, Any]]:
+    """Compact, deterministic description of every action for the planner prompt."""
+    return [
+        {
+            "name": action.name,
+            "description": action.description,
+            "side_effect": action.side_effect,
+            "needs_owner_approval": action.approval == "owner",
+            "input_schema": action.input_schema(),
+            "must_come_after": [list(group) for group in action.requires],
+        }
+        for action in _ACTIONS
+    ]

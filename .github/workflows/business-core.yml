@@ -1,0 +1,63 @@
+name: Business Core
+
+on:
+  push:
+    branches: [main, "agent/**"]
+    paths: ["business-core/**", ".github/workflows/business-core.yml"]
+  pull_request:
+    paths: ["business-core/**", ".github/workflows/business-core.yml"]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: cafe_business_db
+          POSTGRES_USER: cafepilot
+          POSTGRES_PASSWORD: ci-only-password
+        ports: ["5433:5432"]
+        options: >-
+          --health-cmd "pg_isready -U cafepilot -d cafe_business_db"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      POSTGRES_DB: cafe_business_db
+      POSTGRES_USER: cafepilot
+      POSTGRES_PASSWORD: ci-only-password
+      POSTGRES_HOST: 127.0.0.1
+      POSTGRES_PORT: "5433"
+    defaults:
+      run:
+        working-directory: business-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: business-core/requirements.txt
+      - run: pip install -r requirements.txt
+      - name: Migrate and seed demo data
+        run: ./scripts/seed_all.sh && PYTHONPATH=. python scripts/seed_event_surge.py
+      - name: Schema matches models
+        run: alembic check
+      - name: Tests
+        run: python -m pytest -q
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: business-core/frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: business-core/frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm test
+      - run: npm run build

@@ -11,7 +11,7 @@ nodes against ``required_predecessors``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from graphlib import CycleError, TopologicalSorter
 
@@ -22,17 +22,19 @@ from backend.modules.agent.registry import REGISTRY, Action
 class SupersetDAG:
     data_edges: frozenset[tuple[str, str]]
     safety_edges: frozenset[tuple[str, str]]
+    # The rulebook the graph was built from (defaults to the live registry).
+    actions: dict[str, Action] = field(default_factory=lambda: dict(REGISTRY), compare=False, repr=False)
 
     @property
     def allowed_edges(self) -> frozenset[tuple[str, str]]:
         return self.data_edges | self.safety_edges
 
     def required_predecessors(self, action_name: str) -> tuple[tuple[str, ...], ...]:
-        return REGISTRY[action_name].requires
+        return self.actions[action_name].requires
 
     def topological_order(self) -> list[str]:
         sorter: TopologicalSorter[str] = TopologicalSorter()
-        for name in REGISTRY:
+        for name in self.actions:
             sorter.add(name)
         for upstream, downstream in self.allowed_edges:
             sorter.add(downstream, upstream)
@@ -66,6 +68,7 @@ def build_superset(actions: dict[str, Action] | None = None) -> SupersetDAG:
     dag = SupersetDAG(
         data_edges=frozenset(_data_edges(actions)),
         safety_edges=frozenset(_safety_edges(actions)),
+        actions=dict(actions),
     )
     try:
         dag.topological_order()

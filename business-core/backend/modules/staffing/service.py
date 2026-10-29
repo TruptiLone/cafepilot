@@ -102,8 +102,9 @@ class StaffingService:
             raise EmployeeNotFoundError(employee_id)
         return employee
 
-    def schedule_shift(self, request: ShiftCreate) -> ShiftResult:
-        shift_id = f"shift_{uuid4().hex}"
+    def schedule_shift(self, request: ShiftCreate, shift_id: str | None = None) -> ShiftResult:
+        """``shift_id`` lets a caller retry safely: the same id can only be created once."""
+        shift_id = shift_id or f"shift_{uuid4().hex}"
         with self._transaction():
             self._require_cafe(request.cafe_id)
             employee = self._repository.get_employee(

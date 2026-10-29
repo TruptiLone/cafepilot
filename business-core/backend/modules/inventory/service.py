@@ -127,8 +127,9 @@ class InventoryService:
         if self._repository.get_cafe(cafe_id) is None:
             raise CafeNotFoundError(cafe_id)
 
-    def create_count(self, request: StockCountCreate) -> StockCount:
-        count_id = f"count_{uuid4().hex}"
+    def create_count(self, request: StockCountCreate, count_id: str | None = None) -> StockCount:
+        """``count_id`` lets a caller retry safely: the same id can only be created once."""
+        count_id = count_id or f"count_{uuid4().hex}"
         with self._transaction():
             self._require_cafe(request.cafe_id)
             ingredient_ids = {item.ingredient_id for item in request.items}

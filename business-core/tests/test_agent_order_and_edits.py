@@ -236,3 +236,33 @@ def test_api_returns_422_for_an_invalid_change(session: Session) -> None:
         app.dependency_overrides.clear()
     assert response.status_code == 422
     assert "start_at must be before end_at" in response.json()["detail"]
+
+
+# ---------- review findings: fail closed, matching evidence ------------------------
+
+
+def test_missing_recipe_blocks_the_order(session: Session) -> None:
+    from sqlalchemy import delete
+
+    from backend.modules.sales.models import RecipeLine
+
+    session.execute(delete(RecipeLine).where(RecipeLine.variation_id == _id("COF001_REG")))
+    session.flush()
+    short = _short_node()
+    short["args"]["items"] = _items() + [{"variation_id": _id("COF001_REG"), "quantity": 5}]
+    run_id = _start(session, [short, _order_node("$short.order_lines")])
+    calc, order = _node(session, run_id, "short"), _node(session, run_id, "order")
+    assert calc.status == "failed" and "no recipe for" in calc.error
+    assert order.status == "skipped"
+
+
+def test_coverage_for_another_day_is_not_evidence_for_the_shift() -> None:
+    nodes = _shift_nodes("TOC_SOFIA")
+    nodes[0]["args"].update(start_at="2026-10-30T08:00:00-07:00", end_at="2026-10-30T14:00:00-07:00")
+    result = validate_plan(_plan(nodes), CAFE, timezone=TZ)
+    assert [i.code for i in result.issues] == ["unrelated_prerequisite"]
+    assert "staff coverage" in result.issues[0].message
+
+
+def test_coverage_overlapping_the_shift_is_accepted() -> None:
+    assert validate_plan(_plan(_shift_nodes("TOC_SOFIA")), CAFE, timezone=TZ).valid

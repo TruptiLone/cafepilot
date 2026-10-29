@@ -34,6 +34,7 @@ IssueCode = Literal[
     "cycle",
     "wrong_time_offset",
     "unverified_quantity",
+    "unrelated_prerequisite",
 ]
 
 
@@ -153,6 +154,41 @@ def _check_order_quantities(node: PlanNode, by_id: dict[str, PlanNode], issues: 
         )
 
 
+def _window(args: dict[str, Any]) -> tuple[datetime, datetime] | None:
+    start, end = args.get("start_at"), args.get("end_at")
+    if not isinstance(start, str) or not isinstance(end, str) or parse_ref(start) or parse_ref(end):
+        return None
+    try:
+        return datetime.fromisoformat(start), datetime.fromisoformat(end)
+    except ValueError:
+        return None
+
+
+def _check_shift_evidence(node: PlanNode, nodes: list[PlanNode], issues: list[PlanIssue]) -> None:
+    """Coverage and shift checks must look at the same time as the shift being added.
+
+    A Friday coverage report is not evidence for a Sunday shift."""
+    if node.action != "schedule_shift":
+        return
+    shift = _window(node.args)
+    if shift is None:
+        return
+    for action, label in (("coverage_report", "staff coverage"), ("list_shifts", "existing shifts")):
+        windows = [_window(other.args) for other in nodes if other.action == action]
+        literal = [w for w in windows if w is not None]
+        if not literal or len(literal) < len(windows):
+            continue  # missing checks are reported elsewhere; $refs cannot be checked here
+        if not any(start < shift[1] and end > shift[0] for start, end in literal):
+            issues.append(
+                PlanIssue(
+                    "unrelated_prerequisite",
+                    f"the {label} check does not cover the shift time {shift[0].isoformat()} to "
+                    f"{shift[1].isoformat()}; check the same day and hours",
+                    node.id,
+                )
+            )
+
+
 def _check_args(node: PlanNode, issues: list[PlanIssue]) -> None:
     action = REGISTRY[node.action]
     model = action.input_model
@@ -209,6 +245,7 @@ def validate_plan(
     for node in known:
         _check_args(node, issues)
         _check_order_quantities(node, by_id, issues)
+        _check_shift_evidence(node, known, issues)
         if tz is not None:
             _check_offsets(node, tz, issues)
         node_cafe = node.args.get("cafe_id", cafe_id)

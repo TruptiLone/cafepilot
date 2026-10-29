@@ -186,6 +186,10 @@ class Action:
     approval: Approval = "none"
     # Optional: given resolved args, return a reason to skip the step instead of running it.
     skip_reason: Callable[[dict[str, Any]], str | None] | None = None
+    # Writes that create a record: the executor passes a stable id so a retry cannot duplicate it.
+    record_id_prefix: str | None = None
+    # Writes: return the already-applied result for these args (and record id), or None.
+    find_existing: Callable[[Session, Any, str | None], Any] | None = None
     _output_adapter: TypeAdapter = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -199,12 +203,58 @@ class Action:
     def output_schema(self) -> dict[str, Any]:
         return self._output_adapter.json_schema()
 
-    def run(self, session: Session, raw_args: dict[str, Any]) -> Any:
-        """Validate args, call the domain service, return JSON-safe output."""
-        params = self.input_model.model_validate(raw_args)
-        result = self.handler(session, params)
+    def _dump(self, result: Any) -> Any:
         validated = self._output_adapter.validate_python(result, from_attributes=True)
         return self._output_adapter.dump_python(validated, mode="json")
+
+    def run(self, session: Session, raw_args: dict[str, Any], *, record_id: str | None = None) -> Any:
+        """Validate args, call the domain service, return JSON-safe output."""
+        params = self.input_model.model_validate(raw_args)
+        if self.record_id_prefix is not None:
+            return self._dump(self.handler(session, params, record_id))
+        return self._dump(self.handler(session, params))
+
+    def existing(self, session: Session, raw_args: dict[str, Any], record_id: str | None) -> Any:
+        """JSON result of this write if it has already been applied, else None."""
+        if self.find_existing is None:
+            return None
+        params = self.input_model.model_validate(raw_args)
+        found = self.find_existing(session, params, record_id)
+        return None if found is None else self._dump(found)
+
+
+def _existing_shift(session: Session, p: ShiftCreate, record_id: str | None) -> Any:
+    if not record_id:
+        return None
+    try:
+        return StaffingService(session).get_shift(record_id, p.cafe_id)
+    except Exception:
+        return None
+
+
+def _existing_count(session: Session, p: StockCountCreate, record_id: str | None) -> Any:
+    if not record_id:
+        return None
+    try:
+        return InventoryService(session).get_count(record_id, p.cafe_id)
+    except Exception:
+        return None
+
+
+def _already_verified(session: Session, p: Any, _: str | None) -> Any:
+    try:
+        count = InventoryService(session).get_count(p.count_id, p.cafe_id)
+    except Exception:
+        return None
+    return count if count.status == "verified" else None
+
+
+def _already_cancelled(session: Session, p: Any, _: str | None) -> Any:
+    try:
+        shift = StaffingService(session).get_shift(p.shift_id, p.cafe_id)
+    except Exception:
+        return None
+    return shift if shift.status == "cancelled" else None
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +357,9 @@ _ACTIONS: list[Action] = [
         side_effect="write",
         input_model=StockCountCreate,
         output_type=StockCountResponse,
-        handler=lambda s, p: InventoryService(s).create_count(p),
+        handler=lambda s, p, record_id: InventoryService(s).create_count(p, count_id=record_id),
+        record_id_prefix="count",
+        find_existing=_existing_count,
         consumes=("ingredient_catalog", "stock_estimate"),
         produces=("stock_count",),
         approval="owner",
@@ -322,6 +374,7 @@ _ACTIONS: list[Action] = [
         handler=lambda s, p: InventoryService(s).verify_count(
             p.count_id, StockCountVerify(counted_at=p.counted_at), p.cafe_id
         ),
+        find_existing=_already_verified,
         consumes=("stock_count",),
         produces=("verified_stock_count",),
         requires=(("create_stock_count", "get_stock_count"),),
@@ -430,7 +483,9 @@ _ACTIONS: list[Action] = [
         side_effect="write",
         input_model=ShiftCreate,
         output_type=ShiftResponse,
-        handler=lambda s, p: StaffingService(s).schedule_shift(p),
+        handler=lambda s, p, record_id: StaffingService(s).schedule_shift(p, shift_id=record_id),
+        record_id_prefix="shift",
+        find_existing=_existing_shift,
         consumes=("employee_roster", "shift_schedule", "coverage"),
         produces=("scheduled_shift",),
         requires=(("coverage_report",), ("list_employees",), ("list_shifts",)),
@@ -444,6 +499,7 @@ _ACTIONS: list[Action] = [
         input_model=CancelShiftInput,
         output_type=ShiftResponse,
         handler=lambda s, p: StaffingService(s).cancel_shift(p.shift_id, p.cafe_id),
+        find_existing=_already_cancelled,
         consumes=("shift_schedule",),
         produces=("cancelled_shift",),
         requires=(("list_shifts",),),

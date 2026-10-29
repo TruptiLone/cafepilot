@@ -348,3 +348,70 @@ def test_api_approve_all(api, session: Session) -> None:
     run_id = http.post("/api/v1/agent/runs", json={"query": "x", "cafe_id": CAFE}).json()["run"]["run_id"]
     body = http.post(f"/api/v1/agent/runs/{run_id}/decision", json={"decision": "approved"}).json()
     assert body["status"] == "completed" and _shift_count(session) == 1
+
+
+# ---------- retry safety (review findings) ------------------------------------
+
+
+def test_write_interrupted_after_saving_is_adopted_not_repeated(session: Session) -> None:
+    """Server dies after the shift is saved but before the step is marked done."""
+    from backend.modules.agent.executor import record_id_for
+    from backend.modules.agent.registry import REGISTRY
+
+    run_id = _start(session, _staffing_plan())
+    node = _nodes(session, run_id)["add_barista"]
+    session.add(AgentApproval(approval_id="APR-TEST", run_id=run_id, node_id="add_barista", decision="approved",
+                              decided_by="owner", channel="web", decided_at=datetime.now(timezone.utc)))
+    # the write happens, then the process "crashes" leaving the step in 'running'
+    REGISTRY["schedule_shift"].run(session, node.resolved_args, record_id=record_id_for(node))
+    node.status = "running"
+    session.commit()
+    assert _shift_count(session) == 1
+
+    run = execute(session, run_id)  # resumed by any later call
+    node = _nodes(session, run_id)["add_barista"]
+    assert node.status == "done" and node.result["shift_id"] == record_id_for(node)
+    assert _shift_count(session) == 1
+    assert run.status == "completed"
+
+
+def test_retried_write_uses_the_same_record_id(session: Session) -> None:
+    from backend.modules.agent.executor import record_id_for
+
+    run_id = _start(session, _staffing_plan())
+    expected = record_id_for(_nodes(session, run_id)["add_barista"])
+    decide(session, run_id, "add_barista", "approved")
+    node = _nodes(session, run_id)["add_barista"]
+    assert node.result["shift_id"] == expected and expected.startswith("shift_agent_")
+    # a second attempt with the same id cannot create a second shift
+    from backend.modules.agent.registry import REGISTRY
+
+    with pytest.raises(Exception):
+        REGISTRY["schedule_shift"].run(session, node.resolved_args, record_id=expected)
+    session.rollback()
+    assert _shift_count(session) == 1
+
+
+def test_write_without_recorded_approval_is_refused(session: Session) -> None:
+    run_id = _start(session, _staffing_plan())
+    node = _nodes(session, run_id)["add_barista"]
+    node.status = "approved"  # status forged without an approval record
+    session.commit()
+    execute(session, run_id)
+    node = _nodes(session, run_id)["add_barista"]
+    assert node.status == "failed" and "no recorded owner approval" in node.error
+    assert _shift_count(session) == 0
+
+
+def test_cafe_always_comes_from_the_run(session: Session) -> None:
+    """Even if a stored step names another café, the executor uses the run's café."""
+    plan = Plan.model_validate({"status": "plan", "goal": "g", "nodes": _staffing_plan()})
+    run = create_run(session, query="q", cafe_id=CAFE, as_of=AS_OF, plan=plan,
+                     validation=validate_plan(plan, CAFE), model="m", attempts=1)
+    staff = next(n for n in run.nodes if n.node_id == "staff")
+    staff.args = {**staff.args, "cafe_id": "SOME_OTHER_CAFE"}
+    session.commit()
+    execute(session, run.run_id)
+    staff = _nodes(session, run.run_id)["staff"]
+    assert staff.status == "done" and staff.resolved_args["cafe_id"] == CAFE
+    assert {e["employee_id"] for e in staff.result} >= {"TEX_NOOR"}

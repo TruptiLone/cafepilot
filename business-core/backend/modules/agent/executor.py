@@ -184,6 +184,8 @@ def _prepare(session: Session, run: AgentPlanRun, node: AgentNodeRun, results: d
     """Resolve and re-validate a step's arguments. Returns False if the step failed."""
     try:
         resolved = resolve_args(node.args, results)
+        if "cafe_id" in REGISTRY[node.action].input_model.model_fields:
+            resolved["cafe_id"] = run.cafe_id  # scope comes from the run, never from the model
         skip_reason = REGISTRY[node.action].skip_reason
         reason = skip_reason(resolved) if skip_reason else None
         if reason:
@@ -219,15 +221,57 @@ def _replay_of(session: Session, run: AgentPlanRun, node: AgentNodeRun) -> Agent
     )
 
 
+def record_id_for(node: AgentNodeRun) -> str | None:
+    """Stable id for a record this write creates: same step + same arguments = same id."""
+    prefix = REGISTRY[node.action].record_id_prefix
+    if prefix is None:
+        return None
+    seed = f"{node.run_id}/{node.node_id}/{node.idempotency_key}"
+    return f"{prefix}_agent_{hashlib.sha256(seed.encode()).hexdigest()[:20]}"
+
+
+def _has_approval(session: Session, node: AgentNodeRun) -> bool:
+    return (
+        session.scalar(
+            select(AgentApproval.approval_id).where(
+                AgentApproval.run_id == node.run_id,
+                AgentApproval.node_id == node.node_id,
+                AgentApproval.decision == "approved",
+            )
+        )
+        is not None
+    )
+
+
 def _invoke(session: Session, node: AgentNodeRun) -> None:
+    action = REGISTRY[node.action]
+    args = node.resolved_args
+    if node.side_effect == "write" and node.requires_approval and not _has_approval(session, node):
+        _finish(node, "failed", error="refused: no recorded owner approval for this change")
+        return
+    record_id = record_id_for(node) if node.side_effect == "write" else None
+
+    # A previous attempt may have applied this write before the step was marked done
+    # (crash, lost response, double click). Adopt that result instead of writing again.
+    if node.side_effect == "write":
+        already = action.existing(session, args, record_id)
+        if already is not None:
+            node.result = already
+            _finish(node, "done")
+            return
+
     node.status = "running"
     node.started_at = _now()
     session.commit()  # services open their own transaction for writes
-    action, args = node.action, node.resolved_args
     try:
-        result = REGISTRY[action].run(session, args)
+        result = action.run(session, args, record_id=record_id)
     except Exception as error:  # domain errors are reported on the step, not raised
         session.rollback()
+        already = action.existing(session, args, record_id) if node.side_effect == "write" else None
+        if already is not None:  # a concurrent attempt won the race
+            node.result = already
+            _finish(node, "done")
+            return
         _finish(node, "failed", error=f"{type(error).__name__}: {error}")
         return
     node.result = result
@@ -241,6 +285,10 @@ def execute(session: Session, run_id: str) -> AgentPlanRun:
         progressed = False
         by_id = {node.node_id: node for node in run.nodes}
         for node in sorted(run.nodes, key=lambda n: (n.level, n.node_id)):
+            if node.status == "running":  # interrupted earlier: resume safely (writes adopt their record)
+                _invoke(session, node)
+                progressed = True
+                continue
             if node.status not in ("pending", "approved"):
                 continue
             upstream = [by_id[d] for d in node.depends_on]

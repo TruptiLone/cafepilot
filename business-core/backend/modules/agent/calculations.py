@@ -19,6 +19,10 @@ from backend.modules.sales.schemas import SaleItemV2Create, UsageProjectionReque
 from backend.modules.sales.service import SalesService
 
 QUANTITY = Decimal("0.001")
+
+
+class IncompleteRecipeError(ValueError):
+    """The product mix includes items without a recipe, so needs cannot be calculated."""
 DEFAULT_BUFFER_PCT = Decimal("10")
 
 
@@ -83,6 +87,12 @@ def calculate_shortfall(session: Session, params: ShortfallInput) -> ShortfallRe
     projection = SalesService(session).project_usage(
         UsageProjectionRequest(cafe_id=params.cafe_id, target_at=params.target_at, items=params.items)
     )
+    if projection.projection_status != "computed":
+        # Fail closed: an incomplete recipe understates every total, so no order is safe.
+        missing = ", ".join(projection.unmapped_variations) or "some items"
+        raise IncompleteRecipeError(
+            f"Can't work out the order: no recipe for {missing}. Add the recipe or remove it from the mix."
+        )
     estimates = {
         estimate.ingredient_id: estimate
         for estimate in InventoryService(session).list_stock_estimates(params.cafe_id, None, params.as_of)

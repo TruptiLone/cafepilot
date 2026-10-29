@@ -176,3 +176,12 @@ def test_simulated_supplier_order_rejects_wrong_unit(database_session: Session) 
                 "requested_delivery_at": datetime(2026, 11, 1, 14, tzinfo=timezone.utc).isoformat(),
             },
         )
+
+
+def test_superset_uses_the_registry_it_was_built_from() -> None:
+    from backend.modules.agent.superset import build_superset
+
+    subset = {name: REGISTRY[name] for name in ("list_employees", "list_shifts", "coverage_report", "schedule_shift")}
+    dag = build_superset(subset)
+    assert set(dag.topological_order()) == set(subset)
+    assert dag.required_predecessors("schedule_shift") == REGISTRY["schedule_shift"].requires

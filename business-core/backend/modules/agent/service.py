@@ -43,7 +43,7 @@ def plan_and_validate(
             last_error = error
             feedback = (error.raw_content or "", f"- [unparseable] {error}")
             continue
-        validation = validate_plan(result.plan, context.cafe_id)
+        validation = validate_plan(result.plan, context.cafe_id, timezone=context.timezone)
         done = validation.valid or result.plan.status != "plan" or attempt == max_attempts
         if done:
             return PlanningOutcome(result, validation, attempt)

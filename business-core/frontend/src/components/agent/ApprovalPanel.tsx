@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { type AgentRun, AgentApiError, decideAll, decideStep } from "../../api/agent";
+import ChangeForm, { canChange } from "./ChangeForm";
 import { describeChange, evidenceFor } from "./changes";
 import { actionLabel, conditionText } from "./labels";
 
@@ -14,15 +15,23 @@ type Pending = { nodeId: string | "all"; decision: "approved" | "rejected" } | n
 function ApprovalPanel({ run, onUpdated, onShowStep }: ApprovalPanelProps) {
   const [pending, setPending] = useState<Pending>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const waiting = run.nodes.filter((step) => step.status === "awaiting_approval");
   if (waiting.length === 0) return null;
 
-  async function decide(nodeId: string | "all", decision: "approved" | "rejected") {
+  async function decide(
+    nodeId: string | "all",
+    decision: "approved" | "rejected",
+    editedArgs?: Record<string, unknown>,
+  ) {
     setPending({ nodeId, decision });
     setError(null);
     try {
       const updated =
-        nodeId === "all" ? await decideAll(run.run_id, decision) : await decideStep(run.run_id, nodeId, decision);
+        nodeId === "all"
+          ? await decideAll(run.run_id, decision)
+          : await decideStep(run.run_id, nodeId, decision, editedArgs);
+      setEditing(null);
       onUpdated(updated);
     } catch (caught) {
       setError(
@@ -73,27 +82,53 @@ function ApprovalPanel({ run, onUpdated, onShowStep }: ApprovalPanelProps) {
                   ))}
                 </ul>
               )}
-              <div className="approval-card__actions">
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={busy}
-                  onClick={() => decide(step.node_id, "approved")}
-                >
-                  {isThis && pending?.decision === "approved" ? "Approving…" : "Approve"}
-                </button>
-                <button
-                  type="button"
-                  className="secondary-button"
-                  disabled={busy}
-                  onClick={() => decide(step.node_id, "rejected")}
-                >
-                  {isThis && pending?.decision === "rejected" ? "Declining…" : "Decline"}
-                </button>
-                <button type="button" className="text-button" onClick={() => onShowStep(step.node_id)}>
-                  Show details
-                </button>
-              </div>
+              {editing === step.node_id ? (
+                <ChangeForm
+                  step={step}
+                  run={run}
+                  busy={busy}
+                  onSubmit={(edited) => decide(step.node_id, "approved", edited)}
+                  onCancel={() => {
+                    setEditing(null);
+                    setError(null);
+                  }}
+                />
+              ) : (
+                <div className="approval-card__actions">
+                  <button
+                    type="button"
+                    className="primary-button"
+                    disabled={busy}
+                    onClick={() => decide(step.node_id, "approved")}
+                  >
+                    {isThis && pending?.decision === "approved" ? "Approving…" : "Approve"}
+                  </button>
+                  {canChange(step) && (
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      disabled={busy}
+                      onClick={() => {
+                        setEditing(step.node_id);
+                        setError(null);
+                      }}
+                    >
+                      Change
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    disabled={busy}
+                    onClick={() => decide(step.node_id, "rejected")}
+                  >
+                    {isThis && pending?.decision === "rejected" ? "Declining…" : "Decline"}
+                  </button>
+                  <button type="button" className="text-button" onClick={() => onShowStep(step.node_id)}>
+                    Show details
+                  </button>
+                </div>
+              )}
             </li>
           );
         })}

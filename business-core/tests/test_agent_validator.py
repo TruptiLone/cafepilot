@@ -37,7 +37,7 @@ def _node(payload: dict, node_id: str) -> dict:
 def test_mock_hero_plan_is_valid_with_reads_before_writes() -> None:
     result = _validate(_plan())
     assert result.valid, result.issues
-    assert result.levels[0] == ["coverage", "demand", "shifts", "staff", "stock"]
+    assert result.levels[0] == ["coverage", "demand", "shifts", "short", "staff", "stock"]
     assert result.levels[1] == ["add_barista", "order"]
     writes = {n.id for n in result.nodes if n.requires_approval}
     assert writes == {"add_barista", "order"}
@@ -47,7 +47,8 @@ def test_safety_edges_are_added_even_without_refs() -> None:
     result = _validate(_plan())
     safety = {(e.source, e.target) for e in result.edges if e.kind == "safety"}
     assert {("coverage", "add_barista"), ("staff", "add_barista"), ("shifts", "add_barista")} <= safety
-    assert ("stock", "order") in safety
+    data = {(e.source, e.target) for e in result.edges if e.kind == "data"}
+    assert ("short", "order") in data  # the order's lines come from the shortfall step
 
 
 def test_live_hero_plan_is_valid_if_present() -> None:

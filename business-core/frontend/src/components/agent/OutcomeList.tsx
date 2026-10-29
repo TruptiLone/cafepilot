@@ -25,12 +25,13 @@ function OutcomeList({ run }: { run: AgentRun }) {
           if (step.replay_of) prefix = "Already done earlier, not repeated";
           else if (step.status === "rejected") prefix = "You declined";
           else if (step.status === "failed") prefix = "Could not complete";
-          else if (step.status === "skipped") prefix = "Skipped";
+          else if (step.status === "skipped")
+            prefix = step.error && !step.error.startsWith("skipped because") ? "Not needed" : "Skipped";
           return (
             <li key={step.node_id} className={`outcome-list__item outcome-list__item--${step.status}`}>
               <span>
                 <strong>{prefix}:</strong> {describeChange(step, run)}
-                {step.status === "failed" && step.error ? `. ${step.error}` : ""}
+                {(step.status === "failed" || prefix === "Not needed") && step.error ? `. ${step.error}` : ""}
               </span>
               {step.status === "done" && link && <Link to={link.to}>{link.label}</Link>}
             </li>

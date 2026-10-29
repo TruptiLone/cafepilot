@@ -25,7 +25,7 @@ APPLICATION_TABLES = {
     "agent_node_runs",
     "agent_approvals",
 }
-REVISION = "535a8fcd0233"
+REVISION = "187ca310b8ac"
 
 pytestmark = pytest.mark.database
 

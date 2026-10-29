@@ -38,7 +38,7 @@ function timeRange(start: unknown, end: unknown): string {
   return `${formatDay(startText)}, ${formatClock(startText)}–${formatClock(endText)}`;
 }
 
-function formatQuantity(value: unknown, unit: unknown): string {
+export function formatQuantity(value: unknown, unit: unknown): string {
   const number = Number(value);
   const unitText = text(unit);
   if (Number.isNaN(number)) return `${text(value)} ${unitText}`.trim();
@@ -48,20 +48,25 @@ function formatQuantity(value: unknown, unit: unknown): string {
 }
 
 /** Every row any finished step returned for one of these actions. */
-function resultsOf(run: AgentRun, action: string): Row[] {
+export function resultsOf(run: AgentRun, action: string): Row[] {
   return run.nodes
     .filter((node) => node.action === action && node.status === "done")
     .flatMap((node) => (Array.isArray(node.result) ? asRows(node.result) : asRows([node.result])));
 }
 
-function employeeName(run: AgentRun, employeeId: string): string {
+export function employeeName(run: AgentRun, employeeId: string): string {
   const fromStaff = resultsOf(run, "list_employees").find((row) => row.employee_id === employeeId);
   if (fromStaff) return text(fromStaff.name);
   const fromShifts = resultsOf(run, "list_shifts").find((row) => row.employee_id === employeeId);
   return fromShifts ? text(fromShifts.employee_name) : employeeId;
 }
 
-function ingredientName(run: AgentRun, ingredientId: string): string {
+export function ingredientName(run: AgentRun, ingredientId: string): string {
+  const fromShortfall = run.nodes
+    .filter((node) => node.action === "calculate_shortfall" && node.status === "done")
+    .flatMap((node) => asRows((node.result as Row | undefined)?.lines))
+    .find((row) => row.ingredient_id === ingredientId);
+  if (fromShortfall) return text(fromShortfall.name);
   for (const action of ["get_stock_estimates", "list_ingredients"]) {
     const row = resultsOf(run, action).find((item) => item.ingredient_id === ingredientId);
     if (row) return text(row.name);
@@ -144,6 +149,24 @@ export function evidenceFor(step: RunStep, run: AgentRun): string[] {
   }
 
   if (step.action === "propose_supplier_order") {
+    const shortfall = run.nodes.find((node) => node.action === "calculate_shortfall" && node.status === "done");
+    const shortLines = asRows((shortfall?.result as Row | undefined)?.lines);
+    if (shortLines.length > 0) {
+      const pct = text((shortfall?.result as Row).buffer_pct);
+      for (const line of asRows(args.lines)) {
+        const calc = shortLines.find((row) => row.ingredient_id === line.ingredient_id);
+        if (!calc) continue;
+        const unit = calc.unit;
+        facts.push(
+          `${text(calc.name)}: need ${formatQuantity(calc.needed, unit)} + ${pct}% buffer ` +
+            `${formatQuantity(calc.buffer, unit)} = ${formatQuantity(calc.needed_with_buffer, unit)}; ` +
+            `on hand ${formatQuantity(calc.on_hand, unit)} → order ${formatQuantity(calc.order_quantity, unit)}.`,
+        );
+      }
+      const unknown = shortLines.filter((row) => row.status === "unknown_stock").map((row) => text(row.name));
+      if (unknown.length > 0) facts.push(`Stock unknown, not ordered: ${unknown.join(", ")}. Count these first.`);
+      return facts;
+    }
     const demand = run.nodes.find((node) => node.action === "project_recipe_usage" && node.status === "done");
     const needed = asRows((demand?.result as Row | undefined)?.ingredients);
     const stock = resultsOf(run, "get_stock_estimates");

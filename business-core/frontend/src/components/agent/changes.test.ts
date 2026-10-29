@@ -119,3 +119,33 @@ describe("evidenceFor a shift", () => {
     expect(evidenceFor(shift, run)).toEqual(["Ethan already works Sun, Nov 1, 12 PM–4 PM, so this would overlap."]);
   });
 });
+
+describe("evidence for an order computed in code", () => {
+  it("shows need, buffer, stock and the order line by line", () => {
+    const order = node({
+      action: "propose_supplier_order",
+      side_effect: "write",
+      resolved_args: { lines: [{ ingredient_id: "WHOLE_MILK", quantity: "2560", unit: "mL" }] },
+    });
+    const run = runWith([
+      node({
+        action: "calculate_shortfall",
+        result: {
+          buffer_pct: "10",
+          lines: [
+            { ingredient_id: "WHOLE_MILK", name: "Whole Milk", unit: "mL", needed: "9600.000", buffer: "960.000",
+              needed_with_buffer: "10560.000", on_hand: "8000.000", order_quantity: "2560", status: "short" },
+            { ingredient_id: "ALMOND_MILK", name: "Almond Milk", unit: "mL", needed: "500.000", buffer: "50.000",
+              needed_with_buffer: "550.000", on_hand: null, order_quantity: null, status: "unknown_stock" },
+          ],
+        },
+      }),
+      order,
+    ]);
+    expect(describeChange(order, run)).toBe("Order 2.56 L Whole Milk (simulated supplier)");
+    expect(evidenceFor(order, run)).toEqual([
+      "Whole Milk: need 9.6 L + 10% buffer 960 mL = 10.56 L; on hand 8 L → order 2.56 L.",
+      "Stock unknown, not ordered: Almond Milk. Count these first.",
+    ]);
+  });
+});

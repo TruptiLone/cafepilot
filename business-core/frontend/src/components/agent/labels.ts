@@ -1,4 +1,4 @@
-import type { RunStatus, StepStatus } from "../../api/agent";
+import type { AgentRun, RunStatus, StepStatus } from "../../api/agent";
 
 const ACTION_LABELS: Record<string, string> = {
   list_ingredients: "List ingredients",
@@ -16,6 +16,7 @@ const ACTION_LABELS: Record<string, string> = {
   list_employees: "List staff",
   list_shifts: "Check existing shifts",
   coverage_report: "Check staff coverage",
+  calculate_shortfall: "Work out what to order",
   schedule_shift: "Add a shift",
   cancel_shift: "Cancel a shift",
   propose_supplier_order: "Order from supplier",
@@ -40,8 +41,22 @@ export const RUN_STATUS_LABELS: Record<RunStatus, string> = {
   running: "Working",
   awaiting_approval: "Waiting for you",
   completed: "Done",
-  completed_with_issues: "Finished with issues",
+  completed_with_issues: "Finished, not every step ran",
 };
+
+/** Status for a full run: tells "you said no" apart from "something broke". */
+export function runStatusLabel(run: AgentRun): { label: string; tone: string } {
+  if (run.status !== "completed_with_issues") {
+    return { label: RUN_STATUS_LABELS[run.status], tone: run.status };
+  }
+  if (run.nodes.some((step) => step.status === "failed")) {
+    return { label: "Finished with issues", tone: "completed_with_issues" };
+  }
+  const writesDone = run.nodes.some((step) => step.side_effect === "write" && step.status === "done");
+  return writesDone
+    ? { label: "Done, some changes declined", tone: "completed_partial" }
+    : { label: "No changes made", tone: "completed_none" };
+}
 
 export function conditionText(text: string): string {
   return text.replace(/^\s*approve\s+only\s+if:?\s*/i, "");

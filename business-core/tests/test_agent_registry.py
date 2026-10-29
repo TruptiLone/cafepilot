@@ -76,7 +76,7 @@ def test_superset_is_acyclic_and_orders_every_action() -> None:
         ("list_shifts", "schedule_shift"),
         ("list_shifts", "cancel_shift"),
         ("get_stock_estimates", "record_inventory_movement"),
-        ("get_stock_estimates", "propose_supplier_order"),
+        ("calculate_shortfall", "propose_supplier_order"),
         ("create_stock_count", "verify_stock_count"),
         ("get_stock_count", "verify_stock_count"),
     ],
@@ -90,6 +90,7 @@ def test_safety_edges(upstream: str, downstream: str) -> None:
     [
         ("list_products", "project_recipe_usage"),
         ("project_recipe_usage", "propose_supplier_order"),
+        ("calculate_shortfall", "propose_supplier_order"),
         ("propose_supplier_order", "record_inventory_movement"),
         ("list_ingredients", "get_stock_estimates"),
     ],

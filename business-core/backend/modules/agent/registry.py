@@ -21,6 +21,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from sqlalchemy.orm import Session
 
+from backend.modules.agent.calculations import (
+    ShortfallInput,
+    ShortfallResult,
+    calculate_shortfall,
+)
 from backend.modules.inventory.schemas import (
     InventoryItemResponse,
     InventoryMovementCreate,
@@ -179,6 +184,8 @@ class Action:
     # Each inner tuple is an any-of group; every group must be satisfied upstream.
     requires: tuple[tuple[str, ...], ...] = ()
     approval: Approval = "none"
+    # Optional: given resolved args, return a reason to skip the step instead of running it.
+    skip_reason: Callable[[dict[str, Any]], str | None] | None = None
     _output_adapter: TypeAdapter = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -442,22 +449,40 @@ _ACTIONS: list[Action] = [
         requires=(("list_shifts",),),
         approval="owner",
     ),
+    # ---- Order math (code, not the model)
+    Action(
+        name="calculate_shortfall",
+        description=(
+            "Read-only order math: need for the extra product mix (recipes) + buffer (café policy %) "
+            "- usable stock as_of = quantity to order, per ingredient. Returns order_lines ready for "
+            "propose_supplier_order and lists ingredients whose stock is unknown."
+        ),
+        domain="purchasing",
+        side_effect="read",
+        input_model=ShortfallInput,
+        output_type=ShortfallResult,
+        handler=calculate_shortfall,
+        consumes=("menu_catalog", "stock_estimate", "ingredient_demand"),
+        produces=("order_suggestion",),
+    ),
     # ---- Purchasing (simulated)
     Action(
         name="propose_supplier_order",
         description=(
-            "SIMULATED supplier order. Validates ingredients and base units and returns a "
-            "labeled simulated confirmation. No real order is placed."
+            "SIMULATED supplier order. lines MUST be \"$<calculate_shortfall step>.order_lines\" "
+            "so quantities come from code. Validates ingredients and units and returns a labeled "
+            "simulated confirmation. No real order is placed."
         ),
         domain="purchasing",
         side_effect="write",
         input_model=SupplierOrderInput,
         output_type=SupplierOrderResponse,
         handler=_simulate_supplier_order,
-        consumes=("stock_estimate", "ingredient_demand"),
+        consumes=("stock_estimate", "ingredient_demand", "order_suggestion"),
         produces=("supplier_order",),
-        requires=(("get_stock_estimates",),),
+        requires=(("calculate_shortfall",),),
         approval="owner",
+        skip_reason=lambda args: None if args.get("lines") else "Nothing to order: stock covers the need.",
     ),
 ]
 

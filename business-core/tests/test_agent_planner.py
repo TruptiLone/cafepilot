@@ -93,7 +93,7 @@ def test_fixture_plan_parses_and_uses_only_registered_actions() -> None:
 
 def test_parse_accepts_code_fences() -> None:
     plan = parse_plan("```json\n" + _hero_json() + "\n```")
-    assert len(plan.nodes) == 7
+    assert len(plan.nodes) == 8
 
 
 @pytest.mark.parametrize(
@@ -212,7 +212,7 @@ def test_plan_endpoint_rejects_other_cafe_plan_after_one_retry(client_factory) -
     assert response.status_code == 200
     body = response.json()
     assert body["plan"]["status"] == "plan"
-    assert len(body["plan"]["nodes"]) == 7
+    assert len(body["plan"]["nodes"]) == 8
     assert body["as_of"].startswith("2026-10-29T18:00:00")
     # The fixture targets CAFE001, so the validator rejects it and the model gets one retry.
     assert body["validation"]["valid"] is False

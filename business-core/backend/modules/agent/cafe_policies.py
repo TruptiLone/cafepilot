@@ -14,6 +14,7 @@ CAFE_POLICIES: dict[str, dict[str, Any]] = {
             "note": "Use busy_event_required_staff for markets, festivals and large catering days.",
         },
         "ordering": {
+            "buffer_pct": 10,
             "simulated_supplier_id": "SIM_SUPPLIER",
             "latest_delivery_before_opening": "06:00",
         },

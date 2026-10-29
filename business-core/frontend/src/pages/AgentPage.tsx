@@ -13,7 +13,7 @@ import ApprovalPanel from "../components/agent/ApprovalPanel";
 import OutcomeList from "../components/agent/OutcomeList";
 import StepDetail from "../components/agent/StepDetail";
 import TicketRail from "../components/agent/TicketRail";
-import { RUN_STATUS_LABELS } from "../components/agent/labels";
+import { RUN_STATUS_LABELS, runStatusLabel } from "../components/agent/labels";
 
 const EXAMPLE_REQUEST =
   "Farmers market this Sunday Nov 1, 8 AM-2 PM. Expect about 40 extra whole-milk lattes and 20 extra " +
@@ -172,8 +172,8 @@ function AgentPage() {
               <p className="run-view__request">“{run.query}”</p>
               <h2 className="run-view__goal">{run.goal}</h2>
             </div>
-            <span className={`run-status run-status--${run.status}`}>
-              {RUN_STATUS_LABELS[run.status]}
+            <span className={`run-status run-status--${runStatusLabel(run).tone}`}>
+              {runStatusLabel(run).label}
               {waiting > 0 && `: ${waiting} ${waiting === 1 ? "change" : "changes"}`}
             </span>
           </header>

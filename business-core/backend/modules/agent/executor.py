@@ -46,6 +46,10 @@ class ApprovalStateError(RuntimeError):
     """The step cannot be decided on (not a write, or not waiting yet)."""
 
 
+class EditValidationError(ValueError):
+    """The owner's changes do not pass the action's rules."""
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -180,6 +184,12 @@ def _prepare(session: Session, run: AgentPlanRun, node: AgentNodeRun, results: d
     """Resolve and re-validate a step's arguments. Returns False if the step failed."""
     try:
         resolved = resolve_args(node.args, results)
+        skip_reason = REGISTRY[node.action].skip_reason
+        reason = skip_reason(resolved) if skip_reason else None
+        if reason:
+            node.resolved_args = resolved
+            _finish(node, "skipped", error=reason)
+            return False
         REGISTRY[node.action].input_model.model_validate(resolved)
     except (KeyError, IndexError, TypeError) as error:
         _finish(node, "failed", error=f"could not resolve arguments: {error}")
@@ -283,9 +293,14 @@ def decide(
     decided_by: str = "owner",
     channel: str = "web",
     note: str | None = None,
+    edited_args: dict[str, Any] | None = None,
 ) -> AgentPlanRun:
+    """Approve or reject a waiting write. ``edited_args`` (approve only) replaces fields of
+    the step's arguments; the result is re-validated like any model-proposed step."""
     if decision not in ("approved", "rejected"):
         raise ValueError("decision must be approved or rejected")
+    if edited_args and decision != "approved":
+        raise EditValidationError("changes can only be made when approving")
     run = get_run(session, run_id)
     node = next((n for n in run.nodes if n.node_id == node_id), None)
     if node is None:
@@ -300,6 +315,20 @@ def decide(
             return run  # double click / repeated voice command: no-op
         raise ApprovalStateError(f"{node_id} is {node.status}, not waiting for approval")
 
+    original = dict(node.resolved_args or {})
+    edited: dict[str, Any] | None = None
+    if edited_args:
+        edited = {**original, **{k: v for k, v in edited_args.items() if k != "cafe_id"}}
+        try:
+            validated = REGISTRY[node.action].input_model.model_validate(edited)
+        except ValidationError as error:
+            details = "; ".join(
+                f"{'.'.join(str(p) for p in e['loc'])}: {e['msg']}" for e in error.errors()[:3]
+            )
+            raise EditValidationError(f"Your changes are not valid: {details}") from error
+        edited = validated.model_dump(mode="json", exclude_unset=False)
+        edited = {k: v for k, v in edited.items() if k in original or k in edited_args}
+
     session.add(
         AgentApproval(
             approval_id=f"APR-{uuid4().hex[:12].upper()}",
@@ -309,9 +338,14 @@ def decide(
             decided_by=decided_by,
             channel=channel,
             note=note,
+            original_args=original if edited is not None else None,
+            edited_args=edited,
             decided_at=_now(),
         )
     )
+    if edited is not None and edited != original:
+        node.resolved_args = edited
+        node.idempotency_key = write_fingerprint(run.cafe_id, node.action, edited)
     if decision == "approved":
         node.status = "approved"
     else:

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Literal
 
@@ -30,6 +32,8 @@ IssueCode = Literal[
     "missing_prerequisite",
     "cafe_mismatch",
     "cycle",
+    "wrong_time_offset",
+    "unverified_quantity",
 ]
 
 
@@ -97,6 +101,58 @@ def find_refs(value: Any) -> list[tuple[str, str]]:
 # ---------------------------------------------------------------------------
 
 
+_TIME_KEY = re.compile(r"(_at|^as_of)$")
+
+
+def _timestamps(value: Any, path: str = "") -> list[tuple[str, str]]:
+    if isinstance(value, dict):
+        return [item for key, child in value.items() for item in _timestamps(child, f"{path}.{key}" if path else key)]
+    if isinstance(value, list):
+        return [item for index, child in enumerate(value) for item in _timestamps(child, f"{path}[{index}]")]
+    key = path.rsplit(".", 1)[-1]
+    if isinstance(value, str) and _TIME_KEY.search(key) and parse_ref(value) is None:
+        return [(path, value)]
+    return []
+
+
+def _check_offsets(node: PlanNode, tz: ZoneInfo, issues: list[PlanIssue]) -> None:
+    """A timestamp's offset must be the café's real offset at that moment (DST-safe)."""
+    for path, text in _timestamps(node.args):
+        try:
+            moment = datetime.fromisoformat(text)
+        except ValueError:
+            continue  # schema validation reports malformed timestamps
+        if moment.tzinfo is None:
+            continue
+        expected = moment.astimezone(tz).utcoffset()
+        if moment.utcoffset() != expected:
+            hours = expected.total_seconds() / 3600
+            correct = moment.replace(tzinfo=None).isoformat() + f"{'+' if hours >= 0 else '-'}{abs(int(hours)):02d}:00"
+            issues.append(
+                PlanIssue(
+                    "wrong_time_offset",
+                    f"{path}={text} uses the wrong UTC offset for {moment.date()} in {tz.key}; "
+                    f"local {moment.strftime('%H:%M')} that day is {correct}",
+                    node.id,
+                )
+            )
+
+
+def _check_order_quantities(node: PlanNode, by_id: dict[str, PlanNode], issues: list[PlanIssue]) -> None:
+    if node.action != "propose_supplier_order":
+        return
+    ref = parse_ref(node.args.get("lines"))
+    source = by_id.get(ref[0]) if ref else None
+    if not ref or ref[1] != ".order_lines" or source is None or source.action != "calculate_shortfall":
+        issues.append(
+            PlanIssue(
+                "unverified_quantity",
+                'order quantities must come from code: set lines to "$<calculate_shortfall step>.order_lines"',
+                node.id,
+            )
+        )
+
+
 def _check_args(node: PlanNode, issues: list[PlanIssue]) -> None:
     action = REGISTRY[node.action]
     model = action.input_model
@@ -128,9 +184,13 @@ def _check_args(node: PlanNode, issues: list[PlanIssue]) -> None:
 
 
 def validate_plan(
-    plan: Plan, cafe_id: str, superset: SupersetDAG | None = None
+    plan: Plan,
+    cafe_id: str,
+    superset: SupersetDAG | None = None,
+    timezone: str | None = None,
 ) -> ValidationResult:
     superset = superset or get_superset()
+    tz = ZoneInfo(timezone) if timezone else None
     if plan.status != "plan":
         return ValidationResult(
             valid=False,
@@ -148,6 +208,9 @@ def validate_plan(
 
     for node in known:
         _check_args(node, issues)
+        _check_order_quantities(node, by_id, issues)
+        if tz is not None:
+            _check_offsets(node, tz, issues)
         node_cafe = node.args.get("cafe_id", cafe_id)
         if parse_ref(node_cafe) is None and node_cafe != cafe_id:
             issues.append(

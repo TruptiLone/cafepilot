@@ -120,4 +120,6 @@ class AgentApproval(Base):
     decided_by: Mapped[str] = mapped_column(Text, nullable=False)
     channel: Mapped[str] = mapped_column(Text, nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_args: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    edited_args: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -19,6 +19,7 @@ from backend.modules.agent.planner import (
 )
 from backend.modules.agent.executor import (
     ApprovalStateError,
+    EditValidationError,
     NodeNotFoundError,
     RunNotFoundError,
     create_run,
@@ -174,6 +175,9 @@ class DecisionRequest(BaseModel):
     decided_by: str = Field(default="owner", min_length=1, max_length=100)
     channel: Literal["web", "voice", "glasses", "api"] = "web"
     note: str | None = Field(default=None, max_length=500)
+    edited_args: dict[str, Any] | None = Field(
+        default=None, description="Approve with changes: fields that replace the step's arguments."
+    )
 
 
 @router.post("/runs", response_model=CreateRunResponse)
@@ -256,7 +260,10 @@ def decide_step(
             decided_by=request.decided_by,
             channel=request.channel,
             note=request.note,
+            edited_args=request.edited_args,
         )
+    except EditValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except NodeNotFoundError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found") from error
     except ApprovalStateError as error:

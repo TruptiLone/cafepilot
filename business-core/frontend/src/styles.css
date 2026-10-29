@@ -3027,3 +3027,70 @@ h1 {
   padding: 8px 16px;
   font-size: 0.88rem;
 }
+
+.run-status--completed_partial {
+  color: var(--step-done);
+  background: var(--step-done-soft);
+}
+
+.run-status--completed_none {
+  color: #55534d;
+  background: #f1f1ef;
+}
+
+.change-form {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  background: var(--soft);
+  border-radius: 10px;
+}
+
+.change-form__row {
+  display: grid;
+  grid-template-columns: minmax(90px, 140px) minmax(0, 220px) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.change-form__row label {
+  color: #262521;
+  font-size: 0.9rem;
+  font-weight: 620;
+}
+
+.change-form__row input,
+.change-form__row select {
+  min-height: 36px;
+  padding: 6px 10px;
+  color: #191918;
+  background: #fff;
+  border: 1px solid #dddcd7;
+  border-radius: 8px;
+  font: inherit;
+}
+
+.change-form__unit {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.change-form__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.change-form__actions .primary-button,
+.change-form__actions .secondary-button {
+  min-height: 38px;
+  padding: 8px 16px;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 560px) {
+  .change-form__row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}

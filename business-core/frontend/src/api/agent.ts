@@ -136,10 +136,11 @@ export function decideStep(
   runId: string,
   nodeId: string,
   decision: "approved" | "rejected",
+  editedArgs?: Record<string, unknown>,
 ): Promise<AgentRun> {
   return requestJson<AgentRun>(
     `/api/v1/agent/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/decision`,
-    json({ decision, channel: "web" }),
+    json({ decision, channel: "web", ...(editedArgs ? { edited_args: editedArgs } : {}) }),
   );
 }
 

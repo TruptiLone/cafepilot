@@ -307,4 +307,59 @@ describe("AgentPage", () => {
     expect((await within(panel).findByRole("alert")).textContent).toContain("not waiting for approval");
     expect(within(panel).getByRole("button", { name: "Approve" })).toBeTruthy();
   });
+
+  it("changes the person and start time before approving a shift", async () => {
+    const fetchMock = mockApi();
+    renderPage("/agent?run=RUN-1");
+    const panel = await screen.findByRole("region", { name: "One change needs your OK" });
+    await userEvent.click(within(panel).getByRole("button", { name: "Change" }));
+
+    const form = within(panel).getByRole("form", { name: "Change the shift" });
+    expect((within(form).getByLabelText("Who") as HTMLSelectElement).value).toBe("DEMO_EMP_004");
+    const start = within(form).getByLabelText("Starts") as HTMLInputElement;
+    expect(start.value).toBe("07:30");
+    await userEvent.clear(start);
+    await userEvent.type(start, "08:00");
+    await userEvent.click(within(form).getByRole("button", { name: "Approve with changes" }));
+
+    await screen.findByRole("region", { name: "What happened" });
+    const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/nodes/add_barista/decision"));
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      decision: "approved",
+      channel: "web",
+      edited_args: {
+        employee_id: "DEMO_EMP_004",
+        start_at: "2026-11-01T08:00:00-08:00",
+        end_at: "2026-11-01T14:30:00-08:00",
+      },
+    });
+  });
+
+  it("keeps the change form open and explains when a change is not valid", async () => {
+    mockApi(undefined, { status: 422, detail: "Your changes are not valid: start_at must be before end_at" });
+    renderPage("/agent?run=RUN-1");
+    const panel = await screen.findByRole("region", { name: "One change needs your OK" });
+    await userEvent.click(within(panel).getByRole("button", { name: "Change" }));
+    await userEvent.click(within(panel).getByRole("button", { name: "Approve with changes" }));
+
+    expect((await within(panel).findByRole("alert")).textContent).toContain("start_at must be before end_at");
+    expect(within(panel).getByRole("form", { name: "Change the shift" })).toBeTruthy();
+    await userEvent.click(within(panel).getByRole("button", { name: "Cancel" }));
+    expect(within(panel).getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("says no changes were made when everything was declined", async () => {
+    const declined: AgentRun = {
+      ...run,
+      status: "completed_with_issues",
+      nodes: run.nodes.map((node) =>
+        node.side_effect === "write" ? { ...node, status: "rejected", error: "rejected by owner" } : node,
+      ),
+    };
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) =>
+      String(input).startsWith("/api/v1/agent/runs?") ? jsonResponse([]) : jsonResponse(declined),
+    ));
+    renderPage("/agent?run=RUN-1");
+    expect(await screen.findByText("No changes made", { selector: ".run-status" })).toBeTruthy();
+  });
 });

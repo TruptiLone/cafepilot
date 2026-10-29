@@ -21,8 +21,11 @@ APPLICATION_TABLES = {
     "stock_count_lines",
     "inventory_movements",
     "modifier_recipe_effects",
+    "agent_plan_runs",
+    "agent_node_runs",
+    "agent_approvals",
 }
-REVISION = "f7a3c9e4b812"
+REVISION = "187ca310b8ac"
 
 pytestmark = pytest.mark.database
 

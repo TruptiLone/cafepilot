@@ -1,0 +1,105 @@
+{
+  "query": "Farmers market this Sunday Nov 1, 8 AM-2 PM, roughly 40 extra whole-milk lattes and 20 extra oat-milk lattes. Check milk and bean stock as of Thursday 6 PM, check Sunday staff coverage, and add a barista 7:30 AM-2:30 PM if we're short.",
+  "as_of": "2026-10-29T18:00:00-07:00",
+  "model": "muse-spark-1.3",
+  "latency_ms": 14875,
+  "plan": {
+    "status": "plan",
+    "goal": "Prep milk, beans and staffing for Sunday farmers market latte surge.",
+    "assumptions": [
+      "Extra lattes assumed Regular 12 oz Latte (COF003_REG) - 40x with MILK_WHOLE, 20x with MILK_OAT",
+      "Stock view uses Thursday 6 PM cutoff 2026-10-29T18:00:00-07:00",
+      "Sunday coverage threshold is 2 staff for 8 AM-2 PM event",
+      "Ethan Patel (DEMO_EMP_004 barista) assumed available for 7:30 AM-2:30 PM"
+    ],
+    "question": null,
+    "nodes": [
+      {
+        "id": "stock_thursday_pm",
+        "action": "get_stock_estimates",
+        "args": {
+          "cafe_id": "CAFE001",
+          "as_of": "2026-10-29T18:00:00-07:00"
+        },
+        "reason": "Check milk and bean stock as of Thursday 6 PM",
+        "only_if": null
+      },
+      {
+        "id": "latte_usage_projection",
+        "action": "project_recipe_usage",
+        "args": {
+          "cafe_id": "CAFE001",
+          "target_at": "2026-11-01T08:00:00-08:00",
+          "items": [
+            {
+              "variation_id": "COF003_REG",
+              "quantity": 40,
+              "modifiers": [
+                {
+                  "modifier_id": "MILK_WHOLE",
+                  "quantity": 1
+                }
+              ]
+            },
+            {
+              "variation_id": "COF003_REG",
+              "quantity": 20,
+              "modifiers": [
+                {
+                  "modifier_id": "MILK_OAT",
+                  "quantity": 1
+                }
+              ]
+            }
+          ]
+        },
+        "reason": "Estimate milk and bean needs for 60 extra lattes",
+        "only_if": null
+      },
+      {
+        "id": "sunday_coverage",
+        "action": "coverage_report",
+        "args": {
+          "cafe_id": "CAFE001",
+          "start_at": "2026-11-01T08:00:00-08:00",
+          "end_at": "2026-11-01T14:00:00-08:00",
+          "required_staff": 2
+        },
+        "reason": "Check Sunday 8 AM-2 PM staff coverage for market surge",
+        "only_if": null
+      },
+      {
+        "id": "list_staff",
+        "action": "list_employees",
+        "args": {
+          "cafe_id": "CAFE001"
+        },
+        "reason": "Find barista candidates for extra shift",
+        "only_if": null
+      },
+      {
+        "id": "list_sunday_shifts",
+        "action": "list_shifts",
+        "args": {
+          "cafe_id": "CAFE001",
+          "start_at": "2026-11-01T07:30:00-08:00",
+          "end_at": "2026-11-01T14:30:00-08:00"
+        },
+        "reason": "See who is already scheduled to avoid overlap",
+        "only_if": null
+      },
+      {
+        "id": "add_sunday_barista",
+        "action": "schedule_shift",
+        "args": {
+          "cafe_id": "CAFE001",
+          "employee_id": "DEMO_EMP_004",
+          "start_at": "2026-11-01T07:30:00-08:00",
+          "end_at": "2026-11-01T14:30:00-08:00"
+        },
+        "reason": "Add barista 7:30 AM-2:30 PM for market coverage",
+        "only_if": "Approve only if sunday_coverage shows headcount below 2 during 8 AM-2 PM and employee is available"
+      }
+    ]
+  }
+}

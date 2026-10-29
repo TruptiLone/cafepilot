@@ -18,3 +18,5 @@ node_modules/
 
 # Mac files
 .DS_Store
+# Local agent run logs
+business-core/var/

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import Brand from "./Brand";
 import {
+  AgentIcon,
   CloseIcon,
   DashboardIcon,
   InventoryIcon,
@@ -11,6 +12,7 @@ import {
 } from "./Icons";
 
 const navigation = [
+  { label: "Ask CaféPilot", path: "/agent", icon: AgentIcon },
   { label: "Dashboard", path: "/dashboard", icon: DashboardIcon },
   { label: "Inventory", path: "/inventory", icon: InventoryIcon },
   { label: "Sales", path: "/sales", icon: SalesIcon },

@@ -64,6 +64,23 @@ cd business-core
 
 which runs `alembic upgrade head`, then `seed_inventory → seed_sales → seed_sales_catalog → seed_sales_recipes → seed_demo_operations` with `PYTHONPATH=.`. Every script is idempotent, so re-running is safe. Tests marked `database` that read the January 2025 demo data are skipped until this has been run.
 
+## Demo scenario: Sunday farmers market
+
+After `seed_all.sh`, load the Event Surge scenario (Thursday Oct 29 closing count, an oat-milk
+spill, and three existing Sunday Nov 1 shifts):
+
+```bash
+PYTHONPATH=. python scripts/seed_event_surge.py --fresh
+```
+
+`--fresh` first removes the scenario and everything the agent changed for CAFE001 (its runs and
+the shifts, counts and movements created by approved steps), then seeds again, so every demo
+starts from the same state. `--reset` alone is a dry run that lists what would be removed;
+add `--yes` to delete. January 2025 demo data is never touched.
+
+Expected picture as of Thursday 6 PM: whole milk 8 L, oat milk 3.75 L; Sunday 8 AM-noon has
+2 of the 4 people the café wants on an event day, noon-2 PM has 3 of 4.
+
 ## Stop without deleting data
 
 ```bash

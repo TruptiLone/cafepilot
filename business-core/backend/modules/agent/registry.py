@@ -21,6 +21,11 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from sqlalchemy.orm import Session
 
+from backend.modules.agent.calculations import (
+    ShortfallInput,
+    ShortfallResult,
+    calculate_shortfall,
+)
 from backend.modules.inventory.schemas import (
     InventoryItemResponse,
     InventoryMovementCreate,
@@ -79,7 +84,12 @@ class ListIngredientsInput(CafeScopedInput):
 
 class StockEstimatesInput(CafeScopedInput):
     ingredient_id: str | None = Field(
-        default=None, description="Omit to get every ingredient."
+        default=None, description="One ingredient. Omit (and omit ingredient_ids) to get every ingredient."
+    )
+    ingredient_ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        description="Only these ingredients, e.g. the ones the request is about.",
     )
     as_of: datetime | None = Field(
         default=None,
@@ -179,6 +189,12 @@ class Action:
     # Each inner tuple is an any-of group; every group must be satisfied upstream.
     requires: tuple[tuple[str, ...], ...] = ()
     approval: Approval = "none"
+    # Optional: given resolved args, return a reason to skip the step instead of running it.
+    skip_reason: Callable[[dict[str, Any]], str | None] | None = None
+    # Writes that create a record: the executor passes a stable id so a retry cannot duplicate it.
+    record_id_prefix: str | None = None
+    # Writes: return the already-applied result for these args (and record id), or None.
+    find_existing: Callable[[Session, Any, str | None], Any] | None = None
     _output_adapter: TypeAdapter = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -192,12 +208,58 @@ class Action:
     def output_schema(self) -> dict[str, Any]:
         return self._output_adapter.json_schema()
 
-    def run(self, session: Session, raw_args: dict[str, Any]) -> Any:
-        """Validate args, call the domain service, return JSON-safe output."""
-        params = self.input_model.model_validate(raw_args)
-        result = self.handler(session, params)
+    def _dump(self, result: Any) -> Any:
         validated = self._output_adapter.validate_python(result, from_attributes=True)
         return self._output_adapter.dump_python(validated, mode="json")
+
+    def run(self, session: Session, raw_args: dict[str, Any], *, record_id: str | None = None) -> Any:
+        """Validate args, call the domain service, return JSON-safe output."""
+        params = self.input_model.model_validate(raw_args)
+        if self.record_id_prefix is not None:
+            return self._dump(self.handler(session, params, record_id))
+        return self._dump(self.handler(session, params))
+
+    def existing(self, session: Session, raw_args: dict[str, Any], record_id: str | None) -> Any:
+        """JSON result of this write if it has already been applied, else None."""
+        if self.find_existing is None:
+            return None
+        params = self.input_model.model_validate(raw_args)
+        found = self.find_existing(session, params, record_id)
+        return None if found is None else self._dump(found)
+
+
+def _existing_shift(session: Session, p: ShiftCreate, record_id: str | None) -> Any:
+    if not record_id:
+        return None
+    try:
+        return StaffingService(session).get_shift(record_id, p.cafe_id)
+    except Exception:
+        return None
+
+
+def _existing_count(session: Session, p: StockCountCreate, record_id: str | None) -> Any:
+    if not record_id:
+        return None
+    try:
+        return InventoryService(session).get_count(record_id, p.cafe_id)
+    except Exception:
+        return None
+
+
+def _already_verified(session: Session, p: Any, _: str | None) -> Any:
+    try:
+        count = InventoryService(session).get_count(p.count_id, p.cafe_id)
+    except Exception:
+        return None
+    return count if count.status == "verified" else None
+
+
+def _already_cancelled(session: Session, p: Any, _: str | None) -> Any:
+    try:
+        shift = StaffingService(session).get_shift(p.shift_id, p.cafe_id)
+    except Exception:
+        return None
+    return shift if shift.status == "cancelled" else None
 
 
 # ---------------------------------------------------------------------------
@@ -252,9 +314,11 @@ _ACTIONS: list[Action] = [
         side_effect="read",
         input_model=StockEstimatesInput,
         output_type=list[StockEstimateResponse],
-        handler=lambda s, p: InventoryService(s).list_stock_estimates(
-            p.cafe_id, p.ingredient_id, p.as_of
-        ),
+        handler=lambda s, p: [
+            estimate
+            for estimate in InventoryService(s).list_stock_estimates(p.cafe_id, p.ingredient_id, p.as_of)
+            if p.ingredient_ids is None or estimate.ingredient_id in p.ingredient_ids
+        ],
         consumes=("ingredient_catalog",),
         produces=("stock_estimate",),
     ),
@@ -300,7 +364,9 @@ _ACTIONS: list[Action] = [
         side_effect="write",
         input_model=StockCountCreate,
         output_type=StockCountResponse,
-        handler=lambda s, p: InventoryService(s).create_count(p),
+        handler=lambda s, p, record_id: InventoryService(s).create_count(p, count_id=record_id),
+        record_id_prefix="count",
+        find_existing=_existing_count,
         consumes=("ingredient_catalog", "stock_estimate"),
         produces=("stock_count",),
         approval="owner",
@@ -315,6 +381,7 @@ _ACTIONS: list[Action] = [
         handler=lambda s, p: InventoryService(s).verify_count(
             p.count_id, StockCountVerify(counted_at=p.counted_at), p.cafe_id
         ),
+        find_existing=_already_verified,
         consumes=("stock_count",),
         produces=("verified_stock_count",),
         requires=(("create_stock_count", "get_stock_count"),),
@@ -336,7 +403,7 @@ _ACTIONS: list[Action] = [
     # ---- Sales: reads
     Action(
         name="list_products",
-        description="List menu products with their variations.",
+        description="List menu products (base product, category, price). Variation ids are in the planning reference data.",
         domain="sales",
         side_effect="read",
         input_model=CafeScopedInput,
@@ -423,7 +490,9 @@ _ACTIONS: list[Action] = [
         side_effect="write",
         input_model=ShiftCreate,
         output_type=ShiftResponse,
-        handler=lambda s, p: StaffingService(s).schedule_shift(p),
+        handler=lambda s, p, record_id: StaffingService(s).schedule_shift(p, shift_id=record_id),
+        record_id_prefix="shift",
+        find_existing=_existing_shift,
         consumes=("employee_roster", "shift_schedule", "coverage"),
         produces=("scheduled_shift",),
         requires=(("coverage_report",), ("list_employees",), ("list_shifts",)),
@@ -437,27 +506,46 @@ _ACTIONS: list[Action] = [
         input_model=CancelShiftInput,
         output_type=ShiftResponse,
         handler=lambda s, p: StaffingService(s).cancel_shift(p.shift_id, p.cafe_id),
+        find_existing=_already_cancelled,
         consumes=("shift_schedule",),
         produces=("cancelled_shift",),
         requires=(("list_shifts",),),
         approval="owner",
     ),
+    # ---- Order math (code, not the model)
+    Action(
+        name="calculate_shortfall",
+        description=(
+            "Read-only order math: need for the extra product mix (recipes) + buffer (café policy %) "
+            "- usable stock as_of = quantity to order, per ingredient. Returns order_lines ready for "
+            "propose_supplier_order and lists ingredients whose stock is unknown."
+        ),
+        domain="purchasing",
+        side_effect="read",
+        input_model=ShortfallInput,
+        output_type=ShortfallResult,
+        handler=calculate_shortfall,
+        consumes=("menu_catalog", "stock_estimate", "ingredient_demand"),
+        produces=("order_suggestion",),
+    ),
     # ---- Purchasing (simulated)
     Action(
         name="propose_supplier_order",
         description=(
-            "SIMULATED supplier order. Validates ingredients and base units and returns a "
-            "labeled simulated confirmation. No real order is placed."
+            "SIMULATED supplier order. lines MUST be \"$<calculate_shortfall step>.order_lines\" "
+            "so quantities come from code. Validates ingredients and units and returns a labeled "
+            "simulated confirmation. No real order is placed."
         ),
         domain="purchasing",
         side_effect="write",
         input_model=SupplierOrderInput,
         output_type=SupplierOrderResponse,
         handler=_simulate_supplier_order,
-        consumes=("stock_estimate", "ingredient_demand"),
+        consumes=("stock_estimate", "ingredient_demand", "order_suggestion"),
         produces=("supplier_order",),
-        requires=(("get_stock_estimates",),),
+        requires=(("calculate_shortfall",),),
         approval="owner",
+        skip_reason=lambda args: None if args.get("lines") else "Nothing to order: stock covers the need.",
     ),
 ]
 

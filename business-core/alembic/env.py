@@ -6,6 +6,7 @@ from sqlalchemy import create_engine, pool
 from backend.db.base import Base
 from backend.db.config import get_database_connect_args, get_settings
 from backend.models.cafe import Cafe
+from backend.modules.agent.models import AgentApproval, AgentNodeRun, AgentPlanRun
 from backend.modules.inventory.models import (
     InventoryItem,
     InventoryMovement,

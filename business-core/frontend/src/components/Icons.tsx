@@ -80,3 +80,12 @@ export function CloseIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function AgentIcon(props: IconProps) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="M6 4h12v16l-2-1.5-2 1.5-2-1.5-2 1.5-2-1.5L6 20V4Z" />
+      <path d="M9 9h6M9 12.5h6M9 16h3" />
+    </svg>
+  );
+}

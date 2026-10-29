@@ -1,0 +1,39 @@
+{
+  "status": "plan",
+  "goal": "Prepare milk stock and morning staffing for the Sunday Nov 1 farmers market.",
+  "assumptions": [
+    "Event adds 40 whole-milk lattes and 20 oat-milk lattes (12 oz) between 8 AM and 2 PM.",
+    "Event-morning target is 4 people scheduled from 8 AM to 2 PM."
+  ],
+  "nodes": [
+    {"id": "stock", "action": "get_stock_estimates",
+     "args": {"cafe_id": "CAFE001", "as_of": "2026-10-29T18:00:00-07:00"},
+     "reason": "Know how much milk and coffee we have as of Thursday 6 PM."},
+    {"id": "demand", "action": "project_recipe_usage",
+     "args": {"cafe_id": "CAFE001", "target_at": "2026-11-01T08:00:00-08:00",
+              "items": [{"variation_id": "COF003_REG", "quantity": 40},
+                        {"variation_id": "COF003_REG", "quantity": 20,
+                         "modifiers": [{"modifier_id": "MILK_OAT", "quantity": 1}]}]},
+     "reason": "Turn the extra lattes into milk and bean quantities."},
+    {"id": "staff", "action": "list_employees", "args": {"cafe_id": "CAFE001"},
+     "reason": "See who can work and in which role."},
+    {"id": "shifts", "action": "list_shifts",
+     "args": {"cafe_id": "CAFE001", "start_at": "2026-11-01T07:00:00-08:00", "end_at": "2026-11-01T15:00:00-08:00"},
+     "reason": "Check existing Sunday shifts to avoid overlaps."},
+    {"id": "coverage", "action": "coverage_report",
+     "args": {"cafe_id": "CAFE001", "start_at": "2026-11-01T08:00:00-08:00", "end_at": "2026-11-01T14:00:00-08:00", "required_staff": 4},
+     "reason": "Find understaffed hours during the market."},
+    {"id": "order", "action": "propose_supplier_order",
+     "args": {"cafe_id": "CAFE001",
+              "lines": [{"ingredient_id": "WHOLE_MILK", "quantity": "4000", "unit": "mL"},
+                        {"ingredient_id": "OAT_MILK", "quantity": "2000", "unit": "mL"}],
+              "requested_delivery_at": "2026-11-01T06:00:00-08:00"},
+     "reason": "Cover the projected milk shortfall before opening.",
+     "only_if": "stock shows less milk than the projected demand"},
+    {"id": "add_barista", "action": "schedule_shift",
+     "args": {"cafe_id": "CAFE001", "employee_id": "DEMO_EMP_005",
+              "start_at": "2026-11-01T07:30:00-08:00", "end_at": "2026-11-01T14:30:00-08:00"},
+     "reason": "Add a barista for the market rush.",
+     "only_if": "coverage shows understaffed hours and Nora has no overlapping shift"}
+  ]
+}

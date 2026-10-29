@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     postgres_password: SecretStr
     postgres_host: str = "127.0.0.1"
     postgres_port: int = 5433
+    model_api_key: SecretStr | None = None
+    model_api_base_url: str = "https://api.meta.ai/v1"
+    planner_model: str = "muse-spark-1.3"
 
     @property
     def database_url(self) -> URL:

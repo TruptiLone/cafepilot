@@ -336,7 +336,7 @@ _ACTIONS: list[Action] = [
     # ---- Sales: reads
     Action(
         name="list_products",
-        description="List menu products with their variations.",
+        description="List menu products (base product, category, price). Variation ids are in the planning reference data.",
         domain="sales",
         side_effect="read",
         input_model=CafeScopedInput,

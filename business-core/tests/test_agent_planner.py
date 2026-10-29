@@ -263,3 +263,58 @@ def test_missing_api_key_gives_503(monkeypatch, database_session: Session, key) 
         app.dependency_overrides.clear()
     assert response.status_code == 503
     assert "MODEL_API_KEY" in response.json()["detail"]
+
+
+class RaisingClient:
+    def __init__(self, error: Exception) -> None:
+        self.calls = 0
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+        self._error = error
+
+    def _create(self, **_):
+        self.calls += 1
+        raise self._error
+
+
+class _ApiError(Exception):
+    def __init__(self, message: str, status_code: int) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (_ApiError("bad key", 401), "rejected the API key"),
+        (_ApiError("slow down", 429), "rate-limiting"),
+        (type("APITimeoutError", (Exception,), {})("t"), "took too long"),
+        (type("APIConnectionError", (Exception,), {})("c"), "Could not reach"),
+    ],
+)
+def test_model_api_failures_become_readable_502s(client_factory, database_session, error, expected) -> None:
+    raising = RaisingClient(error)
+    app.dependency_overrides[get_db] = lambda: database_session
+    app.dependency_overrides[get_planner_client] = lambda: raising
+    try:
+        response = TestClient(app).post("/api/v1/agent/runs", json={"query": "x", "cafe_id": TEST_CAFE_ID})
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 502
+    assert expected in response.json()["detail"]
+    assert raising.calls == 1  # API failures are not retried
+
+
+def test_database_errors_explain_what_to_do() -> None:
+    from sqlalchemy.exc import ProgrammingError
+
+    def broken_db():
+        raise ProgrammingError("INSERT ...", {}, Exception('relation "agent_plan_runs" does not exist'))
+
+    app.dependency_overrides[get_db] = broken_db
+    try:
+        response = TestClient(app, raise_server_exceptions=False).get("/api/v1/agent/runs")
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert "agent_plan_runs" in detail and "alembic upgrade head" in detail

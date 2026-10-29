@@ -2548,6 +2548,134 @@ h1 {
   font-size: 0.82rem;
 }
 
+/* Approvals: the decision sits above the rail, written as what will happen. */
+
+.approval-panel {
+  margin-top: 26px;
+  padding: 20px;
+  background: var(--step-wait-soft);
+  border: 1px solid #ecd3a8;
+  border-radius: 16px;
+}
+
+.approval-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.approval-panel__header h3 {
+  margin: 0;
+  color: #5a3d0c;
+  font-size: 1.05rem;
+}
+
+.approval-panel__list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.approval-card {
+  padding: 16px 18px;
+  background: #fff;
+  border: 1px solid #ecd3a8;
+  border-radius: 12px;
+}
+
+.approval-card__kind {
+  margin: 0 0 4px;
+  color: var(--step-wait);
+  font-size: 0.84rem;
+  font-weight: 650;
+}
+
+.approval-card__change {
+  max-width: 62ch;
+  margin: 0 0 10px;
+  color: var(--espresso);
+  font-size: 1.12rem;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.approval-card__condition {
+  margin: 0 0 8px;
+  color: #4a4843;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.approval-card__facts {
+  margin: 0 0 14px;
+  padding-left: 18px;
+  color: #4a4843;
+  font-size: 0.9rem;
+  line-height: 1.55;
+}
+
+.approval-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.approval-card__actions .text-button {
+  margin-left: auto;
+}
+
+.outcome-list {
+  margin-top: 26px;
+}
+
+.outcome-list h3 {
+  margin: 0 0 10px;
+  font-size: 1rem;
+}
+
+.outcome-list ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.outcome-list__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 12px 14px;
+  color: #262521;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-left: 4px solid #c9c7c1;
+  border-radius: 10px;
+  line-height: 1.5;
+}
+
+.outcome-list__item--done {
+  border-left-color: var(--step-done);
+}
+
+.outcome-list__item--rejected,
+.outcome-list__item--failed {
+  border-left-color: var(--step-fail);
+}
+
+.outcome-list__item a {
+  color: var(--espresso);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
 /* The ticket rail: stages hang left to right like order tickets on a bar rail. */
 
 .ticket-rail {
@@ -2890,4 +3018,12 @@ h1 {
   .ticket-rail__lines {
     display: none;
   }
+}
+
+.approval-card__actions .primary-button,
+.approval-card__actions .secondary-button,
+.approval-panel__header .primary-button {
+  min-height: 38px;
+  padding: 8px 16px;
+  font-size: 0.88rem;
 }

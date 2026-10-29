@@ -1,5 +1,5 @@
 import type { RunStep } from "../../api/agent";
-import { STEP_STATUS_LABELS, actionLabel } from "./labels";
+import { STEP_STATUS_LABELS, actionLabel, conditionText } from "./labels";
 
 type StepDetailProps = {
   step: RunStep;
@@ -9,10 +9,6 @@ type StepDetailProps = {
 function preview(value: unknown): string {
   const text = JSON.stringify(value, null, 2) ?? "";
   return text.length > 4000 ? `${text.slice(0, 4000)}\n…` : text;
-}
-
-function conditionText(text: string): string {
-  return text.replace(/^\s*approve\s+only\s+if:?\s*/i, "");
 }
 
 function StepDetail({ step, onClose }: StepDetailProps) {

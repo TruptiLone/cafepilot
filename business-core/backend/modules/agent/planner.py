@@ -232,6 +232,10 @@ class PlannerUnavailableError(RuntimeError):
     """The model API is not configured."""
 
 
+class ModelCallError(RuntimeError):
+    """The model API could not be reached or returned an error (not retried)."""
+
+
 @dataclass(frozen=True)
 class PlannerResult:
     plan: Plan
@@ -281,6 +285,21 @@ def _log_call(record: dict[str, Any]) -> None:
         pass  # logging must never break planning
 
 
+def _describe_model_error(error: Exception) -> str:
+    status = getattr(error, "status_code", None)
+    name = type(error).__name__
+    if status == 401:
+        return "The Meta Model API rejected the API key (401). Check MODEL_API_KEY in business-core/.env."
+    if status == 429:
+        return "The Meta Model API is rate-limiting requests (429). Wait a minute and try again."
+    if "Timeout" in name:
+        return "The Meta Model API took too long to answer. Try again."
+    if "Connection" in name:
+        return "Could not reach the Meta Model API. Check your internet connection."
+    detail = str(error).splitlines()[0][:200] if str(error) else name
+    return f"The Meta Model API returned an error ({status or name}): {detail}"
+
+
 def plan_query(
     query: str,
     context: PlanningContext,
@@ -306,7 +325,19 @@ def plan_query(
             },
         ]
     started = time.monotonic()
-    response = client.chat.completions.create(model=model, messages=messages, temperature=0)
+    try:
+        response = client.chat.completions.create(model=model, messages=messages, temperature=0)
+    except Exception as error:  # openai.APIError, timeouts, connection failures
+        _log_call(
+            {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "purpose": "replan" if feedback else "plan",
+                "model": model,
+                "query": query,
+                "error": f"{type(error).__name__}: {error}",
+            }
+        )
+        raise ModelCallError(_describe_model_error(error)) from error
     latency_ms = int((time.monotonic() - started) * 1000)
 
     content = response.choices[0].message.content

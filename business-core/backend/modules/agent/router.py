@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.session import get_db
 from backend.modules.agent.planner import (
+    ModelCallError,
     Plan,
     PlannerError,
     PlannerUnavailableError,
@@ -74,7 +75,7 @@ def _plan(request: PlanRequest, database_session: Session, client: Any) -> tuple
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     try:
         outcome = plan_and_validate(request.query, context, client)
-    except PlannerError as error:
+    except (PlannerError, ModelCallError) as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
     return outcome, context
 

@@ -38,13 +38,28 @@ const run: AgentRun = {
   model: "muse-spark-1.3",
   attempts: 1,
   edges: [{ source: "coverage", target: "add_barista", kind: "safety" }],
-  levels: [["coverage", "stock"], ["add_barista"]],
+  levels: [["coverage", "staff", "stock"], ["add_barista"]],
   warnings: [],
   created_at: "2026-10-29T18:37:00Z",
   updated_at: "2026-10-29T18:37:00Z",
   nodes: [
-    step({ node_id: "coverage", action: "coverage_report", reason: "Check Sunday coverage" }),
+    step({
+      node_id: "coverage",
+      action: "coverage_report",
+      reason: "Check Sunday coverage",
+      result: {
+        hours: [
+          { hour_start: "2026-11-01T08:00:00-08:00", scheduled_employees: 0, required_staff: 2, coverage_status: "understaffed" },
+        ],
+      },
+    }),
     step({}),
+    step({
+      node_id: "staff",
+      action: "list_employees",
+      reason: "Find baristas",
+      result: [{ employee_id: "DEMO_EMP_004", name: "Ethan Patel", role: "barista" }],
+    }),
     step({
       node_id: "add_barista",
       action: "schedule_shift",
@@ -52,6 +67,12 @@ const run: AgentRun = {
       requires_approval: true,
       reason: "Add a barista for the rush",
       only_if: "Approve only if coverage is below 2 people",
+      resolved_args: {
+        cafe_id: "CAFE001",
+        employee_id: "DEMO_EMP_004",
+        start_at: "2026-11-01T07:30:00-08:00",
+        end_at: "2026-11-01T14:30:00-08:00",
+      },
       depends_on: ["coverage"],
       level: 1,
       status: "awaiting_approval",
@@ -75,13 +96,30 @@ function jsonResponse(body: unknown, status = 200) {
   );
 }
 
-function mockApi(start?: StartRunResponse | { status: number; detail: string }) {
+const completedRun: AgentRun = {
+  ...run,
+  status: "completed",
+  nodes: run.nodes.map((node) =>
+    node.node_id === "add_barista"
+      ? { ...node, status: "done", result: { shift_id: "S9", employee_id: "DEMO_EMP_004" } }
+      : node,
+  ),
+};
+
+function mockApi(
+  start?: StartRunResponse | { status: number; detail: string },
+  decision: AgentRun | { status: number; detail: string } = completedRun,
+) {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith("/api/v1/agent/runs?")) return jsonResponse([summary]);
     if (url === "/api/v1/agent/runs" && init?.method === "POST") {
       if (start && "detail" in start) return jsonResponse({ detail: start.detail }, start.status);
       return jsonResponse(start);
+    }
+    if (url.includes("/decision") && init?.method === "POST") {
+      if ("detail" in decision) return jsonResponse({ detail: decision.detail }, decision.status);
+      return jsonResponse(decision);
     }
     if (url.startsWith("/api/v1/agent/runs/RUN-1")) return jsonResponse(run);
     return jsonResponse({ detail: "not found" }, 404);
@@ -120,6 +158,7 @@ describe("AgentPage", () => {
     const stages = screen.getAllByRole("listitem", { name: /Stage/ });
     expect(stages).toHaveLength(2);
     expect(within(stages[0]).getByText("Check staff coverage")).toBeTruthy();
+    expect(within(stages[0]).getByText("List staff")).toBeTruthy();
     expect(within(stages[0]).getByText("Check stock")).toBeTruthy();
     expect(within(stages[1]).getByText("Changes for your OK")).toBeTruthy();
     expect(within(stages[1]).getByText("Needs your OK")).toBeTruthy();
@@ -182,5 +221,90 @@ describe("AgentPage", () => {
     await userEvent.type(screen.getByLabelText("What do you need?"), "anything");
     await userEvent.click(screen.getByRole("button", { name: "Make a plan" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("MODEL_API_KEY"));
+  });
+
+  it("shows the change in plain words with the evidence to decide", async () => {
+    mockApi();
+    renderPage("/agent?run=RUN-1");
+    const panel = await screen.findByRole("region", { name: "One change needs your OK" });
+    expect(within(panel).getByText("Schedule Ethan Patel for Sun, Nov 1, 7:30 AM–2:30 PM")).toBeTruthy();
+    expect(within(panel).getByText("coverage is below 2 people")).toBeTruthy();
+    expect(within(panel).getByText("1 of 1 hours are short: as few as 0 of 2 people scheduled.")).toBeTruthy();
+    expect(within(panel).queryByRole("button", { name: "Approve all" })).toBeNull();
+  });
+
+  it("approves a change and shows what happened", async () => {
+    const fetchMock = mockApi();
+    renderPage("/agent?run=RUN-1");
+    const panel = await screen.findByRole("region", { name: "One change needs your OK" });
+    await userEvent.click(within(panel).getByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByRole("region", { name: "What happened" })).toBeTruthy();
+    expect(screen.getByText(/Schedule Ethan Patel/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "See it in Staffing" }).getAttribute("href")).toBe("/staffing");
+    expect(screen.queryByRole("region", { name: /needs your OK/ })).toBeNull();
+    expect(screen.getByText("Done", { selector: ".run-status" })).toBeTruthy();
+    const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/nodes/add_barista/decision"));
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ decision: "approved", channel: "web" });
+  });
+
+  it("declines a change", async () => {
+    const declined: AgentRun = {
+      ...run,
+      status: "completed_with_issues",
+      nodes: run.nodes.map((node) =>
+        node.node_id === "add_barista" ? { ...node, status: "rejected", error: "rejected by owner" } : node,
+      ),
+    };
+    const fetchMock = mockApi(undefined, declined);
+    renderPage("/agent?run=RUN-1");
+    const panel = await screen.findByRole("region", { name: "One change needs your OK" });
+    await userEvent.click(within(panel).getByRole("button", { name: "Decline" }));
+
+    expect(await screen.findByText("You declined:")).toBeTruthy();
+    const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/decision"));
+    expect(JSON.parse(String(post?.[1]?.body)).decision).toBe("rejected");
+  });
+
+  it("offers Approve all when several changes wait", async () => {
+    const two: AgentRun = {
+      ...run,
+      nodes: [
+        ...run.nodes,
+        {
+          ...run.nodes[run.nodes.length - 1],
+          node_id: "order",
+          action: "propose_supplier_order",
+          only_if: null,
+          resolved_args: {
+            lines: [{ ingredient_id: "OAT_MILK", quantity: "2000", unit: "mL" }],
+            requested_delivery_at: "2026-11-01T06:00:00-08:00",
+          },
+        },
+      ],
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/agent/runs?")) return jsonResponse([]);
+      if (url.endsWith("/RUN-1/decision") && init?.method === "POST") return jsonResponse(completedRun);
+      return jsonResponse(two);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/agent?run=RUN-1");
+
+    const panel = await screen.findByRole("region", { name: "2 changes need your OK" });
+    expect(within(panel).getByText(/Order 2 L/)).toBeTruthy();
+    await userEvent.click(within(panel).getByRole("button", { name: "Approve all" }));
+    await waitFor(() => expect(screen.queryByRole("region", { name: /need your OK/ })).toBeNull());
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/RUN-1/decision"))).toBe(true);
+  });
+
+  it("keeps the change waiting and explains when a decision fails", async () => {
+    mockApi(undefined, { status: 409, detail: "add_barista is done, not waiting for approval" });
+    renderPage("/agent?run=RUN-1");
+    const panel = await screen.findByRole("region", { name: "One change needs your OK" });
+    await userEvent.click(within(panel).getByRole("button", { name: "Approve" }));
+    expect((await within(panel).findByRole("alert")).textContent).toContain("not waiting for approval");
+    expect(within(panel).getByRole("button", { name: "Approve" })).toBeTruthy();
   });
 });

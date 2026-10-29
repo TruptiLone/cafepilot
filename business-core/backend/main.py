@@ -1,4 +1,8 @@
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.modules.agent.router import router as agent_router
 from backend.modules.inventory.router import router as inventory_router
@@ -10,6 +14,28 @@ app = FastAPI(
     description="Operational management system for CafePilot",
     version="0.1.0",
 )
+
+
+logger = logging.getLogger("cafepilot")
+
+
+@app.exception_handler(SQLAlchemyError)
+async def database_error(request: Request, error: SQLAlchemyError) -> JSONResponse:
+    """Turn unexpected database failures on agent endpoints into an actionable message.
+
+    Other modules keep their existing behaviour: the error propagates unchanged.
+    """
+    if not request.url.path.startswith("/api/v1/agent"):
+        raise error
+    logger.exception("database error on %s %s", request.method, request.url.path)
+    original = getattr(error, "orig", None) or error
+    first_line = str(original).strip().splitlines()[0][:200] if str(original).strip() else type(error).__name__
+    hint = ""
+    if "does not exist" in first_line or "UndefinedTable" in type(original).__name__:
+        hint = " The database is missing a table or column: run `alembic upgrade head` in business-core."
+    elif "connection" in first_line.lower():
+        hint = " Is the database running? Try `docker compose up -d` in business-core."
+    return JSONResponse(status_code=500, content={"detail": f"Database error: {first_line}.{hint}"})
 
 
 @app.get("/health")

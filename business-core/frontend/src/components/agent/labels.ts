@@ -42,3 +42,7 @@ export const RUN_STATUS_LABELS: Record<RunStatus, string> = {
   completed: "Done",
   completed_with_issues: "Finished with issues",
 };
+
+export function conditionText(text: string): string {
+  return text.replace(/^\s*approve\s+only\s+if:?\s*/i, "");
+}

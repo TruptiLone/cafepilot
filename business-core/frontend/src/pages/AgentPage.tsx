@@ -9,6 +9,8 @@ import {
   listRuns,
   startRun,
 } from "../api/agent";
+import ApprovalPanel from "../components/agent/ApprovalPanel";
+import OutcomeList from "../components/agent/OutcomeList";
 import StepDetail from "../components/agent/StepDetail";
 import TicketRail from "../components/agent/TicketRail";
 import { RUN_STATUS_LABELS } from "../components/agent/labels";
@@ -187,14 +189,25 @@ function AgentPage() {
             </div>
           )}
 
+          <ApprovalPanel
+            run={run}
+            onUpdated={(updated) => {
+              setRun(updated);
+              refreshRecent();
+            }}
+            onShowStep={setSelectedId}
+          />
+          <OutcomeList run={run} />
+
           <div className={`run-view__body${selected ? " has-detail" : ""}`}>
             <TicketRail run={run} selectedId={selectedId} onSelect={setSelectedId} />
             {selected && <StepDetail step={selected} onClose={() => setSelectedId(null)} />}
           </div>
 
           <p className="run-view__footnote">
-            Data as of {formatTime(run.as_of)}. Planned by {run.model}
-            {run.attempts > 1 ? ` after ${run.attempts} attempts` : ""}.
+            Planned {formatTime(run.created_at)} by {run.model}
+            {run.attempts > 1 ? ` after ${run.attempts} attempts` : ""}. Each step shows the date its
+            data is from.
           </p>
         </div>
       )}

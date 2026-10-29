@@ -102,8 +102,13 @@ def _clear_demo_records(session: Session) -> None:
             StockCount.count_id.startswith(DEMO_PREFIX, autoescape=True)
         )
     )
+    # Any shift for a demo employee blocks deleting that employee, including shifts
+    # added by the Event Surge scenario, the app, or approved agent steps.
     session.execute(
-        delete(Shift).where(Shift.shift_id.startswith(DEMO_PREFIX, autoescape=True))
+        delete(Shift).where(
+            Shift.shift_id.startswith(DEMO_PREFIX, autoescape=True)
+            | Shift.employee_id.startswith(DEMO_PREFIX, autoescape=True)
+        )
     )
     session.execute(
         delete(Employee).where(

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.config import get_settings
 from backend.models.cafe import Cafe
+from backend.modules.agent.cafe_policies import policies_for
 from backend.modules.agent.registry import describe_for_planner
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.sales.models import MenuProduct, Modifier, ModifierGroup, ProductVariation
@@ -144,6 +145,7 @@ def build_planning_context(
             {"employee_id": e.employee_id, "name": e.name, "role": e.role}
             for e in employees
         ],
+        "cafe_policies": policies_for(cafe_id),
     }
     return PlanningContext(cafe_id, cafe.timezone, effective_as_of, now, reference)
 
@@ -185,6 +187,8 @@ RULES
    makes sense if an earlier read shows a need (e.g. a shortfall or a coverage gap), keep the
    write and say so in only_if.
 6. Demand assumptions are scenarios, not forecasts. State them in assumptions.
+   Take staffing thresholds and espresso-capable roles from REFERENCE DATA cafe_policies;
+   do not invent them. Only schedule people whose role can do the job.
 7. Keep plans short: at most 15 nodes, no duplicate steps.
 8. If a required detail is missing and cannot be reasonably assumed (e.g. no date at all),
    return needs_clarification with one question and no nodes. If the request is not about

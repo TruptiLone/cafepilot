@@ -16,9 +16,9 @@ import TicketRail from "../components/agent/TicketRail";
 import { RUN_STATUS_LABELS } from "../components/agent/labels";
 
 const EXAMPLE_REQUEST =
-  "Farmers market this Sunday Nov 1, 8 AM-2 PM, roughly 40 extra whole-milk lattes and 20 extra " +
-  "oat-milk lattes. Check milk and bean stock as of Thursday 6 PM, check Sunday staff coverage, " +
-  "and add a barista 7:30 AM-2:30 PM if we're short.";
+  "Farmers market this Sunday Nov 1, 8 AM-2 PM. Expect about 40 extra whole-milk lattes and 20 extra " +
+  "oat-milk lattes. Using stock as of Thursday 6 PM, order milk for a 6 AM Sunday delivery if we'll " +
+  "run short, and add baristas for any hours below our event staffing target.";
 
 const POLL_MS = 2000;
 

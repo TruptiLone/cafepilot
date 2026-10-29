@@ -84,7 +84,12 @@ class ListIngredientsInput(CafeScopedInput):
 
 class StockEstimatesInput(CafeScopedInput):
     ingredient_id: str | None = Field(
-        default=None, description="Omit to get every ingredient."
+        default=None, description="One ingredient. Omit (and omit ingredient_ids) to get every ingredient."
+    )
+    ingredient_ids: list[str] | None = Field(
+        default=None,
+        min_length=1,
+        description="Only these ingredients, e.g. the ones the request is about.",
     )
     as_of: datetime | None = Field(
         default=None,
@@ -309,9 +314,11 @@ _ACTIONS: list[Action] = [
         side_effect="read",
         input_model=StockEstimatesInput,
         output_type=list[StockEstimateResponse],
-        handler=lambda s, p: InventoryService(s).list_stock_estimates(
-            p.cafe_id, p.ingredient_id, p.as_of
-        ),
+        handler=lambda s, p: [
+            estimate
+            for estimate in InventoryService(s).list_stock_estimates(p.cafe_id, p.ingredient_id, p.as_of)
+            if p.ingredient_ids is None or estimate.ingredient_id in p.ingredient_ids
+        ],
         consumes=("ingredient_catalog",),
         produces=("stock_estimate",),
     ),

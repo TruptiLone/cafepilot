@@ -17,6 +17,9 @@ from backend.modules.agent.planner import (
     build_planning_context,
     create_planner_client,
 )
+from backend.models.cafe import Cafe
+from backend.modules.agent.events import DetectedEvent, detected_events, get_event
+from backend.modules.agent.summaries import summarize_run
 from backend.modules.agent.executor import (
     ApprovalStateError,
     EditValidationError,
@@ -132,6 +135,9 @@ class NodeRunOut(BaseModel):
     replay_of: str | None
     started_at: datetime | None
     finished_at: datetime | None
+    summary: str | None = Field(
+        default=None, description="One plain line about this step, written by code from its real result."
+    )
 
 
 class RunOut(BaseModel):
@@ -152,6 +158,16 @@ class RunOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     nodes: list[NodeRunOut]
+
+
+def _run_out(database_session: Session, run: Any) -> RunOut:
+    """Run with a code-written one-line summary on every step."""
+    cafe = database_session.get(Cafe, run.cafe_id)
+    summaries = summarize_run(list(run.nodes), run.cafe_id, cafe.timezone if cafe else "UTC")
+    out = RunOut.model_validate(run)
+    for node in out.nodes:
+        node.summary = summaries.get(node.node_id)
+    return out
 
 
 class RunSummaryOut(BaseModel):
@@ -202,7 +218,7 @@ def start_run(
         attempts=outcome.attempts,
     )
     run = execute(database_session, run.run_id)
-    return CreateRunResponse(planning=planning, run=RunOut.model_validate(run))
+    return CreateRunResponse(planning=planning, run=_run_out(database_session, run))
 
 
 @router.get("/runs", response_model=list[RunSummaryOut])
@@ -239,7 +255,7 @@ def _load(database_session: Session, run_id: str) -> AgentPlanRun:
 
 @router.get("/runs/{run_id}", response_model=RunOut)
 def read_run(run_id: str, database_session: Session = Depends(get_db)) -> RunOut:
-    return RunOut.model_validate(_load(database_session, run_id))
+    return _run_out(database_session, _load(database_session, run_id))
 
 
 @router.post("/runs/{run_id}/nodes/{node_id}/decision", response_model=RunOut)
@@ -268,7 +284,7 @@ def decide_step(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found") from error
     except ApprovalStateError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
-    return RunOut.model_validate(run)
+    return _run_out(database_session, run)
 
 
 @router.post("/runs/{run_id}/decision", response_model=RunOut)
@@ -282,4 +298,37 @@ def decide_all_steps(
     run = decide_all(
         database_session, run_id, request.decision, decided_by=request.decided_by, channel=request.channel
     )
-    return RunOut.model_validate(run)
+    return _run_out(database_session, run)
+
+
+# ---------------------------------------------------------------------------
+# Events: the trigger that starts a plan
+# ---------------------------------------------------------------------------
+
+
+@router.get("/events", response_model=list[DetectedEvent])
+def list_events(cafe_id: str = Query("CAFE001")) -> list[DetectedEvent]:
+    """Events Muse has detected near the café (demo feed, labeled with is_demo)."""
+    return detected_events(cafe_id)
+
+
+@router.get("/events/{event_id}", response_model=DetectedEvent)
+def read_event(event_id: str) -> DetectedEvent:
+    event = get_event(event_id)
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    return event
+
+
+@router.post("/events/{event_id}/runs", response_model=CreateRunResponse)
+def start_run_for_event(
+    event_id: str,
+    database_session: Session = Depends(get_db),
+    client: Any = Depends(get_planner_client),
+) -> CreateRunResponse:
+    """The owner said "Yes, check": plan and start running for this event."""
+    event = get_event(event_id)
+    if event is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
+    request = PlanRequest(query=event.request, cafe_id=event.cafe_id, as_of=event.knowledge_as_of)
+    return start_run(request, database_session, client)

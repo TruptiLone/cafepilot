@@ -12,8 +12,9 @@ from backend.modules.agent.planner import (
     PlannerUnavailableError,
     build_planning_context,
     create_planner_client,
-    plan_query,
 )
+from backend.modules.agent.service import plan_and_validate
+from backend.modules.agent.validator import ValidationResult
 
 router = APIRouter(tags=["Agent"])
 
@@ -37,6 +38,8 @@ class PlanRequest(BaseModel):
 
 class PlanResponse(BaseModel):
     plan: Plan
+    validation: ValidationResult
+    attempts: int
     model: str
     latency_ms: int
     as_of: datetime
@@ -56,19 +59,25 @@ def create_plan(
     database_session: Session = Depends(get_db),
     client: Any = Depends(get_planner_client),
 ) -> PlanResponse:
-    """Ask the model for a plan. Nothing is validated or executed yet (Tasks 3-4)."""
+    """Ask the model for a plan and validate it. Nothing is executed yet (Task 4).
+
+    A rejected plan is returned with ``validation.valid = false`` and the reasons,
+    after one automatic retry in which the model sees those reasons.
+    """
     try:
         context = build_planning_context(database_session, request.cafe_id, request.as_of)
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     try:
-        result = plan_query(request.query, context, client)
+        outcome = plan_and_validate(request.query, context, client)
     except PlannerError as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
     return PlanResponse(
-        plan=result.plan,
-        model=result.model,
-        latency_ms=result.latency_ms,
+        plan=outcome.result.plan,
+        validation=outcome.validation,
+        attempts=outcome.attempts,
+        model=outcome.result.model,
+        latency_ms=outcome.result.latency_ms,
         as_of=context.as_of,
         planned_at=context.now,
     )

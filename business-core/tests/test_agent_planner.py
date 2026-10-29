@@ -203,7 +203,7 @@ def client_factory(database_session: Session):
     app.dependency_overrides.clear()
 
 
-def test_plan_endpoint_returns_plan_without_executing(client_factory) -> None:
+def test_plan_endpoint_rejects_other_cafe_plan_after_one_retry(client_factory) -> None:
     http, fake = client_factory(_hero_json())
     response = http.post(
         "/api/v1/agent/plans",
@@ -214,7 +214,12 @@ def test_plan_endpoint_returns_plan_without_executing(client_factory) -> None:
     assert body["plan"]["status"] == "plan"
     assert len(body["plan"]["nodes"]) == 7
     assert body["as_of"].startswith("2026-10-29T18:00:00")
-    assert len(fake.calls) == 1
+    # The fixture targets CAFE001, so the validator rejects it and the model gets one retry.
+    assert body["validation"]["valid"] is False
+    assert {i["code"] for i in body["validation"]["issues"]} == {"cafe_mismatch"}
+    assert body["attempts"] == 2 and len(fake.calls) == 2
+    feedback = fake.calls[1]["messages"][-1]["content"]
+    assert "cafe_mismatch" in feedback and fake.calls[1]["messages"][-2]["role"] == "assistant"
 
 
 def test_plan_endpoint_maps_model_failure_to_502(client_factory) -> None:

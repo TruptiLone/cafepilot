@@ -223,6 +223,10 @@ class ChatClient(Protocol):
 class PlannerError(RuntimeError):
     """The model did not return a usable plan."""
 
+    def __init__(self, message: str, raw_content: str | None = None) -> None:
+        super().__init__(message)
+        self.raw_content = raw_content
+
 
 class PlannerUnavailableError(RuntimeError):
     """The model API is not configured."""
@@ -282,9 +286,25 @@ def plan_query(
     context: PlanningContext,
     client: ChatClient,
     model: str | None = None,
+    feedback: tuple[str, str] | None = None,
 ) -> PlannerResult:
+    """Ask the model for a plan.
+
+    ``feedback`` is (previous_response, problems): the earlier answer is replayed and
+    the model is asked to return a corrected, complete plan.
+    """
     model = model or get_settings().planner_model
     messages = build_messages(query, context)
+    if feedback is not None:
+        previous, problems = feedback
+        messages += [
+            {"role": "assistant", "content": previous},
+            {
+                "role": "user",
+                "content": "Your plan was rejected by the validator for these reasons:\n"
+                f"{problems}\nReturn the complete corrected plan as JSON only.",
+            },
+        ]
     started = time.monotonic()
     response = client.chat.completions.create(model=model, messages=messages, temperature=0)
     latency_ms = int((time.monotonic() - started) * 1000)
@@ -294,7 +314,7 @@ def plan_query(
     usage_dict = usage.model_dump() if hasattr(usage, "model_dump") else usage
     record = {
         "at": datetime.now(timezone.utc).isoformat(),
-        "purpose": "plan",
+        "purpose": "replan" if feedback else "plan",
         "model": model,
         "latency_ms": latency_ms,
         "usage": usage_dict,
@@ -308,6 +328,6 @@ def plan_query(
     except PlannerError as error:
         record["error"] = str(error)
         _log_call(record)
-        raise
+        raise PlannerError(str(error), content if isinstance(content, str) else None) from error
     _log_call(record)
     return PlannerResult(plan, model, latency_ms, usage_dict, content)

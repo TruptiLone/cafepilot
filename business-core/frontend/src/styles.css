@@ -3630,3 +3630,39 @@ h1 {
 @media (prefers-reduced-motion: reduce) {
   .rcv-muse.is-thinking .rcv-muse__orb { animation: none; }
 }
+
+.data-table tr.is-highlighted td {
+  background: #fbf3e6;
+}
+
+.data-table tr.is-highlighted td:first-child {
+  box-shadow: inset 4px 0 0 #6b4a35;
+}
+
+.row-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #6b4a35;
+  color: #f4ece2;
+  font-size: 0.7rem;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
+.rcv-done__now {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.rcv-done__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.rcv-done__links .rcv-button {
+  text-decoration: none;
+}

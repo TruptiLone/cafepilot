@@ -115,6 +115,10 @@ export function listOpenOrders(cafeId = ACTIVE_CAFE_ID): Promise<OpenOrder[]> {
   return request(`/orders?cafe_id=${encodeURIComponent(cafeId)}`);
 }
 
+export function getReceipt(receiptId: string): Promise<Receipt> {
+  return request(`/receipts/${encodeURIComponent(receiptId)}`);
+}
+
 export function startReceipt(orderId: string | null, cafeId = ACTIVE_CAFE_ID): Promise<Receipt> {
   return request("/receipts", post({ cafe_id: cafeId, order_id: orderId }));
 }

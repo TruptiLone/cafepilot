@@ -142,3 +142,33 @@ def test_short_delivery_adds_only_what_arrived_and_drafts_a_credit(session: Sess
     assert again.status_code == 409
     sent = api.post(f"/api/v1/receiving/receipts/{rid}/credit-request/send").json()
     assert sent["credit_request"]["status"] == "sent"
+
+
+def test_the_same_slip_cannot_be_received_twice(session: Session) -> None:
+    api, _, rid, _, photo = _checked_delivery(session)
+    whole = _line(photo, "WHOLE_MILK")
+    api.post(f"/api/v1/receiving/receipts/{rid}/lines/{whole['line_no']}", json={"counted_units": 9})
+    assert api.post(f"/api/v1/receiving/receipts/{rid}/confirm", json={"confirmed_by": "owner"}).status_code == 200
+
+    client = VisionClient(LIVE["slip"]["parsed"])
+    api = _api(session, client)
+    again = api.post("/api/v1/receiving/receipts", json={"cafe_id": C}).json()
+    response = api.post(f"/api/v1/receiving/receipts/{again['receipt_id']}/slip", json={"use_demo_image": True})
+    assert response.status_code == 409 and "already received" in response.json()["detail"]
+    moves = session.scalars(select(InventoryMovement).where(InventoryMovement.source_type == "receipt")).all()
+    assert len(moves) == 2
+
+
+def test_a_later_delivery_is_compared_with_what_is_still_due(session: Session) -> None:
+    api, _, rid, _, photo = _checked_delivery(session)
+    whole = _line(photo, "WHOLE_MILK")
+    api.post(f"/api/v1/receiving/receipts/{rid}/lines/{whole['line_no']}", json={"counted_units": 9})
+    api.post(f"/api/v1/receiving/receipts/{rid}/confirm", json={"confirmed_by": "owner"})
+
+    # The missing 3 cartons arrive on a new slip.
+    slip = dict(LIVE["slip"]["parsed"], packing_slip_number="PS-58290",
+                lines=[dict(LIVE["slip"]["parsed"]["lines"][0], shipped=0.5)])
+    api = _api(session, VisionClient(slip))
+    later = api.post("/api/v1/receiving/receipts", json={"cafe_id": C}).json()
+    body = api.post(f"/api/v1/receiving/receipts/{later['receipt_id']}/slip", json={"use_demo_image": True}).json()
+    assert _line(body, "WHOLE_MILK")["display"]["ordered"] == "3 cartons (3 L)"

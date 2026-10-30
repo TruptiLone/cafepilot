@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import { getStockEstimates, type StockEstimate } from "../api/inventory";
 import {
   confirmReceipt,
   countLine,
+  getReceipt,
   imageUrl,
   listOpenOrders,
   readPhoto,
@@ -55,6 +58,13 @@ function units(quantity: string | null, unitSize: string | null): number | null 
   return Math.round(Number(quantity) / size);
 }
 
+function stockAmount(quantity: string, unit: string) {
+  const n = Number(quantity);
+  if (unit === "mL") return `${(n / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 })} L`;
+  if (unit === "g") return `${(n / 1000).toLocaleString("en-US", { maximumFractionDigits: 2 })} kg`;
+  return `${n.toLocaleString("en-US")} ${unit}`;
+}
+
 type Busy = null | "start" | "slip" | "photo" | "count" | "confirm" | "credit";
 
 const BUSY_TEXT: Record<Exclude<Busy, null>, string> = {
@@ -68,7 +78,26 @@ const BUSY_TEXT: Record<Exclude<Busy, null>, string> = {
 
 function ReceivingPage() {
   const [orders, setOrders] = useState<OpenOrder[] | null>(null);
-  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const [receipt, setReceiptState] = useState<Receipt | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const openId = searchParams.get("receipt");
+
+  // Keep the delivery in the address, so going back (e.g. from Inventory) returns to it.
+  const setReceipt = (next: Receipt | null) => {
+    setReceiptState(next);
+    if ((next?.receipt_id ?? null) !== openId) {
+      setSearchParams(next ? { receipt: next.receipt_id } : {}, { replace: true });
+    }
+  };
+
+  useEffect(() => {
+    if (openId && receipt?.receipt_id !== openId) {
+      getReceipt(openId)
+        .then(setReceiptState)
+        .catch(() => setSearchParams({}, { replace: true }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId]);
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -444,21 +473,50 @@ function Done({
 }) {
   const added = receipt.lines.filter((l) => l.accepted_quantity && Number(l.accepted_quantity) > 0);
   const credit = receipt.credit_request;
+  const [stock, setStock] = useState<Map<string, StockEstimate>>(new Map());
+  useEffect(() => {
+    getStockEstimates()
+      .then((rows) => setStock(new Map(rows.map((row) => [row.ingredient_id, row]))))
+      .catch(() => setStock(new Map()));
+  }, [receipt.confirmed_at]);
+  const link = (tab: "movements" | "stock") =>
+    `/inventory?${new URLSearchParams({
+      tab,
+      receipt: receipt.receipt_id,
+      items: added.map((l) => l.ingredient_id ?? "").join(","),
+      ...(receipt.slip_number ? { slip: receipt.slip_number } : {}),
+    })}`;
   return (
     <div className="rcv-stack">
       <article className="rcv-card rcv-done">
         <p className="rcv-done__title">Added to stock</p>
         <ul>
-          {added.map((l) => (
-            <li key={l.line_no}>
-              <span>{l.description.split(",")[0]}</span>
-              <strong>{l.display.accepted}</strong>
-            </li>
-          ))}
+          {added.map((l) => {
+            const now = l.ingredient_id ? stock.get(l.ingredient_id) : undefined;
+            return (
+              <li key={l.line_no}>
+                <span>
+                  {l.description.split(",")[0]}
+                  {now?.estimated_quantity != null && (
+                    <small className="rcv-done__now">Now in stock: {stockAmount(now.estimated_quantity, now.base_unit)}</small>
+                  )}
+                </span>
+                <strong>+{l.display.accepted}</strong>
+              </li>
+            );
+          })}
         </ul>
         <p className="rcv-muted">
           {receipt.order?.po_number} is now {receipt.order?.status === "received" ? "fully received" : "partly received"}.
         </p>
+        <div className="rcv-done__links">
+          <Link className="rcv-button rcv-button--small" to={link("movements")}>
+            See stock movements
+          </Link>
+          <Link className="rcv-button rcv-button--small" to={link("stock")}>
+            See current stock
+          </Link>
+        </div>
       </article>
 
       {credit && (

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MemoryRouter } from "react-router-dom";
 import InventoryPage from "./InventoryPage";
 
 const responses = {
@@ -170,7 +171,7 @@ describe("InventoryPage", () => {
   it("loads each dataset, switches tabs, and opens count details", async () => {
     mockSuccessfulApi();
     const user = userEvent.setup();
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     expect(screen.getByText("Loading inventory data")).not.toBeNull();
     expect(await screen.findByText("OAT_MILK")).not.toBeNull();
@@ -189,7 +190,7 @@ describe("InventoryPage", () => {
 
   it("shows an empty state for an empty dataset", async () => {
     vi.stubGlobal("fetch", vi.fn(() => jsonResponse([])));
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
     expect(await screen.findByText("No ingredients found")).not.toBeNull();
   });
 
@@ -199,7 +200,7 @@ describe("InventoryPage", () => {
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
       .mockResolvedValue(jsonResponse([]));
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     expect(await screen.findByText("Inventory data is unavailable")).not.toBeNull();
     expect(screen.getByText(/backend is running on port 8001/)).not.toBeNull();
@@ -235,7 +236,7 @@ describe("InventoryPage", () => {
       return jsonResponse(responses.stock);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     await openMovementForm(user);
     await enterValidReceipt(user);
@@ -274,7 +275,7 @@ describe("InventoryPage", () => {
       return jsonResponse(responses.stock);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     await openMovementForm(user);
     await enterValidReceipt(user);
@@ -312,7 +313,7 @@ describe("InventoryPage", () => {
       return jsonResponse(responses.stock);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     await openCountForm(user);
     await user.type(screen.getByLabelText(/Counted By/), "EMP_UI_TEST");
@@ -349,7 +350,7 @@ describe("InventoryPage", () => {
   it("validates draft count lines before sending them", async () => {
     const user = userEvent.setup();
     const fetchMock = mockSuccessfulApi();
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     await openCountForm(user);
     await user.selectOptions(screen.getByLabelText("Ingredient 1"), "OAT_MILK");
@@ -377,7 +378,7 @@ describe("InventoryPage", () => {
       return jsonResponse(responses.stock);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     await openCountForm(user);
     await user.selectOptions(screen.getByLabelText("Ingredient 1"), "OAT_MILK");
@@ -423,7 +424,7 @@ describe("InventoryPage", () => {
       return jsonResponse(responses.stock);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     expect(await screen.findByText("OAT_MILK")).not.toBeNull();
     await user.click(screen.getByRole("tab", { name: /Stock Counts/ }));
@@ -472,7 +473,7 @@ describe("InventoryPage", () => {
       return jsonResponse(responses.stock);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     expect(await screen.findByText("OAT_MILK")).not.toBeNull();
     await user.click(screen.getByRole("tab", { name: /Stock Counts/ }));
@@ -491,7 +492,7 @@ describe("InventoryPage", () => {
   it("rejects invalid movement signs and missing required reasons", async () => {
     const user = userEvent.setup();
     const fetchMock = mockSuccessfulApi();
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     await openMovementForm(user);
     await user.selectOptions(screen.getByLabelText("Movement Type"), "WASTE");
@@ -532,7 +533,7 @@ describe("InventoryPage", () => {
       return jsonResponse(responses.stock);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     await openMovementForm(user);
     await enterValidReceipt(user);
@@ -560,7 +561,7 @@ describe("InventoryPage", () => {
       return jsonResponse(responses.stock);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     await openMovementForm(user);
     await enterValidReceipt(user);
@@ -601,7 +602,7 @@ describe("InventoryPage", () => {
       return jsonResponse(responses.stock);
     });
     vi.stubGlobal("fetch", fetchMock);
-    render(<InventoryPage />);
+    render(<MemoryRouter><InventoryPage /></MemoryRouter>);
 
     expect(await screen.findByText("OAT_MILK")).not.toBeNull();
     await user.click(screen.getByRole("tab", { name: /Stock Counts/ }));

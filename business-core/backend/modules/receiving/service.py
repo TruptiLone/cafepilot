@@ -20,12 +20,15 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from zoneinfo import ZoneInfo
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.inventory.schemas import InventoryMovementCreate
 from backend.modules.inventory.service import InventoryService
+from backend.models.cafe import Cafe
 from backend.modules.purchasing.models import PurchaseOrder, Receipt, ReceiptLine
 from backend.modules.purchasing.service import settle_due
 from backend.modules.receiving.vision import PhotoRead, SlipRead
@@ -146,7 +149,8 @@ def build_drafts(session: Session, receipt: Receipt, order: PurchaseOrder | None
                 item_number=line.supplier_item_number,
                 unit=line.unit,
                 pack_size=line.pack_size,
-                ordered=line.quantity,
+                # What is still due: a second delivery against the same order is compared with the rest.
+                ordered=max(line.quantity - (line.received_quantity or ZERO), ZERO),
             )
             drafts.append(draft)
             if line.supplier_item_number:
@@ -316,9 +320,29 @@ def _save_image(receipt: Receipt, kind: str, image: bytes, mime: str) -> str:
     return str(path)
 
 
+def _refuse_received_slip(session: Session, receipt: Receipt, slip_number: str | None) -> None:
+    """The same packing slip can only be received once (no double-counting stock)."""
+    if not slip_number:
+        return
+    earlier = session.scalar(
+        select(Receipt).where(
+            Receipt.cafe_id == receipt.cafe_id,
+            Receipt.slip_number == slip_number,
+            Receipt.status == "confirmed",
+            Receipt.receipt_id != receipt.receipt_id,
+        )
+    )
+    if earlier is not None:
+        cafe = session.get(Cafe, receipt.cafe_id)
+        tz = ZoneInfo(cafe.timezone if cafe else "UTC")
+        when = earlier.confirmed_at.astimezone(tz).strftime("%b %-d") if earlier.confirmed_at else "earlier"
+        raise ReceivingError(f"Packing slip {slip_number} was already received ({when}). Nothing was added again.")
+
+
 def attach_slip(session: Session, receipt: Receipt, slip: SlipRead, model: str, image: bytes | None = None,
                 mime: str = "image/jpeg") -> Receipt:
     _require_draft(receipt)
+    _refuse_received_slip(session, receipt, slip.packing_slip_number)
     receipt.slip_read = slip.model_dump(mode="json")
     receipt.slip_number = slip.packing_slip_number
     receipt.slip_supplier = slip.supplier
@@ -373,6 +397,7 @@ def _require_draft(receipt: Receipt) -> None:
 def confirm(session: Session, receipt: Receipt, *, confirmed_by: str = "owner", channel: str = "web") -> Receipt:
     """Owner approved: only accepted quantities become stock; shortfalls become a credit request."""
     _require_draft(receipt)
+    _refuse_received_slip(session, receipt, receipt.slip_number)
     if receipt.order_id is None:
         raise ReceivingError("Match this delivery to an order first (the slip's PO number wasn't found).")
     waiting = [l for l in receipt.lines if l.status == "needs_count"]

@@ -3,10 +3,9 @@
 Run from business-core/ (needs MODEL_API_KEY in .env):
     PYTHONPATH=. python scripts/try_vision.py
 
-Tries three requests and prints what worked:
-  1. packing slip as a PNG image   (OpenAI-style "image_url" with a base64 data URL)
-  2. packing slip as a PDF file    (OpenAI-style "file" content part)
-  3. delivery photo as a JPEG image (count what is visible)
+Tries two image requests (glasses and phones produce images) and prints what worked:
+  1. packing slip photo   (OpenAI-style "image_url" with a base64 data URL)
+  2. delivery photo       (count what is visible)
 Results are saved to tests/fixtures/receiving/vision_live.json so we can build on the real output.
 """
 
@@ -74,16 +73,11 @@ def main() -> None:
     print(f"Model: {model}")
     results = {
         "model": model,
-        "slip_png": ask(client, model, "1. Packing slip as PNG image", [
+        "slip": ask(client, model, "1. Packing slip photo", [
             {"type": "text", "text": SLIP_PROMPT},
             {"type": "image_url", "image_url": {"url": data_url(ASSETS / "packing-slip-PS-58213.png", "image/png")}},
         ]),
-        "slip_pdf": ask(client, model, "2. Packing slip as PDF file", [
-            {"type": "text", "text": SLIP_PROMPT},
-            {"type": "file", "file": {"filename": "packing-slip-PS-58213.pdf",
-                                       "file_data": data_url(ASSETS / "packing-slip-PS-58213.pdf", "application/pdf")}},
-        ]),
-        "photo": ask(client, model, "3. Delivery photo as JPEG image", [
+        "photo": ask(client, model, "2. Delivery photo", [
             {"type": "text", "text": PHOTO_PROMPT},
             {"type": "image_url", "image_url": {"url": data_url(ASSETS / "delivery-photo.jpg", "image/jpeg")}},
         ]),

@@ -165,7 +165,7 @@ def test_cafe_orders_are_rounded_up_to_whole_packs(session: Session) -> None:
     whole = next(l for l in result["lines"] if l["ingredient_id"] == "WHOLE_MILK")
     assert whole["status"] == "short"  # 30 x 240 mL = 7.2 L against 3 L counted on Thursday
     assert Decimal(whole["shortfall"]) == Decimal("4200")
-    assert whole["order_quantity"] == "5000" and whole["packs"] == 5 and whole["pack_name"] == "1 L carton"
+    assert whole["order_quantity"] == "6000" and whole["packs"] == 1 and whole["pack_name"] == "case of 6 × 1 L"
 
 
 def test_approved_changes_are_acknowledged_with_real_coverage(session: Session) -> None:

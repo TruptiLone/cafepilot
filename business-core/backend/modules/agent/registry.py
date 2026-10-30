@@ -187,6 +187,7 @@ class PurchaseOrderOut(BaseModel):
 
 class SupplierOrderResponse(BaseModel):
     order_id: str
+    po_number: str | None = None
     order_ref: str
     supplier_id: str
     supplier_name: str
@@ -319,7 +320,8 @@ def _already_cancelled(session: Session, p: Any, _: str | None) -> Any:
 def _order_response(order: Any) -> SupplierOrderResponse:
     return SupplierOrderResponse(
         order_id=order.order_id,
-        order_ref=order.order_id,
+        po_number=order.po_number,
+        order_ref=order.po_number or order.order_id,
         supplier_id=order.supplier_id,
         supplier_name=order.supplier_name,
         status=order.status,

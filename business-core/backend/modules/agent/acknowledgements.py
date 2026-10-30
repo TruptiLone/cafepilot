@@ -142,7 +142,7 @@ def _order_status(session: Session, node: Any, ctx: RunContext) -> ChangeStatus:
         for l in order.lines
     ]
     when = order.requested_delivery_at.astimezone(ctx.tz)
-    details = [f"Reference {order.order_id}", *items, f"Total {_money(order.total_cents)}"]
+    details = [f"Order {order.po_number or order.order_id}", *items, f"Total {_money(order.total_cents)}"]
     sent = Stage(stage=f"Sent to {order.supplier_name}", state="done", at=order.sent_at)
     simulated_note = "Simulated supplier: no real order was sent. " if order.simulated else ""
 

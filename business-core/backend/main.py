@@ -6,6 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from backend.modules.agent.router import router as agent_router
 from backend.modules.inventory.router import router as inventory_router
+from backend.modules.receiving.router import router as receiving_router
 from backend.modules.sales.router import router as sales_router
 from backend.modules.staffing.router import router as staffing_router
 
@@ -47,3 +48,4 @@ app.include_router(inventory_router, prefix="/api/v1/inventory")
 app.include_router(sales_router, prefix="/api/v1/sales")
 app.include_router(staffing_router, prefix="/api/v1/staffing")
 app.include_router(agent_router, prefix="/api/v1/agent")
+app.include_router(receiving_router, prefix="/api/v1/receiving")

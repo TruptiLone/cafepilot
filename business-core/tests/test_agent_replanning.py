@@ -71,24 +71,24 @@ def _api(session: Session, client=None) -> TestClient:
 
 
 def test_approved_order_is_sent_then_answered_honestly(session: Session) -> None:
-    run = _run(session, _order_plan("VALLEY_FARMS"))
+    run = _run(session, _order_plan("WILLOW_RIDGE"))
     run = decide(session, run.run_id, "order", "approved")
     try:
         api = _api(session)
         body = api.get(f"/api/v1/agent/runs/{run.run_id}").json()
         order = next(n for n in body["nodes"] if n["node_id"] == "order")
         assert [s["stage"] for s in order["lifecycle"]] == [
-            "Proposed", "Approved", "Sent to Valley Farms", "Waiting for confirmation"]
-        assert order["external_status"] == "sent" and body["waiting_on"] == ["Valley Farms"]
-        assert order["acknowledgement"]["headline"] == "Order sent to Valley Farms (simulated)"
+            "Proposed", "Approved", "Sent to Willow Ridge Dairy Supply", "Waiting for confirmation"]
+        assert order["external_status"] == "sent" and body["waiting_on"] == ["Willow Ridge Dairy Supply"]
+        assert order["acknowledgement"]["headline"] == "Order sent to Willow Ridge Dairy Supply (simulated)"
         assert any(d.startswith("Total $") for d in order["acknowledgement"]["details"])
-        assert "Waiting on Valley Farms" in body["closing_message"]
+        assert "Waiting on Willow Ridge Dairy Supply" in body["closing_message"]
 
         settle_due(session, cafe_id=C, now=LATER)
         body = api.get(f"/api/v1/agent/runs/{run.run_id}").json()
         order = next(n for n in body["nodes"] if n["node_id"] == "order")
         assert order["lifecycle"][-1]["stage"] == "Confirmed" and order["external_status"] == "confirmed"
-        assert order["acknowledgement"]["headline"] == "Valley Farms confirmed the order"
+        assert order["acknowledgement"]["headline"] == "Willow Ridge Dairy Supply confirmed the order"
         assert "Arriving Sun Nov 1 by 6 AM" in order["acknowledgement"]["details"]
         assert body["waiting_on"] == []
     finally:
@@ -105,12 +105,12 @@ def test_usual_supplier_rejects_early_sunday_and_muse_replans(session: Session, 
     assert order.response_reason == "Bay Dairy Co. can't deliver on Sundays before 9 AM (requested 6 AM)."
 
     replan = {
-        "status": "plan", "goal": "Get the milk from Valley Farms",
-        "assumptions": ["Valley Farms delivers Sundays from 5:30 AM"],
+        "status": "plan", "goal": "Get the milk from Willow Ridge Dairy Supply",
+        "assumptions": ["Willow Ridge Dairy Supply delivers Sundays from 5:30 AM"],
         "nodes": [
             {"id": "po", "action": "get_purchase_order", "reason": "r", "args": {"cafe_id": C, "order_id": order.order_id}},
             {"id": "resend", "action": "propose_supplier_order", "reason": "r",
-             "args": {"cafe_id": C, "supplier_id": "VALLEY_FARMS", "lines": "$po.reorder_lines",
+             "args": {"cafe_id": C, "supplier_id": "WILLOW_RIDGE", "lines": "$po.reorder_lines",
                       "requested_delivery_at": "2026-11-01T06:00:00-08:00"}},
         ],
     }
@@ -142,7 +142,7 @@ def test_usual_supplier_rejects_early_sunday_and_muse_replans(session: Session, 
 def test_resending_needs_the_rejected_orders_quantities() -> None:
     plan = Plan.model_validate({"status": "plan", "goal": "g", "nodes": [
         {"id": "resend", "action": "propose_supplier_order", "reason": "r",
-         "args": {"cafe_id": C, "supplier_id": "VALLEY_FARMS",
+         "args": {"cafe_id": C, "supplier_id": "WILLOW_RIDGE",
                   "lines": [{"ingredient_id": "OAT_MILK", "quantity": "9000", "unit": "mL"}],
                   "requested_delivery_at": "2026-11-01T06:00:00-08:00"}}]})
     codes = {i.code for i in validate_plan(plan, C, timezone="America/Los_Angeles").issues}

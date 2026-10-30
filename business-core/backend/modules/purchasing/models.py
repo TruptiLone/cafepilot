@@ -9,7 +9,8 @@ Demo suppliers and staff replies are simulated and labeled ``simulated``.
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.db.base import Base
@@ -33,10 +34,12 @@ class PurchaseOrder(Base):
         CheckConstraint("total_cents >= 0", name="ck_purchase_orders_total"),
         Index("ix_purchase_orders_cafe_status", "cafe_id", "status"),
         Index("ix_purchase_orders_source", "source_run_id", "source_node_id"),
+        UniqueConstraint("cafe_id", "po_number", name="uq_purchase_orders_cafe_po_number"),
     )
 
     order_id: Mapped[str] = mapped_column(Text, primary_key=True)
     cafe_id: Mapped[str] = mapped_column(Text, ForeignKey("cafes.cafe_id"), nullable=False)
+    po_number: Mapped[str | None] = mapped_column(Text, nullable=True)
     supplier_id: Mapped[str] = mapped_column(Text, nullable=False)
     supplier_name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
@@ -71,6 +74,8 @@ class PurchaseOrderLine(Base):
     order_id: Mapped[str] = mapped_column(Text, ForeignKey("purchase_orders.order_id", ondelete="CASCADE"), primary_key=True)
     line_no: Mapped[int] = mapped_column(Integer, primary_key=True)
     ingredient_id: Mapped[str] = mapped_column(Text, nullable=False)
+    supplier_item_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
     quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False)
     unit: Mapped[str] = mapped_column(Text, nullable=False)
     pack_size: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
@@ -104,3 +109,83 @@ class ShiftOffer(Base):
     simulated: Mapped[bool] = mapped_column(Boolean, nullable=False)
     source_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+RECEIPT_STATUSES = ("draft", "confirmed", "cancelled")
+LINE_STATUSES = (
+    "match",          # ordered = shipped = counted
+    "needs_count",    # some units may be hidden (crate, closed case): the owner must count
+    "short",          # fewer arrived than the slip says
+    "short_shipped",  # the slip itself ships less than was ordered (back-order)
+    "over",           # more arrived than ordered
+    "not_on_order",   # on the slip or in the photo, but not on our order (wrong item)
+    "missing",        # on our order, but neither on the slip nor seen
+    "damaged",        # owner rejected some units as damaged or out of date
+)
+
+
+class Receipt(Base):
+    """One delivery being checked in: what the slip says, what the photo shows, what the owner counts."""
+
+    __tablename__ = "receipts"
+    __table_args__ = (
+        CheckConstraint(_in("status", RECEIPT_STATUSES), name="ck_receipts_status"),
+        Index("ix_receipts_cafe_status", "cafe_id", "status"),
+    )
+
+    receipt_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cafe_id: Mapped[str] = mapped_column(Text, ForeignKey("cafes.cafe_id"), nullable=False)
+    order_id: Mapped[str | None] = mapped_column(Text, ForeignKey("purchase_orders.order_id"), nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    slip_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slip_supplier: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slip_po_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slip_delivery: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slip_image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    photo_image_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    slip_read: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    photo_read: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    channel: Mapped[str | None] = mapped_column(Text, nullable=True)
+    credit_request: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    lines: Mapped[list["ReceiptLine"]] = relationship(
+        back_populates="receipt", cascade="all, delete-orphan", order_by="ReceiptLine.line_no"
+    )
+
+
+class ReceiptLine(Base):
+    __tablename__ = "receipt_lines"
+    __table_args__ = (
+        CheckConstraint(_in("status", LINE_STATUSES), name="ck_receipt_lines_status"),
+        CheckConstraint("counted_quantity IS NULL OR counted_quantity >= 0", name="ck_receipt_lines_counted"),
+        CheckConstraint("rejected_quantity >= 0", name="ck_receipt_lines_rejected"),
+        CheckConstraint("accepted_quantity IS NULL OR accepted_quantity >= 0", name="ck_receipt_lines_accepted"),
+    )
+
+    receipt_id: Mapped[str] = mapped_column(Text, ForeignKey("receipts.receipt_id", ondelete="CASCADE"), primary_key=True)
+    line_no: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ingredient_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    order_line_no: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    supplier_item_number: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    unit: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pack_size: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    unit_size: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    ordered_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    slip_shipped_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    slip_backordered_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    seen_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    seen_may_hide_more: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    counted_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    rejected_quantity: Mapped[Decimal] = mapped_column(Numeric(18, 3), nullable=False, default=0)
+    rejected_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    accepted_quantity: Mapped[Decimal | None] = mapped_column(Numeric(18, 3), nullable=True)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+
+    receipt: Mapped[Receipt] = relationship(back_populates="lines")

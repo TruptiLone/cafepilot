@@ -58,6 +58,16 @@ def _tz(session: Session, cafe_id: str) -> ZoneInfo:
     return ZoneInfo(cafe.timezone if cafe else "UTC")
 
 
+PO_NUMBER_START = 1040
+
+
+def next_po_number(session: Session, cafe_id: str) -> str:
+    """Human order numbers (PO-1043…), unique per café."""
+    numbers = session.scalars(select(PurchaseOrder.po_number).where(PurchaseOrder.cafe_id == cafe_id))
+    highest = max((int(n.split("-")[-1]) for n in numbers if n and n.split("-")[-1].isdigit()), default=PO_NUMBER_START)
+    return f"PO-{highest + 1}"
+
+
 def _clock(moment: datetime) -> str:
     return moment.strftime("%I:%M %p").lstrip("0").replace(":00 ", " ")
 
@@ -125,6 +135,7 @@ def send_order(
         order_lines.append(
             PurchaseOrderLine(
                 line_no=number, ingredient_id=line.ingredient_id, quantity=pack_size * packs, unit=line.unit,
+                supplier_item_number=item.get("item_number"), description=item.get("description"),
                 pack_size=pack_size, pack_name=item["pack_name"], packs=packs,
                 pack_price_cents=int(item["pack_price_cents"]),
             )
@@ -133,6 +144,7 @@ def send_order(
     order = PurchaseOrder(
         order_id=order_id,
         cafe_id=cafe_id,
+        po_number=next_po_number(session, cafe_id),
         supplier_id=supplier["supplier_id"],
         supplier_name=supplier["name"],
         status="sent",

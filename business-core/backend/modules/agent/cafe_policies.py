@@ -15,7 +15,7 @@ CAFE_POLICIES: dict[str, dict[str, Any]] = {
         },
         "ordering": {
             "buffer_pct": 10,
-            "simulated_supplier_id": "SIM_SUPPLIER",
+            "default_supplier_id": "BAY_DAIRY",
             "latest_delivery_before_opening": "06:00",
             # Orders are rounded up to whole packs (base units per pack).
             "pack_sizes": {
@@ -26,6 +26,36 @@ CAFE_POLICIES: dict[str, dict[str, Any]] = {
                 "COFFEE_BEANS": {"size": "1000", "name": "1 kg bag"},
             },
         },
+        # Simulated suppliers (demo): they answer a few seconds after an order is sent.
+        # earliest_delivery: weekday (Mon=0) -> earliest local delivery time; missing day = no delivery.
+        "suppliers": [
+            {
+                "supplier_id": "BAY_DAIRY",
+                "name": "Bay Dairy Co.",
+                "respond_after_seconds": 8,
+                "earliest_delivery": {0: "05:00", 1: "05:00", 2: "05:00", 3: "05:00", 4: "05:00", 5: "05:00", 6: "09:00"},
+                "items": {
+                    "WHOLE_MILK": {"pack_size": "1000", "pack_name": "1 L carton", "pack_price_cents": 310},
+                    "OAT_MILK": {"pack_size": "1000", "pack_name": "1 L carton", "pack_price_cents": 420},
+                    "ALMOND_MILK": {"pack_size": "1000", "pack_name": "1 L carton", "pack_price_cents": 450},
+                    "SKIM_MILK": {"pack_size": "1000", "pack_name": "1 L carton", "pack_price_cents": 300},
+                },
+            },
+            {
+                "supplier_id": "VALLEY_FARMS",
+                "name": "Valley Farms",
+                "respond_after_seconds": 8,
+                "earliest_delivery": {d: "05:30" for d in range(7)},
+                "items": {
+                    "WHOLE_MILK": {"pack_size": "1000", "pack_name": "1 L carton", "pack_price_cents": 350},
+                    "OAT_MILK": {"pack_size": "1000", "pack_name": "1 L carton", "pack_price_cents": 470},
+                    "ALMOND_MILK": {"pack_size": "1000", "pack_name": "1 L carton", "pack_price_cents": 500},
+                    "SKIM_MILK": {"pack_size": "1000", "pack_name": "1 L carton", "pack_price_cents": 340},
+                },
+            },
+        ],
+        # Simulated staff replies to shift offers (demo).
+        "staff_replies": {"respond_after_seconds": 10, "declines": []},
         # weekday (Mon=0) -> (open hour, close hour), café local time
         "opening_hours": {0: (7, 19), 1: (7, 19), 2: (7, 19), 3: (7, 19), 4: (7, 19), 5: (7, 17), 6: (7, 17)},
         # Regular orders that arrive without CaféPilot doing anything (sized to normal use).

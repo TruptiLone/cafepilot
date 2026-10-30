@@ -8,6 +8,7 @@ from backend.db.config import get_database_connect_args, get_settings
 from backend.models.cafe import Cafe
 from backend.modules.agent.models import AgentApproval, AgentNodeRun, AgentPlanRun
 from backend.modules.events.models import CafeEvent  # noqa: F401
+from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, ShiftOffer  # noqa: F401
 from backend.modules.inventory.models import (
     InventoryItem,
     InventoryMovement,

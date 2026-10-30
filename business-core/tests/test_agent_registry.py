@@ -162,8 +162,9 @@ def test_simulated_supplier_order_is_labeled_and_deterministic(database_session:
     first = REGISTRY["propose_supplier_order"].run(database_session, args)
     second = REGISTRY["propose_supplier_order"].run(database_session, args)
     assert first["simulated"] is True
-    assert first["status"] == "confirmed"
-    assert first["order_ref"] == second["order_ref"]
+    assert first["status"] == "sent"  # the supplier answers later; approval is not confirmation
+    assert first["confirmed_delivery_at"] is None
+    assert first["order_ref"] == second["order_ref"]  # sending the same request twice is one order
 
 
 def test_simulated_supplier_order_rejects_wrong_unit(database_session: Session) -> None:

@@ -21,6 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from sqlalchemy.orm import Session
 
+from backend.modules.purchasing.service import OrderLineIn, offer_shift, send_order
 from backend.modules.agent.demand import EventDemandInput, EventDemandResult, estimate_event_demand
 from backend.modules.agent.calculations import (
     ShortfallInput,
@@ -149,7 +150,9 @@ class SupplierOrderLine(_AgentInput):
 
 
 class SupplierOrderInput(CafeScopedInput):
-    supplier_id: str = "SIM_SUPPLIER"
+    supplier_id: str | None = Field(
+        default=None, description="A supplier_id from REFERENCE DATA suppliers. Omit for the café's usual supplier."
+    )
     lines: list[SupplierOrderLine] = Field(min_length=1)
     requested_delivery_at: datetime
     note: str | None = None
@@ -157,14 +160,42 @@ class SupplierOrderInput(CafeScopedInput):
     _aware = field_validator("requested_delivery_at")(_require_aware)
 
 
+class SupplierOrderLineOut(BaseModel):
+    ingredient_id: str
+    quantity: Decimal
+    unit: str
+    packs: int | None = None
+    pack_name: str | None = None
+    pack_price_cents: int | None = None
+
+
+class GetPurchaseOrderInput(CafeScopedInput):
+    order_id: str = Field(min_length=1, description="A purchase order id, e.g. from a rejected order.")
+
+
+class PurchaseOrderOut(BaseModel):
+    order_id: str
+    supplier_id: str
+    supplier_name: str
+    status: str
+    response_reason: str | None
+    requested_delivery_at: datetime
+    confirmed_delivery_at: datetime | None
+    lines: list["SupplierOrderLineOut"]
+    reorder_lines: list[SupplierOrderLine] = Field(description="The same quantities, ready to send again.")
+
+
 class SupplierOrderResponse(BaseModel):
+    order_id: str
     order_ref: str
     supplier_id: str
-    status: Literal["confirmed"]
-    simulated: Literal[True]
+    supplier_name: str
+    status: str
+    simulated: bool
     requested_delivery_at: datetime
-    confirmed_delivery_at: datetime
-    lines: list[SupplierOrderLine]
+    confirmed_delivery_at: datetime | None
+    lines: list[SupplierOrderLineOut]
+    total_cents: int
     message: str
 
 
@@ -173,7 +204,16 @@ class SupplierOrderResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-Handler = Callable[[Session, Any], Any]
+Handler = Callable[..., Any]
+
+
+@dataclass(frozen=True)
+class WriteContext:
+    """Passed to writes that create records: a stable id plus where the request came from."""
+
+    record_id: str | None
+    run_id: str | None = None
+    node_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -213,11 +253,19 @@ class Action:
         validated = self._output_adapter.validate_python(result, from_attributes=True)
         return self._output_adapter.dump_python(validated, mode="json")
 
-    def run(self, session: Session, raw_args: dict[str, Any], *, record_id: str | None = None) -> Any:
+    def run(
+        self,
+        session: Session,
+        raw_args: dict[str, Any],
+        *,
+        record_id: str | None = None,
+        run_id: str | None = None,
+        node_id: str | None = None,
+    ) -> Any:
         """Validate args, call the domain service, return JSON-safe output."""
         params = self.input_model.model_validate(raw_args)
         if self.record_id_prefix is not None:
-            return self._dump(self.handler(session, params, record_id))
+            return self._dump(self.handler(session, params, WriteContext(record_id, run_id, node_id)))
         return self._dump(self.handler(session, params))
 
     def existing(self, session: Session, raw_args: dict[str, Any], record_id: str | None) -> Any:
@@ -268,26 +316,93 @@ def _already_cancelled(session: Session, p: Any, _: str | None) -> Any:
 # ---------------------------------------------------------------------------
 
 
-def _simulate_supplier_order(session: Session, p: SupplierOrderInput) -> SupplierOrderResponse:
+def _order_response(order: Any) -> SupplierOrderResponse:
+    return SupplierOrderResponse(
+        order_id=order.order_id,
+        order_ref=order.order_id,
+        supplier_id=order.supplier_id,
+        supplier_name=order.supplier_name,
+        status=order.status,
+        simulated=order.simulated,
+        requested_delivery_at=order.requested_delivery_at,
+        confirmed_delivery_at=order.confirmed_delivery_at,
+        lines=[
+            SupplierOrderLineOut(
+                ingredient_id=line.ingredient_id, quantity=line.quantity, unit=line.unit, packs=line.packs,
+                pack_name=line.pack_name, pack_price_cents=line.pack_price_cents,
+            )
+            for line in order.lines
+        ],
+        total_cents=order.total_cents,
+        message="Sent to a simulated supplier; it answers in a few seconds. No real order is placed."
+        if order.simulated
+        else "Sent to supplier.",
+    )
+
+
+def _get_purchase_order(session: Session, p: GetPurchaseOrderInput) -> PurchaseOrderOut:
+    from backend.modules.purchasing.models import PurchaseOrder
+    from backend.modules.purchasing.service import settle_due
+
+    settle_due(session, cafe_id=p.cafe_id)
+    order = session.get(PurchaseOrder, p.order_id)
+    if order is None or order.cafe_id != p.cafe_id:
+        raise LookupError(f"purchase order not found: {p.order_id}")
+    out = _order_response(order)
+    return PurchaseOrderOut(
+        order_id=order.order_id, supplier_id=order.supplier_id, supplier_name=order.supplier_name,
+        status=order.status, response_reason=order.response_reason,
+        requested_delivery_at=order.requested_delivery_at, confirmed_delivery_at=order.confirmed_delivery_at,
+        lines=out.lines,
+        reorder_lines=[SupplierOrderLine(ingredient_id=l.ingredient_id, quantity=l.quantity, unit=l.unit) for l in order.lines],
+    )
+
+
+def _send_supplier_order(session: Session, p: SupplierOrderInput, ctx: "WriteContext") -> SupplierOrderResponse:
     inventory = InventoryService(session)
     for line in p.lines:
         item = inventory.get_item(line.ingredient_id, p.cafe_id)
         if line.unit != item.base_unit:
-            raise ValueError(
-                f"{line.ingredient_id} must be ordered in {item.base_unit}, not {line.unit}"
-            )
-    fingerprint = json.dumps(p.model_dump(mode="json"), sort_keys=True)
-    order_ref = "SIMPO-" + hashlib.sha256(fingerprint.encode()).hexdigest()[:10].upper()
-    return SupplierOrderResponse(
-        order_ref=order_ref,
+            raise ValueError(f"{line.ingredient_id} must be ordered in {item.base_unit}, not {line.unit}")
+    order_id = ctx.record_id or "po_" + hashlib.sha256(
+        json.dumps(p.model_dump(mode="json"), sort_keys=True).encode()
+    ).hexdigest()[:20]
+    from backend.modules.purchasing.models import PurchaseOrder
+
+    existing = session.get(PurchaseOrder, order_id)
+    if existing is not None:  # same request sent again: return the original order
+        return _order_response(existing)
+    order = send_order(
+        session,
+        cafe_id=p.cafe_id,
         supplier_id=p.supplier_id,
-        status="confirmed",
-        simulated=True,
+        lines=[OrderLineIn(l.ingredient_id, l.quantity, l.unit) for l in p.lines],
         requested_delivery_at=p.requested_delivery_at,
-        confirmed_delivery_at=p.requested_delivery_at,
-        lines=p.lines,
-        message="Simulated supplier response. No real order was placed.",
+        order_id=order_id,
+        source_run_id=ctx.run_id,
+        source_node_id=ctx.node_id,
+        note=p.note,
     )
+    session.commit()
+    return _order_response(order)
+
+
+def _existing_order(session: Session, p: SupplierOrderInput, record_id: str | None) -> Any:
+    from backend.modules.purchasing.models import PurchaseOrder
+
+    order = session.get(PurchaseOrder, record_id) if record_id else None
+    return _order_response(order) if order is not None else None
+
+
+def _schedule_and_offer(session: Session, p: ShiftCreate, ctx: "WriteContext") -> Any:
+    shift = StaffingService(session).schedule_shift(p, shift_id=ctx.record_id)
+    if ctx.run_id is not None:  # the agent offered it: the employee still has to say yes
+        offer_shift(
+            session, cafe_id=p.cafe_id, shift_id=shift.shift_id, employee_id=p.employee_id,
+            source_run_id=ctx.run_id, source_node_id=ctx.node_id,
+        )
+        session.commit()
+    return shift
 
 
 _ACTIONS: list[Action] = [
@@ -365,7 +480,7 @@ _ACTIONS: list[Action] = [
         side_effect="write",
         input_model=StockCountCreate,
         output_type=StockCountResponse,
-        handler=lambda s, p, record_id: InventoryService(s).create_count(p, count_id=record_id),
+        handler=lambda s, p, ctx: InventoryService(s).create_count(p, count_id=ctx.record_id),
         record_id_prefix="count",
         find_existing=_existing_count,
         consumes=("ingredient_catalog", "stock_estimate"),
@@ -491,7 +606,7 @@ _ACTIONS: list[Action] = [
         side_effect="write",
         input_model=ShiftCreate,
         output_type=ShiftResponse,
-        handler=lambda s, p, record_id: StaffingService(s).schedule_shift(p, shift_id=record_id),
+        handler=_schedule_and_offer,
         record_id_prefix="shift",
         find_existing=_existing_shift,
         consumes=("employee_roster", "shift_schedule", "coverage"),
@@ -548,22 +663,39 @@ _ACTIONS: list[Action] = [
         consumes=("menu_catalog", "stock_estimate", "ingredient_demand", "event_demand"),
         produces=("order_suggestion",),
     ),
+    Action(
+        name="get_purchase_order",
+        description=(
+            "Read a purchase order: supplier, status (sent / confirmed / rejected), the supplier's reason, and "
+            "reorder_lines with the same quantities. Use it to replan after a rejection: send "
+            "\"$<this step>.reorder_lines\" to another supplier."
+        ),
+        domain="purchasing",
+        side_effect="read",
+        input_model=GetPurchaseOrderInput,
+        output_type=PurchaseOrderOut,
+        handler=_get_purchase_order,
+        consumes=(),
+        produces=("order_suggestion", "purchase_order"),
+    ),
     # ---- Purchasing (simulated)
     Action(
         name="propose_supplier_order",
         description=(
-            "SIMULATED supplier order. lines MUST be \"$<calculate_shortfall step>.order_lines\" "
-            "so quantities come from code. Validates ingredients and units and returns a labeled "
-            "simulated confirmation. No real order is placed."
+            "Send an order to a SIMULATED supplier. lines MUST be \"$<calculate_shortfall step>.order_lines\" "
+            "so quantities come from code. supplier_id from REFERENCE DATA suppliers (omit for the usual one). "
+            "The supplier answers a few seconds later: confirmed, or rejected with a reason. No real order is placed."
         ),
         domain="purchasing",
         side_effect="write",
         input_model=SupplierOrderInput,
         output_type=SupplierOrderResponse,
-        handler=_simulate_supplier_order,
+        handler=_send_supplier_order,
+        record_id_prefix="po",
+        find_existing=_existing_order,
         consumes=("stock_estimate", "ingredient_demand", "order_suggestion"),
         produces=("supplier_order",),
-        requires=(("calculate_shortfall",),),
+        requires=(("calculate_shortfall", "get_purchase_order"),),
         approval="owner",
         skip_reason=lambda args: None if args.get("lines") else "Nothing to order: stock covers the need.",
     ),

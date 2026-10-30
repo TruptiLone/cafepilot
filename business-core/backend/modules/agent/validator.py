@@ -145,11 +145,13 @@ def _check_order_quantities(node: PlanNode, by_id: dict[str, PlanNode], issues: 
         return
     ref = parse_ref(node.args.get("lines"))
     source = by_id.get(ref[0]) if ref else None
-    if not ref or ref[1] != ".order_lines" or source is None or source.action != "calculate_shortfall":
+    allowed = {("calculate_shortfall", ".order_lines"), ("get_purchase_order", ".reorder_lines")}
+    if not ref or source is None or (source.action, ref[1]) not in allowed:
         issues.append(
             PlanIssue(
                 "unverified_quantity",
-                'order quantities must come from code: set lines to "$<calculate_shortfall step>.order_lines"',
+                'order quantities must come from code: set lines to "$<calculate_shortfall step>.order_lines" '
+                '(or "$<get_purchase_order step>.reorder_lines" when re-sending a rejected order)',
                 node.id,
             )
         )

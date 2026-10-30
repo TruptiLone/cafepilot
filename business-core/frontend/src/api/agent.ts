@@ -31,9 +31,25 @@ export type RunStep = {
   finished_at: string | null;
   summary?: string | null;
   acknowledgement?: Acknowledgement | null;
+  lifecycle?: LifecycleStage[] | null;
+  external_status?: string | null;
+  replanned_in?: string | null;
 };
 
-export type Acknowledgement = { headline: string; details: string[]; caveat: string | null };
+export type Acknowledgement = {
+  headline: string;
+  details: string[];
+  caveat: string | null;
+  tone?: "done" | "waiting" | "problem" | "declined";
+  next_step?: "find_alternative" | "find_cover" | null;
+};
+
+export type LifecycleStage = {
+  stage: string;
+  state: "done" | "current" | "failed" | "pending";
+  at: string | null;
+  note: string | null;
+};
 
 export type RunEdge = { source: string; target: string; kind: "data" | "safety" };
 
@@ -54,6 +70,9 @@ export type AgentRun = {
   updated_at: string;
   nodes: RunStep[];
   closing_message?: string | null;
+  waiting_on?: string[];
+  parent_run_id?: string | null;
+  parent_node_id?: string | null;
 };
 
 export type RunSummary = {
@@ -186,6 +205,13 @@ export function listEvents(signal?: AbortSignal): Promise<DetectedEvent[]> {
 export function startEventRun(eventId: string): Promise<StartRunResponse> {
   return requestJson<StartRunResponse>(
     `/api/v1/agent/events/${encodeURIComponent(eventId)}/runs`,
+    { method: "POST", headers: { Accept: "application/json" } },
+  );
+}
+
+export function replanStep(runId: string, nodeId: string): Promise<StartRunResponse> {
+  return requestJson<StartRunResponse>(
+    `/api/v1/agent/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/replan`,
     { method: "POST", headers: { Accept: "application/json" } },
   );
 }

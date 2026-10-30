@@ -146,7 +146,14 @@ def build_planning_context(
             {"employee_id": e.employee_id, "name": e.name, "role": e.role}
             for e in employees
         ],
-        "cafe_policies": {k: v for k, v in policies_for(cafe_id).items() if k != "standing_deliveries"},
+        "cafe_policies": {
+            k: v for k, v in policies_for(cafe_id).items() if k not in ("standing_deliveries", "suppliers", "staff_replies")
+        },
+        "suppliers": [
+            {"supplier_id": s["supplier_id"], "name": s["name"], "earliest_delivery": s.get("earliest_delivery", {}),
+             "items": sorted(s.get("items", {}))}
+            for s in policies_for(cafe_id).get("suppliers", [])
+        ],
         "upcoming_events": upcoming_for_planner(session, cafe_id, effective_as_of),
     }
     return PlanningContext(cafe_id, cafe.timezone, effective_as_of, now, reference)
@@ -214,6 +221,14 @@ SCOPE
 12. If a detail that cannot reasonably be assumed is missing (e.g. no date), return
     needs_clarification with one question and no nodes. If the request is not about running this
     café, return out_of_scope with no nodes.
+
+REPLANNING
+13. When a supplier rejected an order, add get_purchase_order for it and send
+    "$<that step>.reorder_lines" to a supplier from REFERENCE DATA suppliers whose earliest_delivery
+    for that weekday is at or before the time needed. If none can, say so in assumptions and propose
+    the earliest possible delivery that still arrives before the café opens or the event starts.
+14. When an employee declined a shift, look for someone else (coverage_report, list_employees,
+    list_shifts) for the same hours; if nobody fits, say so in assumptions and propose no shift.
 """
 
 

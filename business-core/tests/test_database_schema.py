@@ -23,10 +23,13 @@ APPLICATION_TABLES = {
     "modifier_recipe_effects",
     "agent_plan_runs",
     "cafe_events",
+    "purchase_orders",
+    "purchase_order_lines",
+    "shift_offers",
     "agent_node_runs",
     "agent_approvals",
 }
-REVISION = "324eed209916"
+REVISION = "35c888456e31"
 
 pytestmark = pytest.mark.database
 

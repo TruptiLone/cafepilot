@@ -118,11 +118,15 @@ def create_run(
     validation: ValidationResult,
     model: str,
     attempts: int,
+    parent_run_id: str | None = None,
+    parent_node_id: str | None = None,
 ) -> AgentPlanRun:
     if not validation.valid:
         raise ValueError("only a valid plan can be run")
     now = _now()
     run = AgentPlanRun(
+        parent_run_id=parent_run_id,
+        parent_node_id=parent_node_id,
         run_id=f"RUN-{uuid4().hex[:12].upper()}",
         cafe_id=cafe_id,
         query=query,
@@ -264,7 +268,7 @@ def _invoke(session: Session, node: AgentNodeRun) -> None:
     node.started_at = _now()
     session.commit()  # services open their own transaction for writes
     try:
-        result = action.run(session, args, record_id=record_id)
+        result = action.run(session, args, record_id=record_id, run_id=node.run_id, node_id=node.node_id)
     except Exception as error:  # domain errors are reported on the step, not raised
         session.rollback()
         already = action.existing(session, args, record_id) if node.side_effect == "write" else None

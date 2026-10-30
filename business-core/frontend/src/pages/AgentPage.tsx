@@ -9,6 +9,7 @@ import {
   getRun,
   listEvents,
   listRuns,
+  replanStep,
   startEventRun,
   startRun,
 } from "../api/agent";
@@ -51,6 +52,28 @@ function AgentPage() {
   const [recent, setRecent] = useState<RunSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [events, setEvents] = useState<DetectedEvent[]>([]);
+  const [replanning, setReplanning] = useState<string | null>(null);
+
+  async function handleReplan(nodeId: string) {
+    if (!run) return;
+    setReplanning(nodeId);
+    setPlanError(null);
+    try {
+      const response = await replanStep(run.run_id, nodeId);
+      if (response.run) {
+        setSelectedId(null);
+        setRun(response.run);
+        setSearchParams({ run: response.run.run_id });
+      } else {
+        setRejectedPlanning(response.planning);
+      }
+      refreshRecent();
+    } catch (error) {
+      setPlanError(errorMessage(error));
+    } finally {
+      setReplanning(null);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -85,7 +108,8 @@ function AgentPage() {
   }, [runId, run?.run_id]);
 
   useEffect(() => {
-    if (!run || run.status !== "running") return;
+    // keep refreshing while Muse is working or a supplier / employee hasn't answered yet
+    if (!run || (run.status !== "running" && !(run.waiting_on && run.waiting_on.length > 0))) return;
     const timer = window.setTimeout(() => {
       getRun(run.run_id).then(setRun).catch(() => undefined);
     }, POLL_MS);
@@ -245,7 +269,24 @@ function AgentPage() {
             }}
             onShowStep={setSelectedId}
           />
-          <OutcomeList run={run} />
+          {run.parent_run_id && (
+            <p className="run-view__parent">
+              Muse planned this because a change in an earlier plan fell through.{" "}
+              <button
+                type="button"
+                className="text-button"
+                onClick={() => setSearchParams({ run: run.parent_run_id as string })}
+              >
+                See the earlier plan
+              </button>
+            </p>
+          )}
+          <OutcomeList
+            run={run}
+            onReplan={handleReplan}
+            onOpenRun={(id) => setSearchParams({ run: id })}
+            replanning={replanning}
+          />
 
           <div className={`run-view__body${selected ? " has-detail" : ""}`}>
             <TicketRail run={run} selectedId={selectedId} onSelect={setSelectedId} />

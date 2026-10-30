@@ -20,7 +20,9 @@ from backend.modules.agent.planner import (
 from backend.models.cafe import Cafe
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
 from backend.modules.agent.summaries import summarize_run
-from backend.modules.agent.acknowledgements import Acknowledgement, acknowledge_run
+from backend.modules.agent.acknowledgements import Acknowledgement, Stage, change_statuses
+from backend.modules.purchasing.service import settle_due
+from backend.modules.agent.replanning import NothingToReplanError, replan_request, replans_of
 from backend.modules.agent.executor import (
     ApprovalStateError,
     EditValidationError,
@@ -142,6 +144,13 @@ class NodeRunOut(BaseModel):
     acknowledgement: Acknowledgement | None = Field(
         default=None, description="For finished changes: what happened, details, and an honest caveat."
     )
+    lifecycle: list[Stage] | None = Field(
+        default=None, description="Changes only: Proposed → Approved → Sent/Offered → Confirmed/Accepted or Rejected/Declined."
+    )
+    external_status: str | None = Field(
+        default=None, description="sent / confirmed / rejected (orders), offered / accepted / declined (shifts)."
+    )
+    replanned_in: str | None = Field(default=None, description="The run that replanned this failed change.")
 
 
 class RunOut(BaseModel):
@@ -165,18 +174,34 @@ class RunOut(BaseModel):
     closing_message: str | None = Field(
         default=None, description="Muse's closing line once every change has been decided."
     )
+    waiting_on: list[str] = Field(
+        default_factory=list, description="Suppliers or staff whose answer is still pending (poll while non-empty)."
+    )
+    parent_run_id: str | None = None
+    parent_node_id: str | None = None
 
 
 def _run_out(database_session: Session, run: Any) -> RunOut:
     """Run with a code-written one-line summary on every step."""
     cafe = database_session.get(Cafe, run.cafe_id)
     summaries = summarize_run(list(run.nodes), run.cafe_id, cafe.timezone if cafe else "UTC")
+    if settle_due(database_session, cafe_id=run.cafe_id):  # reveal simulated supplier / staff answers that are due
+        database_session.commit()
     out = RunOut.model_validate(run)
-    acks, closing = acknowledge_run(database_session, run)
+    statuses, closing, waiting = change_statuses(database_session, run)
+    replans = replans_of(database_session, run.run_id)
     for node in out.nodes:
+        node.replanned_in = replans.get(node.node_id)
         node.summary = summaries.get(node.node_id)
-        node.acknowledgement = acks.get(node.node_id)
+        status_ = statuses.get(node.node_id)
+        if status_ is not None:
+            node.acknowledgement = status_.acknowledgement
+            node.lifecycle = status_.lifecycle
+            node.external_status = status_.external_status
+            if status_.acknowledgement and status_.acknowledgement.tone in ("done", "waiting", "problem"):
+                node.summary = status_.acknowledgement.headline
     out.closing_message = closing
+    out.waiting_on = waiting
     return out
 
 
@@ -213,6 +238,16 @@ def start_run(
     client: Any = Depends(get_planner_client),
 ) -> CreateRunResponse:
     """Plan, validate and start running: reads execute now, writes wait for approval."""
+    return _start(request, database_session, client)
+
+
+def _start(
+    request: PlanRequest,
+    database_session: Session,
+    client: Any,
+    parent_run_id: str | None = None,
+    parent_node_id: str | None = None,
+) -> CreateRunResponse:
     outcome, context = _plan(request, database_session, client)
     planning = _plan_response(outcome, context)
     if not outcome.validation.valid:
@@ -226,6 +261,8 @@ def start_run(
         validation=outcome.validation,
         model=outcome.result.model,
         attempts=outcome.attempts,
+        parent_run_id=parent_run_id,
+        parent_node_id=parent_node_id,
     )
     run = execute(database_session, run.run_id)
     return CreateRunResponse(planning=planning, run=_run_out(database_session, run))
@@ -342,3 +379,22 @@ def start_run_for_event(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     request = PlanRequest(query=event.request, cafe_id=event.cafe_id, as_of=event.knowledge_as_of)
     return start_run(request, database_session, client)
+
+
+@router.post("/runs/{run_id}/nodes/{node_id}/replan", response_model=CreateRunResponse)
+def replan_step(
+    run_id: str,
+    node_id: str,
+    database_session: Session = Depends(get_db),
+    client: Any = Depends(get_planner_client),
+) -> CreateRunResponse:
+    """A supplier rejected an order or an employee declined a shift: plan another way."""
+    run = _load(database_session, run_id)
+    try:
+        query = replan_request(database_session, run, node_id)
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found") from error
+    except NothingToReplanError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    request = PlanRequest(query=query, cafe_id=run.cafe_id, as_of=run.as_of)
+    return _start(request, database_session, client, parent_run_id=run_id, parent_node_id=node_id)

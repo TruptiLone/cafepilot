@@ -3182,3 +3182,47 @@ h1 {
     justify-self: start;
   }
 }
+
+.lifecycle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 6px;
+  padding: 0;
+  list-style: none;
+}
+
+.lifecycle__stage {
+  padding: 3px 9px;
+  color: #6e6c67;
+  background: #f1f1ef;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.lifecycle__stage--done {
+  color: var(--step-done, #2f6b4f);
+  background: var(--step-done-soft, #e8f1ec);
+}
+
+.lifecycle__stage--current {
+  color: var(--step-wait, #a86a12);
+  background: var(--step-wait-soft, #fbf1e1);
+}
+
+.lifecycle__stage--failed {
+  color: var(--step-fail, #b42318);
+  background: var(--step-fail-soft, #fdecea);
+}
+
+.outcome-list__replan {
+  justify-self: start;
+  margin-top: 6px;
+}
+
+.run-view__parent {
+  margin: 16px 0 0;
+  color: #4a4843;
+  font-size: 0.9rem;
+}

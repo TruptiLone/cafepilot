@@ -187,7 +187,9 @@ def test_owner_can_change_quantities_before_approving(session: Session) -> None:
     order = next(n for n in run.nodes if n.node_id == "order")
     assert order.status == "done"
     by_id = lambda lines: {l["ingredient_id"]: l["quantity"] for l in lines}  # noqa: E731
-    assert by_id(order.result["lines"]) == {_id("WHOLE_MILK"): "3000", _id("OAT_MILK"): "2000"}
+    assert {k: Decimal(v) for k, v in by_id(order.result["lines"]).items()} == {
+        _id("WHOLE_MILK"): Decimal("3000"), _id("OAT_MILK"): Decimal("2000")}
+    assert order.result["status"] == "sent" and order.result["supplier_name"] == "Simulated supplier"
     approval = session.scalar(select(AgentApproval).where(AgentApproval.run_id == run_id))
     assert by_id(approval.original_args["lines"])[_id("WHOLE_MILK")] == "2560"
     assert by_id(approval.edited_args["lines"])[_id("WHOLE_MILK")] == "3000"

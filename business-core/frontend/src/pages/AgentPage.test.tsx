@@ -412,4 +412,56 @@ describe("AgentPage", () => {
     expect(await screen.findByRole("heading", { name: run.goal })).toBeTruthy();
     expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")).toBe(true);
   });
+
+  it("shows a rejected order honestly and asks Muse for an alternative", async () => {
+    const rejected: AgentRun = {
+      ...run,
+      status: "completed",
+      waiting_on: [],
+      closing_message: "Here's where things stand: Bay Dairy Co. can't take this order. Something needs another plan.",
+      nodes: run.nodes.map((node) =>
+        node.node_id === "add_barista"
+          ? {
+              ...node,
+              action: "propose_supplier_order",
+              status: "done",
+              result: { order_id: "po_1" },
+              lifecycle: [
+                { stage: "Proposed", state: "done", at: null, note: null },
+                { stage: "Approved", state: "done", at: null, note: null },
+                { stage: "Sent to Bay Dairy Co.", state: "done", at: null, note: null },
+                { stage: "Rejected by supplier", state: "failed", at: null, note: null },
+              ],
+              acknowledgement: {
+                headline: "Bay Dairy Co. can't take this order",
+                details: ["Bay Dairy Co. can't deliver on Sundays before 9 AM (requested 6 AM).", "The milk shortfall is still open."],
+                caveat: "Simulated supplier: no real order was sent.",
+                tone: "problem",
+                next_step: "find_alternative",
+              },
+            }
+          : node,
+      ),
+    };
+    const replanned: AgentRun = { ...run, run_id: "RUN-2", goal: "Get the milk from Valley Farms", parent_run_id: "RUN-1", parent_node_id: "add_barista" };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/agent/runs?") || url.startsWith("/api/v1/agent/events")) return jsonResponse([]);
+      if (url.endsWith("/nodes/add_barista/replan") && init?.method === "POST")
+        return jsonResponse({ planning: planning(), run: replanned });
+      if (url.startsWith("/api/v1/agent/runs/RUN-2")) return jsonResponse(replanned);
+      return jsonResponse(rejected);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage("/agent?run=RUN-1");
+
+    const outcome = await screen.findByRole("region", { name: "What happened" });
+    expect(within(outcome).getByText("Rejected by supplier")).toBeTruthy();
+    expect(within(outcome).getByText(/before 9 AM/)).toBeTruthy();
+    await userEvent.click(within(outcome).getByRole("button", { name: "Find an alternative" }));
+
+    expect(await screen.findByRole("heading", { name: "Get the milk from Valley Farms" })).toBeTruthy();
+    expect(screen.getByText(/a change in an earlier plan fell through/)).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/nodes/add_barista/replan"))).toBe(true);
+  });
 });

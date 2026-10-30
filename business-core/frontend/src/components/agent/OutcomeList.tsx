@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import type { AgentRun } from "../../api/agent";
+import type { AgentRun, LifecycleStage } from "../../api/agent";
 import { describeChange } from "./changes";
 
 const LINKS: Record<string, { to: string; label: string }> = {
@@ -10,7 +10,26 @@ const LINKS: Record<string, { to: string; label: string }> = {
   record_inventory_movement: { to: "/inventory", label: "See it in Inventory" },
 };
 
-function OutcomeList({ run }: { run: AgentRun }) {
+function Lifecycle({ stages }: { stages: LifecycleStage[] }) {
+  return (
+    <ol className="lifecycle" aria-label="Progress">
+      {stages.map((stage, index) => (
+        <li key={`${stage.stage}-${index}`} className={`lifecycle__stage lifecycle__stage--${stage.state}`}>
+          {stage.stage}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+type OutcomeListProps = {
+  run: AgentRun;
+  onReplan?: (nodeId: string) => void;
+  onOpenRun?: (runId: string) => void;
+  replanning?: string | null;
+};
+
+function OutcomeList({ run, onReplan, onOpenRun, replanning }: OutcomeListProps) {
   const writes = run.nodes.filter(
     (step) => step.side_effect === "write" && ["done", "rejected", "failed", "skipped"].includes(step.status),
   );
@@ -30,6 +49,7 @@ function OutcomeList({ run }: { run: AgentRun }) {
           return (
             <li key={step.node_id} className={`outcome-list__item outcome-list__item--${step.status}`}>
               <div className="outcome-list__body">
+                {step.lifecycle && step.lifecycle.length > 1 && <Lifecycle stages={step.lifecycle} />}
                 {step.acknowledgement ? (
                   <>
                     <strong>{step.acknowledgement.headline}</strong>
@@ -43,6 +63,29 @@ function OutcomeList({ run }: { run: AgentRun }) {
                     {step.status === "rejected" && <span>{describeChange(step, run)}</span>}
                     {step.acknowledgement.caveat && (
                       <p className="outcome-list__caveat">{step.acknowledgement.caveat}</p>
+                    )}
+                    {step.acknowledgement.next_step && !step.replanned_in && onReplan && (
+                      <button
+                        type="button"
+                        className="primary-button outcome-list__replan"
+                        disabled={replanning !== null && replanning !== undefined}
+                        onClick={() => onReplan(step.node_id)}
+                      >
+                        {replanning === step.node_id
+                          ? "Muse is planning…"
+                          : step.acknowledgement.next_step === "find_cover"
+                            ? "Find someone else"
+                            : "Find an alternative"}
+                      </button>
+                    )}
+                    {step.replanned_in && onOpenRun && (
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => onOpenRun(step.replanned_in as string)}
+                      >
+                        See Muse's new plan
+                      </button>
                     )}
                   </>
                 ) : (

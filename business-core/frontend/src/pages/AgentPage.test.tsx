@@ -99,9 +99,19 @@ function jsonResponse(body: unknown, status = 200) {
 const completedRun: AgentRun = {
   ...run,
   status: "completed",
+  closing_message: "Done. Ethan Patel is on the schedule. Sun Nov 1 staffing now: 8 AM–12 PM: 3 of 4.",
   nodes: run.nodes.map((node) =>
     node.node_id === "add_barista"
-      ? { ...node, status: "done", result: { shift_id: "S9", employee_id: "DEMO_EMP_004" } }
+      ? {
+          ...node,
+          status: "done",
+          result: { shift_id: "S9", employee_id: "DEMO_EMP_004" },
+          acknowledgement: {
+            headline: "Ethan Patel is on the schedule",
+            details: ["Sun Nov 1, 7:30 AM–2:30 PM", "Sun Nov 1 staffing now: 8 AM–12 PM: 3 of 4"],
+            caveat: "Ethan hasn't been notified yet: staff messaging isn't connected.",
+          },
+        }
       : node,
   ),
 };
@@ -240,7 +250,7 @@ describe("AgentPage", () => {
     await userEvent.click(within(panel).getByRole("button", { name: "Approve" }));
 
     expect(await screen.findByRole("region", { name: "What happened" })).toBeTruthy();
-    expect(screen.getByText(/Schedule Ethan Patel/)).toBeTruthy();
+    expect(screen.getByText("Ethan Patel is on the schedule")).toBeTruthy();
     expect(screen.getByRole("link", { name: "See it in Staffing" }).getAttribute("href")).toBe("/staffing");
     expect(screen.queryByRole("region", { name: /needs your OK/ })).toBeNull();
     expect(screen.getByText("Done", { selector: ".run-status" })).toBeTruthy();
@@ -361,5 +371,45 @@ describe("AgentPage", () => {
     ));
     renderPage("/agent?run=RUN-1");
     expect(await screen.findByText("No changes made", { selector: ".run-status" })).toBeTruthy();
+  });
+
+  it("acknowledges an approved change with details and Muse's closing line", async () => {
+    mockApi();
+    renderPage("/agent?run=RUN-1");
+    const panel = await screen.findByRole("region", { name: "One change needs your OK" });
+    await userEvent.click(within(panel).getByRole("button", { name: "Approve" }));
+
+    const outcome = await screen.findByRole("region", { name: "What happened" });
+    expect(within(outcome).getByText("Ethan Patel is on the schedule")).toBeTruthy();
+    expect(within(outcome).getByText("Sun Nov 1 staffing now: 8 AM–12 PM: 3 of 4")).toBeTruthy();
+    expect(within(outcome).getByText(/hasn't been notified yet/)).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toContain("Done. Ethan Patel is on the schedule");
+  });
+
+  it("starts a plan from a detected event", async () => {
+    const event = {
+      event_id: "EVT_1", title: "Market", category: "farmers_market", starts_at: "", ends_at: "",
+      location: null, distance_m: 250, source: "Santa Clara community events (demo)", is_demo: true,
+      muse_message: "Santa Clara Farmers Market: Sun Nov 1. The last 6 editions brought +19 to +53 extra drinks.",
+      expected: { confidence: "good", examples: 6, normal_drinks: 96, extra_drinks_low: 19,
+        extra_drinks_typical: 35, extra_drinks_high: 53, extra_food_typical: 7, basis: "Compared the last 6 editions." },
+    };
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/agent/events?")) return jsonResponse([event]);
+      if (url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")
+        return jsonResponse({ planning: planning(), run });
+      if (url.startsWith("/api/v1/agent/runs?")) return jsonResponse([]);
+      return jsonResponse(run);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const strip = await screen.findByRole("region", { name: "Muse found 1 event coming up" });
+    expect(within(strip).getByText(/The last 6 editions brought/)).toBeTruthy();
+    expect(within(strip).getByText(/Source: Santa Clara community events \(demo\)/)).toBeTruthy();
+    await userEvent.click(within(strip).getByRole("button", { name: "Yes, check" }));
+    expect(await screen.findByRole("heading", { name: run.goal })).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")).toBe(true);
   });
 });

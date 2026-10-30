@@ -166,3 +166,41 @@ def test_cafe_orders_are_rounded_up_to_whole_packs(session: Session) -> None:
     assert whole["status"] == "short"  # 30 x 240 mL = 7.2 L against 3 L counted on Thursday
     assert Decimal(whole["shortfall"]) == Decimal("4200")
     assert whole["order_quantity"] == "5000" and whole["packs"] == 5 and whole["pack_name"] == "1 L carton"
+
+
+def test_approved_changes_are_acknowledged_with_real_coverage(session: Session) -> None:
+    from datetime import datetime as dt
+
+    from backend.modules.agent.executor import create_run, decide, execute
+    from backend.modules.agent.planner import Plan
+    from backend.modules.agent.validator import validate_plan
+    from backend.modules.agent.acknowledgements import acknowledge_run
+    from scripts.seed_event_surge import apply_reset, plan_reset, seed_event_surge
+
+    apply_reset(session, plan_reset(session))  # clean scenario inside this rolled-back test
+    seed_event_surge(session)
+    window = {"start_at": "2026-11-01T08:00:00-08:00", "end_at": "2026-11-01T14:00:00-08:00"}
+    nodes = [
+        {"id": "cov", "action": "coverage_report", "reason": "r", "args": {"cafe_id": "CAFE001", **window, "required_staff": 4}},
+        {"id": "staff", "action": "list_employees", "reason": "r", "args": {"cafe_id": "CAFE001"}},
+        {"id": "shifts", "action": "list_shifts", "reason": "r", "args": {"cafe_id": "CAFE001", **window}},
+        {"id": "add", "action": "schedule_shift", "reason": "r", "args": {
+            "cafe_id": "CAFE001", "employee_id": "DEMO_EMP_003",
+            "start_at": "2026-11-01T07:30:00-08:00", "end_at": "2026-11-01T14:30:00-08:00"}},
+    ]
+    plan = Plan.model_validate({"status": "plan", "goal": "g", "nodes": nodes})
+    run = create_run(session, query="q", cafe_id="CAFE001", as_of=dt.fromisoformat("2026-10-29T18:00:00-07:00"),
+                     plan=plan, validation=validate_plan(plan, "CAFE001"), model="m", attempts=1)
+    run = execute(session, run.run_id)
+    acks, closing = acknowledge_run(session, run)
+    assert acks == {} and closing is None  # nothing decided yet
+
+    before = next(n for n in run.nodes if n.node_id == "cov").result["hours"][0]["scheduled_employees"]
+    run = decide(session, run.run_id, "add", "approved")
+    acks, closing = acknowledge_run(session, run)
+    ack = acks["add"]
+    assert ack.headline == "Sofia Ramirez is on the schedule"
+    assert ack.details[0] == "Sun Nov 1, 7:30 AM–2:30 PM"
+    assert f"8 AM–" in ack.details[1] and f"{before + 1} of 4" in ack.details[1]  # re-measured after the change
+    assert "hasn't been notified" in ack.caveat
+    assert closing.startswith("Done. Sofia Ramirez is on the schedule")

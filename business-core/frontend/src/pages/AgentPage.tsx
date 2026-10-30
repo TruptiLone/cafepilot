@@ -2,11 +2,14 @@ import { type FormEvent, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   type AgentRun,
+  type DetectedEvent,
   type Planning,
   type RunSummary,
   AgentApiError,
   getRun,
+  listEvents,
   listRuns,
+  startEventRun,
   startRun,
 } from "../api/agent";
 import ApprovalPanel from "../components/agent/ApprovalPanel";
@@ -47,6 +50,15 @@ function AgentPage() {
   const [runError, setRunError] = useState<string | null>(null);
   const [recent, setRecent] = useState<RunSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [events, setEvents] = useState<DetectedEvent[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listEvents(controller.signal)
+      .then(setEvents)
+      .catch(() => setEvents([]));
+    return () => controller.abort();
+  }, []);
 
   const refreshRecent = useCallback(() => {
     listRuns()
@@ -84,12 +96,16 @@ function AgentPage() {
     event.preventDefault();
     const query = request.trim();
     if (!query || isPlanning) return;
+    await plan(() => startRun(query));
+  }
+
+  async function plan(start: () => ReturnType<typeof startRun>) {
     setIsPlanning(true);
     setPlanError(null);
     setRejectedPlanning(null);
     setSelectedId(null);
     try {
-      const response = await startRun(query);
+      const response = await start();
       if (response.run) {
         setRun(response.run);
         setSearchParams({ run: response.run.run_id });
@@ -118,6 +134,32 @@ function AgentPage() {
           </p>
         </div>
       </div>
+
+      {events.length > 0 && (
+        <section className="event-strip" aria-labelledby="events-title">
+          <h2 id="events-title">
+            Muse found {events.length} {events.length === 1 ? "event" : "events"} coming up
+          </h2>
+          <ul>
+            {events.map((item) => (
+              <li key={item.event_id} className="event-strip__card">
+                <p className="event-strip__message">{item.muse_message}</p>
+                <p className="event-strip__basis">
+                  {item.expected.basis} Source: {item.source}.
+                </p>
+                <button
+                  type="button"
+                  className="primary-button"
+                  disabled={isPlanning}
+                  onClick={() => plan(() => startEventRun(item.event_id))}
+                >
+                  Yes, check
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <form className="ask-bar" onSubmit={handleSubmit}>
         <label className="ask-bar__label" htmlFor="agent-request">
@@ -187,6 +229,12 @@ function AgentPage() {
                 ))}
               </ul>
             </div>
+          )}
+
+          {run.closing_message && (
+            <p className="run-view__closing" role="status">
+              {run.closing_message}
+            </p>
           )}
 
           <ApprovalPanel

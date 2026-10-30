@@ -20,6 +20,7 @@ from backend.modules.agent.planner import (
 from backend.models.cafe import Cafe
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
 from backend.modules.agent.summaries import summarize_run
+from backend.modules.agent.acknowledgements import Acknowledgement, acknowledge_run
 from backend.modules.agent.executor import (
     ApprovalStateError,
     EditValidationError,
@@ -138,6 +139,9 @@ class NodeRunOut(BaseModel):
     summary: str | None = Field(
         default=None, description="One plain line about this step, written by code from its real result."
     )
+    acknowledgement: Acknowledgement | None = Field(
+        default=None, description="For finished changes: what happened, details, and an honest caveat."
+    )
 
 
 class RunOut(BaseModel):
@@ -158,6 +162,9 @@ class RunOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     nodes: list[NodeRunOut]
+    closing_message: str | None = Field(
+        default=None, description="Muse's closing line once every change has been decided."
+    )
 
 
 def _run_out(database_session: Session, run: Any) -> RunOut:
@@ -165,8 +172,11 @@ def _run_out(database_session: Session, run: Any) -> RunOut:
     cafe = database_session.get(Cafe, run.cafe_id)
     summaries = summarize_run(list(run.nodes), run.cafe_id, cafe.timezone if cafe else "UTC")
     out = RunOut.model_validate(run)
+    acks, closing = acknowledge_run(database_session, run)
     for node in out.nodes:
         node.summary = summaries.get(node.node_id)
+        node.acknowledgement = acks.get(node.node_id)
+    out.closing_message = closing
     return out
 
 

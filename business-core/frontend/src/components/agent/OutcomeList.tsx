@@ -29,10 +29,29 @@ function OutcomeList({ run }: { run: AgentRun }) {
             prefix = step.error && !step.error.startsWith("skipped because") ? "Not needed" : "Skipped";
           return (
             <li key={step.node_id} className={`outcome-list__item outcome-list__item--${step.status}`}>
-              <span>
-                <strong>{prefix}:</strong> {describeChange(step, run)}
-                {(step.status === "failed" || prefix === "Not needed") && step.error ? `. ${step.error}` : ""}
-              </span>
+              <div className="outcome-list__body">
+                {step.acknowledgement ? (
+                  <>
+                    <strong>{step.acknowledgement.headline}</strong>
+                    {step.acknowledgement.details.length > 0 && (
+                      <ul className="outcome-list__details">
+                        {step.acknowledgement.details.map((detail) => (
+                          <li key={detail}>{detail}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {step.status === "rejected" && <span>{describeChange(step, run)}</span>}
+                    {step.acknowledgement.caveat && (
+                      <p className="outcome-list__caveat">{step.acknowledgement.caveat}</p>
+                    )}
+                  </>
+                ) : (
+                  <span>
+                    <strong>{prefix}:</strong> {describeChange(step, run)}
+                    {(step.status === "failed" || prefix === "Not needed") && step.error ? `. ${step.error}` : ""}
+                  </span>
+                )}
+              </div>
               {step.status === "done" && link && <Link to={link.to}>{link.label}</Link>}
             </li>
           );

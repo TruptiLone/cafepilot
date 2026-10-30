@@ -29,7 +29,11 @@ export type RunStep = {
   replay_of: string | null;
   started_at: string | null;
   finished_at: string | null;
+  summary?: string | null;
+  acknowledgement?: Acknowledgement | null;
 };
+
+export type Acknowledgement = { headline: string; details: string[]; caveat: string | null };
 
 export type RunEdge = { source: string; target: string; kind: "data" | "safety" };
 
@@ -49,6 +53,7 @@ export type AgentRun = {
   created_at: string;
   updated_at: string;
   nodes: RunStep[];
+  closing_message?: string | null;
 };
 
 export type RunSummary = {
@@ -148,5 +153,39 @@ export function decideAll(runId: string, decision: "approved" | "rejected"): Pro
   return requestJson<AgentRun>(
     `/api/v1/agent/runs/${encodeURIComponent(runId)}/decision`,
     json({ decision, channel: "web" }),
+  );
+}
+
+export type DetectedEvent = {
+  event_id: string;
+  title: string;
+  category: string;
+  starts_at: string;
+  ends_at: string;
+  location: string | null;
+  distance_m: number | null;
+  source: string;
+  is_demo: boolean;
+  muse_message: string;
+  expected: {
+    confidence: "good" | "rough" | "none";
+    examples: number;
+    normal_drinks: number;
+    extra_drinks_low: number;
+    extra_drinks_typical: number;
+    extra_drinks_high: number;
+    extra_food_typical: number;
+    basis: string;
+  };
+};
+
+export function listEvents(signal?: AbortSignal): Promise<DetectedEvent[]> {
+  return requestJson<DetectedEvent[]>(`/api/v1/agent/events?cafe_id=${ACTIVE_CAFE_ID}`, { signal });
+}
+
+export function startEventRun(eventId: string): Promise<StartRunResponse> {
+  return requestJson<StartRunResponse>(
+    `/api/v1/agent/events/${encodeURIComponent(eventId)}/runs`,
+    { method: "POST", headers: { Accept: "application/json" } },
   );
 }

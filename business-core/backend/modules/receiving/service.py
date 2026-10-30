@@ -190,6 +190,11 @@ def build_drafts(session: Session, receipt: Receipt, order: PurchaseOrder | None
     return drafts
 
 
+def _product(description: str) -> str:
+    """'Whole Milk, 1 L carton' -> 'whole milk'."""
+    return description.split(",")[0].strip().lower()
+
+
 def evaluate(draft: _Draft, counted: Decimal | None, rejected: Decimal, has_slip: bool, has_photo: bool) -> tuple[str, Decimal | None, str]:
     """Status, accepted quantity (None until known) and a plain message for one line."""
     f = lambda q: _fmt(q, draft.unit, draft.unit_size)  # noqa: E731
@@ -208,13 +213,13 @@ def evaluate(draft: _Draft, counted: Decimal | None, rejected: Decimal, has_slip
     else:
         if draft.seen is not None:
             return "needs_count", None, (
-                f"Muse can see {f(draft.seen)} of {draft.description.lower()}, but the "
+                f"Muse can see {f(draft.seen)} of {_product(draft.description)}, but the "
                 f"{'slip says' if draft.shipped is not None else 'order is for'} {f(expected)}"
                 f" and the crate or case may hide more. Please count it."
             )
         if has_photo:
             return "needs_count", None, f"{draft.description} isn't visible in the photo. Please count it."
-        return "needs_count", None, f"Count the {draft.description.lower()}: expecting {f(expected)}."
+        return "needs_count", None, f"Count the {_product(draft.description)}: expecting {f(expected)}."
 
     if expected is None:
         expected = draft.ordered

@@ -7,6 +7,7 @@ import {
   DashboardIcon,
   InventoryIcon,
   MenuIcon,
+  ReceivingIcon,
   SalesIcon,
   StaffingIcon,
 } from "./Icons";
@@ -15,6 +16,7 @@ const navigation = [
   { label: "Ask CaféPilot", path: "/agent", icon: AgentIcon },
   { label: "Dashboard", path: "/dashboard", icon: DashboardIcon },
   { label: "Inventory", path: "/inventory", icon: InventoryIcon },
+  { label: "Receive delivery", path: "/receiving", icon: ReceivingIcon },
   { label: "Sales", path: "/sales", icon: SalesIcon },
   { label: "Staffing", path: "/staffing", icon: StaffingIcon },
 ];

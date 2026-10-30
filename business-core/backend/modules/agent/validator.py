@@ -35,6 +35,7 @@ IssueCode = Literal[
     "wrong_time_offset",
     "unverified_quantity",
     "unrelated_prerequisite",
+    "unverified_demand",
 ]
 
 
@@ -154,6 +155,28 @@ def _check_order_quantities(node: PlanNode, by_id: dict[str, PlanNode], issues: 
         )
 
 
+_SCENARIO_PATH = re.compile(r"^\.scenarios\.(low|typical|high)\.items$")
+
+
+def _check_demand_source(node: PlanNode, by_id: dict[str, PlanNode], issues: list[PlanIssue]) -> None:
+    """When the plan reads demand from history, the order math must use those numbers."""
+    if node.action != "calculate_shortfall":
+        return
+    demand_steps = [n for n in by_id.values() if n.action == "estimate_event_demand"]
+    if not demand_steps:
+        return
+    ref = parse_ref(node.args.get("items"))
+    source = by_id.get(ref[0]) if ref else None
+    if not ref or source is None or source.action != "estimate_event_demand" or not _SCENARIO_PATH.match(ref[1]):
+        issues.append(
+            PlanIssue(
+                "unverified_demand",
+                'demand must come from history: set items to "$<estimate_event_demand step>.scenarios.typical.items"',
+                node.id,
+            )
+        )
+
+
 def _window(args: dict[str, Any]) -> tuple[datetime, datetime] | None:
     start, end = args.get("start_at"), args.get("end_at")
     if not isinstance(start, str) or not isinstance(end, str) or parse_ref(start) or parse_ref(end):
@@ -246,6 +269,7 @@ def validate_plan(
         _check_args(node, issues)
         _check_order_quantities(node, by_id, issues)
         _check_shift_evidence(node, known, issues)
+        _check_demand_source(node, by_id, issues)
         if tz is not None:
             _check_offsets(node, tz, issues)
         node_cafe = node.args.get("cafe_id", cafe_id)

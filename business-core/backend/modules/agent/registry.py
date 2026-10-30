@@ -21,6 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from sqlalchemy.orm import Session
 
+from backend.modules.agent.demand import EventDemandInput, EventDemandResult, estimate_event_demand
 from backend.modules.agent.calculations import (
     ShortfallInput,
     ShortfallResult,
@@ -512,20 +513,39 @@ _ACTIONS: list[Action] = [
         requires=(("list_shifts",),),
         approval="owner",
     ),
+    # ---- Demand from history (code, not the model)
+    Action(
+        name="estimate_event_demand",
+        description=(
+            "Read-only: expected demand for an upcoming event, from sales history. Normal day = average "
+            "of recent same-weekday days without events; event effect = what past events of the same "
+            "kind did. Returns low / typical / high scenarios whose .items feed calculate_shortfall, "
+            "plus how many past examples were used (confidence good / rough / none)."
+        ),
+        domain="demand",
+        side_effect="read",
+        input_model=EventDemandInput,
+        output_type=EventDemandResult,
+        handler=estimate_event_demand,
+        consumes=("event_calendar",),
+        produces=("event_demand", "ingredient_demand"),
+    ),
     # ---- Order math (code, not the model)
     Action(
         name="calculate_shortfall",
         description=(
-            "Read-only order math: need for the extra product mix (recipes) + buffer (café policy %) "
-            "- usable stock as_of = quantity to order, per ingredient. Returns order_lines ready for "
-            "propose_supplier_order and lists ingredients whose stock is unknown."
+            "Read-only order math in code. Extra need (recipes x items) + buffer (café policy %) - stock "
+            "available = order, per ingredient. With include_normal_use=true, available = stock as_of + "
+            "regular deliveries - normal sales until cover_until (default: closing time on the target "
+            "day); use it for events. Returns order_lines ready for propose_supplier_order and lists "
+            "ingredients whose stock is unknown."
         ),
         domain="purchasing",
         side_effect="read",
         input_model=ShortfallInput,
         output_type=ShortfallResult,
         handler=calculate_shortfall,
-        consumes=("menu_catalog", "stock_estimate", "ingredient_demand"),
+        consumes=("menu_catalog", "stock_estimate", "ingredient_demand", "event_demand"),
         produces=("order_suggestion",),
     ),
     # ---- Purchasing (simulated)

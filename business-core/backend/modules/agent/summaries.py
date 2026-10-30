@@ -152,15 +152,48 @@ def _shortfall(result: Row, ctx: RunContext) -> str:
     enough = [l for l in lines if l.get("status") == "enough"]
     unknown = [l for l in lines if l.get("status") == "unknown_stock"]
     parts = []
+    def ordered(l: Row) -> str:
+        text = f"{quantity(l['order_quantity'], l['unit'])} {l['name'].lower()}"
+        if l.get("packs") and l.get("pack_name"):
+            text += f" ({l['packs']} × {l['pack_name']})"
+        return text
+
     if short:
-        parts.append("Order " + _list(f"{quantity(l['order_quantity'], l['unit'])} {l['name'].lower()}" for l in short))
+        parts.append("Order " + _list(ordered(l) for l in short))
     else:
         parts.append("Nothing to order")
-    if enough:
+    if enough and len(enough) <= 2:
         parts.append(f"{_list(l['name'].lower() for l in enough)} enough")
+    elif enough:
+        parts.append("everything else is covered")
     if unknown:
         parts.append(f"count {_list(l['name'].lower() for l in unknown)} first")
-    return "; ".join(parts) + f" (includes {quantity(result.get('buffer_pct'), '')}% buffer)"
+    basis = f"includes {quantity(result.get('buffer_pct'), '')}% buffer"
+    if result.get("include_normal_use"):
+        basis = "after normal use and regular deliveries; " + basis
+    return "; ".join(parts) + f" ({basis})"
+
+
+def _demand(result: Row, ctx: RunContext) -> str:
+    d, food = result.get("drinks", {}), result.get("food", {})
+    n = len(result.get("examples", []))
+    if result.get("confidence") == "none":
+        return f"No past events like this; normal day is {d.get('normal', 0)} drinks"
+    low, typ, high = d.get("extra_low", 0), d.get("extra_typical", 0), d.get("extra_high", 0)
+    sign = lambda v: f"+{v}" if v > 0 else str(v)  # noqa: E731
+    rng = sign(typ) if low == high else f"{sign(low)} to {sign(high)} (typically {sign(typ)})"
+    names = {e.get("name") for e in result.get("examples", [])}
+    if len(names) == 1:
+        name = names.pop()
+        who = f"Last {name}" if n == 1 else f"Last {n} {name}s"
+    else:
+        who = f"{n} past event{'s' if n != 1 else ''}"
+    text = f"{who}: {rng} drinks on a normal {d.get('normal', 0)}"
+    if food.get("extra_typical"):
+        text += f"; pastries {sign(food['extra_typical'])}"
+    if result.get("confidence") == "rough":
+        text += " (rough guide)"
+    return text
 
 
 def _coverage(result: Row, ctx: RunContext) -> str | None:
@@ -269,6 +302,8 @@ def summarize_step(node: Any, ctx: RunContext) -> str | None:
         return _projection(result, ctx)
     if action == "calculate_shortfall" and isinstance(result, dict):
         return _shortfall(result, ctx)
+    if action == "estimate_event_demand" and isinstance(result, dict):
+        return _demand(result, ctx)
     if action == "coverage_report" and isinstance(result, dict):
         return _coverage(result, ctx)
     if action == "list_employees" and isinstance(result, list):

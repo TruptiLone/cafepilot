@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from backend.db.config import get_settings
 from backend.models.cafe import Cafe
 from backend.modules.agent.cafe_policies import policies_for
+from backend.modules.agent.events import upcoming_for_planner
 from backend.modules.agent.registry import describe_for_planner
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.sales.models import MenuProduct, Modifier, ModifierGroup, ProductVariation
@@ -145,7 +146,8 @@ def build_planning_context(
             {"employee_id": e.employee_id, "name": e.name, "role": e.role}
             for e in employees
         ],
-        "cafe_policies": policies_for(cafe_id),
+        "cafe_policies": {k: v for k, v in policies_for(cafe_id).items() if k != "standing_deliveries"},
+        "upcoming_events": upcoming_for_planner(session, cafe_id, effective_as_of),
     }
     return PlanningContext(cafe_id, cafe.timezone, effective_as_of, now, reference)
 
@@ -183,10 +185,13 @@ ACTIONS AND ARGUMENTS
 
 NUMBERS: CODE DOES THE MATH, NOT YOU
 5. Never calculate quantities yourself. For any supplier order, first add a calculate_shortfall
-   step with the expected extra product mix, then set the order's lines to exactly
-   "$<that step id>.order_lines". The buffer comes from café policy; do not add your own.
-6. Express expected demand as product variations and modifiers (e.g. COF003_REG with MILK_OAT).
-   State the mix in assumptions; it is a scenario, not a forecast.
+   step, then set the order's lines to exactly "$<that step id>.order_lines". The buffer comes
+   from café policy; do not add your own.
+6. Demand for an event in REFERENCE DATA upcoming_events comes from history, not from you: add
+   estimate_event_demand for that event_id, then give calculate_shortfall
+   items "$<demand step id>.scenarios.typical.items" and include_normal_use true. Only when the
+   owner states a product mix themselves (or no event applies) write the items directly from
+   their words and state them in assumptions.
 
 TIME
 7. Every timestamp needs the café's UTC offset FOR THAT DATE, taken from CONTEXT

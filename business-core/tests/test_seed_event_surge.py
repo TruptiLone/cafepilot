@@ -60,8 +60,8 @@ def test_scenario_tells_the_event_story(session: Session) -> None:
         row["ingredient_id"]: row["estimated_quantity"]
         for row in REGISTRY["get_stock_estimates"].run(session, {"cafe_id": "CAFE001", "as_of": AS_OF})
     }
-    assert stock["WHOLE_MILK"] == "8000.000"
-    assert stock["OAT_MILK"] == "3750.000"  # 4,000 counted, 250 spilled after the count
+    assert stock["WHOLE_MILK"] == "3000.000"  # low at close, before the next morning's delivery
+    assert stock["OAT_MILK"] == "1250.000"  # 1,500 counted, 250 spilled after the count
     coverage = REGISTRY["coverage_report"].run(
         session,
         {

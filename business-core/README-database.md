@@ -78,8 +78,16 @@ the shifts, counts and movements created by approved steps), then seeds again, s
 starts from the same state. `--reset` alone is a dry run that lists what would be removed;
 add `--yes` to delete. January 2025 demo data is never touched.
 
-Expected picture as of Thursday 6 PM: whole milk 8 L, oat milk 3.75 L; Sunday 8 AM-noon has
-2 of the 4 people the café wants on an event day, noon-2 PM has 3 of 4.
+`seed_all.sh` also loads synthetic sales history (May–Oct 2026 and Sep–Nov 2025, line-level with
+milk choices) and the event calendar (`scripts/seed_sales_history.py`): six past monthly farmers
+markets, last Halloween, holidays, festivals, football nights and heat waves, plus the upcoming
+Halloween and Nov 1 market. Expected demand for an event is read from that history in code
+(`estimate_event_demand`). The history is demo data: the method is real, the numbers are not a
+validated forecast.
+
+Expected picture as of Thursday 6 PM: whole milk 3 L and oat milk 1.25 L on hand (low before the next
+morning's regular delivery); past markets added about +19 to +53 drinks (typically +35) on a normal
+96; Sunday 8 AM-noon has 2 of the 4 people the café wants on an event day, noon-2 PM has 3 of 4.
 
 ## Stop without deleting data
 

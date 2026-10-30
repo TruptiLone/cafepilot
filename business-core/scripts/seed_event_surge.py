@@ -1,7 +1,8 @@
 """Event Surge demo scenario (AF-01): a believable Thursday-to-Sunday picture for CAFE001.
 
 Story: farmers market Sunday Nov 1, 8 AM-2 PM. Thursday Oct 29 at 5 PM the closing shift
-counts milk, beans and pastries; a pitcher of oat milk is spilled at 5:40 PM. Sunday
+counts milk, beans and pastries (milk is low before the next morning's regular delivery); a
+pitcher of oat milk is spilled at 5:40 PM. Sunday
 already has a shift lead, a cashier, and one barista from noon. The café's busy-event
 target is 4 people, so the morning is short by 2 and the early afternoon by 1.
 
@@ -42,9 +43,9 @@ AS_OF = "2026-10-29T18:00:00-07:00"
 COUNTED_AT = datetime.fromisoformat("2026-10-29T17:00:00-07:00")
 COUNT_ID = f"{PREFIX}COUNT_THU_CLOSE"
 COUNT_QUANTITIES = {
-    "WHOLE_MILK": Decimal("8000.000"),
-    "OAT_MILK": Decimal("4000.000"),
-    "COFFEE_BEANS": Decimal("2500.000"),
+    "WHOLE_MILK": Decimal("3000.000"),
+    "OAT_MILK": Decimal("1500.000"),
+    "COFFEE_BEANS": Decimal("6000.000"),
     "DRIP_COFFEE": Decimal("1500.000"),
     "COLD_BREW_CONCENTRATE": Decimal("4000.000"),
     "BUTTER_CROISSANT": Decimal("30.000"),

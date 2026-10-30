@@ -277,7 +277,9 @@ def test_demo_sales_use_database_prices_and_reports_are_meaningful(
     )
     assert {item.product_id for item in items} == set(prices)
     assert database_session.scalar(
-        select(func.count()).select_from(SaleItemModifier)
+        select(func.count())
+        .select_from(SaleItemModifier)
+        .where(SaleItemModifier.sale_item_id.startswith(DEMO_PREFIX, autoescape=True))
     ) == 0
     assert database_session.scalar(
         select(func.count())

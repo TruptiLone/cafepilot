@@ -307,14 +307,14 @@ def decide_all_steps(
 
 
 @router.get("/events", response_model=list[DetectedEvent])
-def list_events(cafe_id: str = Query("CAFE001")) -> list[DetectedEvent]:
-    """Events Muse has detected near the café (demo feed, labeled with is_demo)."""
-    return detected_events(cafe_id)
+def list_events(cafe_id: str = Query("CAFE001"), database_session: Session = Depends(get_db)) -> list[DetectedEvent]:
+    """Upcoming events with expected demand computed from sales history (is_demo marks demo data)."""
+    return detected_events(database_session, cafe_id)
 
 
 @router.get("/events/{event_id}", response_model=DetectedEvent)
-def read_event(event_id: str) -> DetectedEvent:
-    event = get_event(event_id)
+def read_event(event_id: str, database_session: Session = Depends(get_db)) -> DetectedEvent:
+    event = get_event(database_session, event_id)
     if event is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     return event
@@ -327,7 +327,7 @@ def start_run_for_event(
     client: Any = Depends(get_planner_client),
 ) -> CreateRunResponse:
     """The owner said "Yes, check": plan and start running for this event."""
-    event = get_event(event_id)
+    event = get_event(database_session, event_id)
     if event is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     request = PlanRequest(query=event.request, cafe_id=event.cafe_id, as_of=event.knowledge_as_of)

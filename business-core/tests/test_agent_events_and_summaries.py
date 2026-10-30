@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
@@ -84,14 +85,7 @@ def test_a_broken_result_never_breaks_the_run() -> None:
 
 # ---------- events ----------------------------------------------------------------
 
-
-def test_demo_event_is_labeled_and_uses_the_cafe_offsets() -> None:
-    (event,) = detected_events("CAFE001")
-    assert event.is_demo and "(demo)" in event.source
-    assert event.starts_at.isoformat() == "2026-11-01T08:00:00-08:00"  # after daylight saving ends
-    assert event.knowledge_as_of.isoformat() == "2026-10-29T18:00:00-07:00"
-    assert [d.label for d in event.expected_demand] == ["40 extra whole-milk lattes", "20 extra oat-milk lattes"]
-    assert detected_events("ANOTHER_CAFE") == []
+MARKET = "EVT_SC_FARMERS_MARKET_20261101"
 
 
 @pytest.fixture
@@ -100,13 +94,28 @@ def session() -> Session:
     transaction = connection.begin()
     db = sessionmaker(bind=connection, join_transaction_mode="create_savepoint")()
     try:
-        if db.get(Cafe, "CAFE001") is None:
-            pytest.skip("demo data not seeded; run scripts/seed_all.sh")
+        if db.get(Cafe, "CAFE001") is None or get_event(db, MARKET) is None:
+            pytest.skip("demo history not seeded; run scripts/seed_sales_history.py")
         yield db
     finally:
         db.close()
         transaction.rollback()
         connection.close()
+
+
+def test_demo_event_comes_from_the_calendar_with_history_numbers(session: Session) -> None:
+    events = {e.event_id: e for e in detected_events(session, "CAFE001")}
+    market = events[MARKET]
+    assert market.is_demo and "(demo)" in market.source
+    assert market.starts_at.isoformat().startswith("2026-11-01T16:00:00")  # 8 AM PST, after DST ends
+    assert market.knowledge_as_of.isoformat().startswith("2026-10-30T01:00:00")  # Thu 6 PM PDT
+    expected = market.expected
+    assert expected.confidence == "good" and expected.examples == 6
+    assert expected.extra_drinks_low <= expected.extra_drinks_typical <= expected.extra_drinks_high
+    assert f"typically +{expected.extra_drinks_typical}" in market.muse_message
+    assert MARKET in market.request and "estimate_event_demand" in market.request
+    assert events["EVT_HALLOWEEN_20261031"].expected.confidence == "rough"
+    assert detected_events(session, "ANOTHER_CAFE") == []
 
 
 def test_saying_yes_to_an_event_starts_a_run(session: Session, tmp_path, monkeypatch) -> None:
@@ -118,17 +127,42 @@ def test_saying_yes_to_an_event_starts_a_run(session: Session, tmp_path, monkeyp
     app.dependency_overrides[get_planner_client] = lambda: client
     try:
         api = TestClient(app)
-        events = api.get("/api/v1/agent/events").json()
-        event_id = events[0]["event_id"]
-        assert api.get(f"/api/v1/agent/events/{event_id}").json()["title"] == "Santa Clara Farmers Market"
-        response = api.post(f"/api/v1/agent/events/{event_id}/runs")
+        assert MARKET in {e["event_id"] for e in api.get("/api/v1/agent/events").json()}
+        assert api.get(f"/api/v1/agent/events/{MARKET}").json()["title"] == "Santa Clara Farmers Market"
+        response = api.post(f"/api/v1/agent/events/{MARKET}/runs")
         assert api.post("/api/v1/agent/events/NOPE/runs").status_code == 404
     finally:
         app.dependency_overrides.clear()
-    body = response.json()
-    run = body["run"]
-    assert run["query"] == get_event(event_id).request
-    assert run["as_of"].startswith("2026-10-30T01:00:00")  # Thu 6 PM PDT, stored in UTC
+    run = response.json()["run"]
+    assert run["query"] == get_event(session, MARKET).request
+    assert run["as_of"].startswith("2026-10-30T01:00:00")
     assert run["nodes"][0]["summary"].endswith("can make espresso")
     sent = client.calls[0]["messages"][-1]["content"]
-    assert "Farmers market this Sunday Nov 1" in sent
+    assert MARKET in sent and "upcoming_events" in sent
+
+
+def test_demand_and_packed_order_lines_read_naturally() -> None:
+    demand = step("demand", "estimate_event_demand", {
+        "confidence": "good", "drinks": {"normal": 96, "extra_low": 19, "extra_typical": 35, "extra_high": 53},
+        "food": {"extra_typical": 7}, "examples": [{"name": "Farmers Market"}] * 6})
+    short = step("short", "calculate_shortfall", {"buffer_pct": "10", "include_normal_use": True, "lines": [
+        {"ingredient_id": "OAT_MILK", "name": "Oat Milk", "unit": "mL", "status": "short", "order_quantity": "5000",
+         "packs": 5, "pack_name": "1 L carton"},
+        *[{"ingredient_id": f"I{i}", "name": f"Item {i}", "unit": "each", "status": "enough", "order_quantity": "0"}
+          for i in range(3)]]})
+    lines = summarize_run([demand, short], "CAFE001", TZ)
+    assert lines["demand"] == "Last 6 Farmers Markets: +19 to +53 (typically +35) drinks on a normal 96; pastries +7"
+    assert lines["short"] == ("Order 5 L oat milk (5 × 1 L carton); everything else is covered "
+                              "(after normal use and regular deliveries; includes 10% buffer)")
+
+
+def test_cafe_orders_are_rounded_up_to_whole_packs(session: Session) -> None:
+    from backend.modules.agent.registry import REGISTRY
+
+    result = REGISTRY["calculate_shortfall"].run(session, {
+        "cafe_id": "CAFE001", "as_of": "2026-10-29T18:00:00-07:00", "target_at": "2026-11-01T08:00:00-08:00",
+        "items": [{"variation_id": "COF003_REG", "quantity": 30}], "buffer_pct": "0"})
+    whole = next(l for l in result["lines"] if l["ingredient_id"] == "WHOLE_MILK")
+    assert whole["status"] == "short"  # 30 x 240 mL = 7.2 L against 3 L counted on Thursday
+    assert Decimal(whole["shortfall"]) == Decimal("4200")
+    assert whole["order_quantity"] == "5000" and whole["packs"] == 5 and whole["pack_name"] == "1 L carton"

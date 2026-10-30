@@ -200,7 +200,8 @@ def test_demo_inventory_is_synthetic_chronological_and_preserves_unknown_stock(
 
     stock = client.get(
         "/api/v1/inventory/stock",
-        params={"cafe_id": CAFE_ID},
+        # as of the end of the January demo week, so later scenario counts don't apply
+        params={"cafe_id": CAFE_ID, "as_of": "2025-01-12T20:00:00-08:00"},
     )
     assert stock.status_code == 200
     by_ingredient = {item["ingredient_id"]: item for item in stock.json()}

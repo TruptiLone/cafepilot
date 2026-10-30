@@ -46,6 +46,9 @@ class DetectedEvent(BaseModel):
     expected: ExpectedDemand
     muse_message: str = Field(description="Muse's opening line, written by code from the history.")
     request: str = Field(description="The request sent to the planner when the owner says yes.")
+    run_id: str | None = Field(default=None, description="Muse's plan for this event, if one was started.")
+    latest_run_id: str | None = Field(default=None, description="The newest plan in that family (after replans).")
+    plan_state: str = Field(default="new", description="new, checking, needs_ok, waiting, planned or issues.")
 
 
 def _signed(n: int) -> str:

@@ -74,11 +74,29 @@ class History:
         return {k: sum(w.get(k, 0) for w in windows) / len(windows) for k in keys}, dates
 
 
+_HISTORY_CACHE: dict[tuple, History] = {}
+
+
 def load_history(session: Session, cafe_id: str, until: datetime) -> History:
+    """Sales history before ``until``; cached while the sales before that time are unchanged."""
     cafe = session.get(Cafe, cafe_id)
     if cafe is None:
         raise LookupError(f"café not found: {cafe_id}")
-    tz = ZoneInfo(cafe.timezone)
+    fingerprint = tuple(session.execute(
+        text("SELECT count(*) FILTER (WHERE status = 'completed'), max(recorded_at), sum(total_cents) FROM sales WHERE cafe_id = :c AND sold_at < :u"),
+        {"c": cafe_id, "u": until},
+    ).one())
+    key = (cafe_id, until, cafe.timezone, fingerprint)
+    if key in _HISTORY_CACHE:
+        return _HISTORY_CACHE[key]
+    history = _load_history(session, cafe_id, until, ZoneInfo(cafe.timezone))
+    if len(_HISTORY_CACHE) > 32:
+        _HISTORY_CACHE.clear()
+    _HISTORY_CACHE[key] = history
+    return history
+
+
+def _load_history(session: Session, cafe_id: str, until: datetime, tz: ZoneInfo) -> History:
     rows = session.execute(
         text(
             """

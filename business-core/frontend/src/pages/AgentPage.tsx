@@ -1,58 +1,194 @@
-import { type FormEvent, useCallback, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   type AgentRun,
+  type CafeStatus,
   type DetectedEvent,
   type Planning,
-  type RunSummary,
   AgentApiError,
+  getCafeStatus,
   getRun,
   listEvents,
-  listRuns,
   replanStep,
   startEventRun,
   startRun,
 } from "../api/agent";
-import ApprovalPanel from "../components/agent/ApprovalPanel";
-import OutcomeList from "../components/agent/OutcomeList";
 import StepDetail from "../components/agent/StepDetail";
-import TicketRail from "../components/agent/TicketRail";
-import { RUN_STATUS_LABELS, runStatusLabel } from "../components/agent/labels";
-
-const EXAMPLE_REQUEST =
-  "Farmers market this Sunday Nov 1, 8 AM-2 PM. Expect about 40 extra whole-milk lattes and 20 extra " +
-  "oat-milk lattes. Using stock as of Thursday 6 PM, order milk for a 6 AM Sunday delivery if we'll " +
-  "run short, and add baristas for any hours below our event staffing target.";
+import ApprovalList from "../components/muse/ApprovalList";
+import CafeStatusPanel, { PLAN_STATE } from "../components/muse/CafeStatusPanel";
+import PlanMap, { type PlanView, useNarrow } from "../components/muse/PlanMap";
+import PlanReceipt from "../components/muse/PlanReceipt";
+import { planCounts } from "../components/muse/stages";
 
 const POLL_MS = 2000;
-
-function formatTime(value: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZone: "America/Los_Angeles",
-  }).format(new Date(value));
-}
+const VIEW_KEY = "cafepilot-plan-view";
 
 function errorMessage(error: unknown): string {
   return error instanceof AgentApiError ? error.message : "Something went wrong. Try again.";
 }
 
+function readView(): PlanView {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === "graph" ? "graph" : "tiles";
+  } catch {
+    return "tiles";
+  }
+}
+
+function eventChip(value: string) {
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" })
+    .format(new Date(value))
+    .toUpperCase();
+}
+
+function eventWhen(event: DetectedEvent) {
+  const fmt = (value: string, options: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat("en-US", { ...options, timeZone: "America/Los_Angeles" }).format(new Date(value));
+  return `${fmt(event.starts_at, { weekday: "short", month: "short", day: "numeric" })} · ${fmt(event.starts_at, {
+    hour: "numeric",
+  })}–${fmt(event.ends_at, { hour: "numeric" })}`;
+}
+
+/** Signature of everything on a run that can change what the café panel shows. */
+function runSignature(run: AgentRun | null) {
+  if (!run) return "";
+  return run.nodes.map((n) => `${n.node_id}:${n.status}:${n.external_status ?? ""}`).join("|") + run.status;
+}
+
+type SpeechRecognitionLike = {
+  lang: string;
+  interimResults: boolean;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+};
+
+function speechRecognition(): (new () => SpeechRecognitionLike) | null {
+  const w = window as unknown as Record<string, unknown>;
+  return (w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null) as (new () => SpeechRecognitionLike) | null;
+}
+
 function AgentPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const runId = searchParams.get("run");
-  const [request, setRequest] = useState("");
-  const [isPlanning, setIsPlanning] = useState(false);
-  const [planError, setPlanError] = useState<string | null>(null);
-  const [rejectedPlanning, setRejectedPlanning] = useState<Planning | null>(null);
+  const eventId = searchParams.get("event");
+
+  const [events, setEvents] = useState<DetectedEvent[]>([]);
+  const [status, setStatus] = useState<CafeStatus | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
   const [run, setRun] = useState<AgentRun | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
-  const [recent, setRecent] = useState<RunSummary[]>([]);
+  const [planningFor, setPlanningFor] = useState<string | null>(null);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [rejectedPlanning, setRejectedPlanning] = useState<Planning | null>(null);
+  const [request, setRequest] = useState("");
+  const [view, setView] = useState<PlanView>(readView);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [events, setEvents] = useState<DetectedEvent[]>([]);
   const [replanning, setReplanning] = useState<string | null>(null);
+  const [listening, setListening] = useState(false);
+  const recognition = useRef<SpeechRecognitionLike | null>(null);
+  const narrow = useNarrow();
+
+  const refreshEvents = useCallback(() => {
+    listEvents()
+      .then(setEvents)
+      .catch(() => setEvents([]));
+  }, []);
+
+  const statusRequest = useRef(0);
+  const refreshStatus = useCallback(() => {
+    const ticket = ++statusRequest.current;
+    getCafeStatus()
+      .then((next) => {
+        if (ticket !== statusRequest.current) return; // a newer refresh is on its way
+        setStatus(next);
+        setStatusError(null);
+      })
+      .catch((error) => {
+        if (ticket === statusRequest.current) setStatusError(errorMessage(error));
+      });
+  }, []);
+
+  useEffect(refreshEvents, [refreshEvents]);
+
+  // Load the run named in the address (only when the address changes: a plan Muse just
+  // returned is already in state while the address catches up).
+  const runRef = useRef<AgentRun | null>(null);
+  runRef.current = run;
+  useEffect(() => {
+    if (!runId) {
+      setRun(null);
+      return;
+    }
+    if (runRef.current?.run_id === runId) return;
+    const controller = new AbortController();
+    setRunError(null);
+    getRun(runId, controller.signal)
+      .then((loaded) => {
+        if (!controller.signal.aborted) setRun(loaded);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) setRunError(errorMessage(error));
+      });
+    return () => controller.abort();
+  }, [runId]);
+
+  // Keep refreshing while Muse is working or a supplier / employee hasn't answered yet.
+  useEffect(() => {
+    if (!run || (run.status !== "running" && !(run.waiting_on && run.waiting_on.length > 0))) return;
+    const timer = window.setTimeout(() => {
+      getRun(run.run_id).then(setRun).catch(() => undefined);
+    }, POLL_MS);
+    return () => window.clearTimeout(timer);
+  }, [run]);
+
+  // The café panel follows the plan: refresh whenever a step or a supplier answer changes.
+  const signature = runSignature(run);
+  useEffect(() => {
+    refreshStatus();
+    if (signature) refreshEvents();
+  }, [signature, refreshStatus, refreshEvents]);
+
+  function chooseView(next: PlanView) {
+    setView(next);
+    try {
+      window.localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      /* per-viewer convenience only */
+    }
+  }
+
+  async function plan(start: () => ReturnType<typeof startRun>, forEvent: string | null) {
+    setPlanningFor(forEvent ?? "request");
+    setPlanError(null);
+    setRejectedPlanning(null);
+    setSelectedId(null);
+    setRun(null);
+    try {
+      const response = await start();
+      if (response.run) {
+        setRun(response.run);
+        setSearchParams(forEvent ? { event: forEvent, run: response.run.run_id } : { run: response.run.run_id });
+      } else {
+        setRejectedPlanning(response.planning);
+      }
+      refreshEvents();
+    } catch (error) {
+      setPlanError(errorMessage(error));
+    } finally {
+      setPlanningFor(null);
+    }
+  }
+
+  function openEvent(id: string) {
+    const event = events.find((e) => e.event_id === id);
+    setSelectedId(null);
+    setRejectedPlanning(null);
+    setPlanError(null);
+    if (event?.run_id) setSearchParams({ event: id, run: event.run_id });
+    else setSearchParams({ event: id });
+  }
 
   async function handleReplan(nodeId: string) {
     if (!run) return;
@@ -63,11 +199,11 @@ function AgentPage() {
       if (response.run) {
         setSelectedId(null);
         setRun(response.run);
-        setSearchParams({ run: response.run.run_id });
+        setSearchParams({ ...(eventId ? { event: eventId } : {}), run: response.run.run_id });
       } else {
         setRejectedPlanning(response.planning);
       }
-      refreshRecent();
+      refreshEvents();
     } catch (error) {
       setPlanError(errorMessage(error));
     } finally {
@@ -75,260 +211,280 @@ function AgentPage() {
     }
   }
 
-  useEffect(() => {
-    const controller = new AbortController();
-    listEvents(controller.signal)
-      .then(setEvents)
-      .catch(() => setEvents([]));
-    return () => controller.abort();
-  }, []);
+  function openRun(id: string) {
+    setSelectedId(null);
+    setSearchParams({ ...(eventId ? { event: eventId } : {}), run: id });
+  }
 
-  const refreshRecent = useCallback(() => {
-    listRuns()
-      .then(setRecent)
-      .catch(() => setRecent([]));
-  }, []);
-
-  useEffect(refreshRecent, [refreshRecent]);
-
-  useEffect(() => {
-    if (!runId) {
-      setRun(null);
-      return;
-    }
-    if (run?.run_id === runId) return;
-    const controller = new AbortController();
-    setRunError(null);
-    getRun(runId, controller.signal)
-      .then(setRun)
-      .catch((error) => {
-        if (!controller.signal.aborted) setRunError(errorMessage(error));
-      });
-    return () => controller.abort();
-  }, [runId, run?.run_id]);
-
-  useEffect(() => {
-    // keep refreshing while Muse is working or a supplier / employee hasn't answered yet
-    if (!run || (run.status !== "running" && !(run.waiting_on && run.waiting_on.length > 0))) return;
-    const timer = window.setTimeout(() => {
-      getRun(run.run_id).then(setRun).catch(() => undefined);
-    }, POLL_MS);
-    return () => window.clearTimeout(timer);
-  }, [run]);
-
-  async function handleSubmit(event: FormEvent) {
+  async function handleAsk(event: FormEvent) {
     event.preventDefault();
     const query = request.trim();
-    if (!query || isPlanning) return;
-    await plan(() => startRun(query));
+    if (!query || planningFor) return;
+    await plan(() => startRun(query), null);
+    setRequest("");
   }
 
-  async function plan(start: () => ReturnType<typeof startRun>) {
-    setIsPlanning(true);
-    setPlanError(null);
-    setRejectedPlanning(null);
-    setSelectedId(null);
-    try {
-      const response = await start();
-      if (response.run) {
-        setRun(response.run);
-        setSearchParams({ run: response.run.run_id });
-      } else {
-        setRejectedPlanning(response.planning);
-      }
-      refreshRecent();
-    } catch (error) {
-      setPlanError(errorMessage(error));
-    } finally {
-      setIsPlanning(false);
+  function toggleMic() {
+    const Recognition = speechRecognition();
+    if (!Recognition) return;
+    if (listening) {
+      recognition.current?.stop();
+      return;
     }
+    const r = new Recognition();
+    r.lang = "en-US";
+    r.interimResults = true;
+    r.onresult = (e) => {
+      const text = Array.from(e.results)
+        .map((result) => result[0]?.transcript ?? "")
+        .join("");
+      setRequest(text);
+    };
+    r.onend = () => setListening(false);
+    recognition.current = r;
+    setListening(true);
+    r.start();
   }
 
-  const selected = run?.nodes.find((step) => step.node_id === selectedId) ?? null;
-  const waiting = run?.nodes.filter((step) => step.status === "awaiting_approval").length ?? 0;
+  const selectedEvent =
+    events.find((e) => e.event_id === eventId) ??
+    (run ? events.find((e) => e.run_id === run.run_id || e.latest_run_id === run.run_id) : undefined);
+  const counts = run ? planCounts(run) : null;
+  const selectedStep = run?.nodes.find((n) => n.node_id === selectedId && n.status !== "awaiting_approval") ?? null;
+
+  const live = useMemo((): [string, string] => {
+    if (planningFor || run?.status === "running") return ["working", "Working"];
+    if (run?.status === "awaiting_approval") return ["waiting", "Waiting for you"];
+    if (run?.waiting_on && run.waiting_on.length > 0) return ["waiting", `Waiting on ${run.waiting_on.join(" and ")}`];
+    return ["watching", "Watching for events"];
+  }, [planningFor, run]);
+
+  const highlight = planningFor || run?.status === "running" ? "running" : run?.status === "awaiting_approval" ? "waiting" : "none";
+
+  let museLine: string | null = null;
+  if (planningFor) museLine = "Checking stock, sales history and the roster. This usually takes 10 to 20 seconds.";
+  else if (run?.closing_message) museLine = run.closing_message;
+  else if (run && counts?.waiting)
+    museLine = `${counts.waiting === 1 ? "1 change needs" : `${counts.waiting} changes need`} your OK. Nothing changes until you approve.`;
+  else if (run) museLine = run.goal;
 
   return (
-    <section className="page page--agent" aria-labelledby="page-title">
-      <div className="page__heading">
-        <div>
-          <h1 id="page-title">Ask CaféPilot</h1>
-          <p className="page__description">
-            Describe what's coming up. CaféPilot checks stock, sales and staff, lays out the
-            steps, and waits for your OK before changing anything.
-          </p>
-        </div>
-      </div>
+    <section className="page page--muse mz" aria-label="Ask CaféPilot">
+      <div className="mz-muse">
+        <header className="mz-pane-head">
+          <div className="mz-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M5 11h11v3.5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z" />
+              <path d="M16 12h1.5a2.25 2.25 0 0 1 0 4.5H16" />
+              <path d="M10.5 3v4.5M8.25 5.25h4.5" />
+            </svg>
+          </div>
+          <div>
+            <h1 className="mz-head-title">Muse</h1>
+            <div className="mz-muted">Powered by Muse Spark</div>
+          </div>
+          <div className="mz-live" data-live={live[0]} role="status">
+            <i />
+            <span>{live[1]}</span>
+          </div>
+        </header>
 
-      {events.length > 0 && (
-        <section className="event-strip" aria-labelledby="events-title">
-          <h2 id="events-title">
-            Muse found {events.length} {events.length === 1 ? "event" : "events"} coming up
-          </h2>
-          <ul>
-            {events.map((item) => (
-              <li key={item.event_id} className="event-strip__card">
-                <p className="event-strip__message">{item.muse_message}</p>
-                <p className="event-strip__basis">
-                  {item.expected.basis} Source: {item.source}.
-                </p>
-                <button
-                  type="button"
-                  className="primary-button"
-                  disabled={isPlanning}
-                  onClick={() => plan(() => startEventRun(item.event_id))}
-                >
-                  Yes, check
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+        <div className="mz-scroll">
+          <section className="mz-events" aria-label="Events Muse found">
+            <p className="mz-label">
+              Muse found {events.length} {events.length === 1 ? "event" : "events"} coming up
+            </p>
+            {events.map((event) => {
+              const state = event.plan_state ?? "new";
+              const isSelected = selectedEvent?.event_id === event.event_id;
+              const busy = planningFor === event.event_id;
+              return (
+                <article key={event.event_id} className={`mz-ev${isSelected ? " is-sel" : ""}`}>
+                  <button type="button" className="mz-ev__open" onClick={() => openEvent(event.event_id)} aria-label={`Open ${event.title}`}>
+                    <span className="mz-ev__chip">{eventChip(event.starts_at)}</span>
+                    <span className="mz-ev__main">
+                      <span className="mz-ev__title">{event.title}</span>
+                      <span className="mz-ev__meta">
+                        {eventWhen(event)} · {event.is_demo ? "demo data" : event.source}
+                      </span>
+                    </span>
+                    {state !== "new" && <span className={`mz-pill is-${PLAN_STATE[state][0]}`}>{PLAN_STATE[state][1]}</span>}
+                  </button>
+                  {state === "new" ? (
+                    <button
+                      type="button"
+                      className="mz-btn mz-btn--primary"
+                      disabled={planningFor !== null}
+                      onClick={() => plan(() => startEventRun(event.event_id), event.event_id)}
+                    >
+                      {busy ? "Checking…" : "Check if we're ready"}
+                    </button>
+                  ) : (
+                    <button type="button" className="mz-btn mz-btn--ghost" onClick={() => openEvent(event.event_id)}>
+                      {isSelected && run ? "Showing plan" : "Open plan"}
+                    </button>
+                  )}
+                  {isSelected && (
+                    <p className="mz-ev__muse">
+                      {event.muse_message}
+                      <span className="mz-ev__basis">{event.expected.basis}</span>
+                    </p>
+                  )}
+                </article>
+              );
+            })}
+          </section>
 
-      <form className="ask-bar" onSubmit={handleSubmit}>
-        <label className="ask-bar__label" htmlFor="agent-request">
-          What do you need?
-        </label>
-        <textarea
-          id="agent-request"
-          className="ask-bar__input"
-          rows={3}
-          value={request}
-          placeholder="For example: a catering order for 25 lattes on Friday at 9 AM. Do we have enough milk?"
-          onChange={(event) => setRequest(event.target.value)}
-          disabled={isPlanning}
-        />
-        <div className="ask-bar__actions">
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => setRequest(EXAMPLE_REQUEST)}
-            disabled={isPlanning}
-          >
-            Use the farmers market example
-          </button>
-          <button type="submit" className="primary-button" disabled={isPlanning || !request.trim()}>
-            {isPlanning ? "Planning…" : "Make a plan"}
-          </button>
-        </div>
-        {isPlanning && (
-          <p className="ask-bar__hint" role="status">
-            Reading your café's data and planning the steps. This usually takes 10 to 20 seconds.
-          </p>
-        )}
-        {planError && (
-          <p className="ask-bar__error" role="alert">
-            {planError}
-          </p>
-        )}
-      </form>
-
-      {rejectedPlanning && <PlanningNotice planning={rejectedPlanning} />}
-
-      {runError && (
-        <p className="ask-bar__error" role="alert">
-          {runError}
-        </p>
-      )}
-
-      {run && (
-        <div className="run-view">
-          <header className="run-view__header">
-            <div>
-              <p className="run-view__request">“{run.query}”</p>
-              <h2 className="run-view__goal">{run.goal}</h2>
-            </div>
-            <span className={`run-status run-status--${runStatusLabel(run).tone}`}>
-              {runStatusLabel(run).label}
-              {waiting > 0 && `: ${waiting} ${waiting === 1 ? "change" : "changes"}`}
-            </span>
-          </header>
-
-          {run.assumptions.length > 0 && (
-            <div className="run-view__assumptions">
-              <h3>Assumed for this plan</h3>
-              <ul>
-                {run.assumptions.map((assumption) => (
-                  <li key={assumption}>{assumption}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {run.closing_message && (
-            <p className="run-view__closing" role="status">
-              {run.closing_message}
+          {museLine && <p className="mz-muse-line">{museLine}</p>}
+          {planError && (
+            <p className="mz-error" role="alert">
+              {planError}
             </p>
           )}
+          {runError && (
+            <p className="mz-error" role="alert">
+              {runError}
+            </p>
+          )}
+          {rejectedPlanning && <PlanningNotice planning={rejectedPlanning} />}
 
-          <ApprovalPanel
-            run={run}
-            onUpdated={(updated) => {
-              setRun(updated);
-              refreshRecent();
-            }}
-            onShowStep={setSelectedId}
-          />
-          {run.parent_run_id && (
-            <p className="run-view__parent">
-              Muse planned this because a change in an earlier plan fell through.{" "}
+          {planningFor && <PlanningSkeleton />}
+
+          {run && !planningFor && counts && (
+            <section className="mz-plan" aria-label="Muse's plan">
+              {run.parent_run_id && (
+                <p className="mz-parent">
+                  Muse planned this because a change in an earlier plan fell through.{" "}
+                  <button type="button" className="mz-link" onClick={() => openRun(run.parent_run_id as string)}>
+                    See the earlier plan
+                  </button>
+                </p>
+              )}
+              <div className="mz-plan__head">
+                <div>
+                  <h2 className="mz-plan__goal">{run.goal}</h2>
+                  <p className="mz-muted">
+                    {counts.checksDone} of {counts.checks} checks done
+                    {counts.waiting > 0 ? ` · ${counts.waiting} waiting for you` : ""}
+                  </p>
+                </div>
+                {!narrow && <div className="mz-toggle" role="group" aria-label="Plan view">
+                  <button type="button" aria-pressed={view === "tiles"} onClick={() => chooseView("tiles")}>
+                    Steps
+                  </button>
+                  <button type="button" aria-pressed={view === "graph"} onClick={() => chooseView("graph")}>
+                    Dependencies
+                  </button>
+                </div>}
+              </div>
+              {run.assumptions.length > 0 && (
+                <details className="mz-assume">
+                  <summary>Muse assumed {run.assumptions.length === 1 ? "1 thing" : `${run.assumptions.length} things`}</summary>
+                  <ul>
+                    {run.assumptions.map((a) => (
+                      <li key={a}>{a}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+
+              <PlanMap
+                run={run}
+                view={view}
+                selectedId={selectedId}
+                onSelect={(id) => setSelectedId((current) => (current === id ? null : id))}
+              />
+
+              {selectedStep && (
+                <div className="mz-detail">
+                  <StepDetail step={selectedStep} onClose={() => setSelectedId(null)} />
+                </div>
+              )}
+
+              <ApprovalList run={run} selectedId={selectedId} onSelect={setSelectedId} onUpdated={setRun} />
+              <PlanReceipt run={run} onReplan={handleReplan} onOpenRun={openRun} replanning={replanning} />
+
+              <p className="mz-foot">
+                Planned by {run.model}
+                {run.attempts > 1 ? ` after ${run.attempts} attempts` : ""}. Every number comes from the café's data, worked
+                out in code.
+              </p>
+            </section>
+          )}
+
+          {!run && !planningFor && !rejectedPlanning && !runError && (
+            <div className="mz-empty">
+              {selectedEvent ? (
+                <p>Say “Check if we're ready” and Muse will plan for {selectedEvent.title}.</p>
+              ) : (
+                <p>Pick an event, or ask Muse anything below.</p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <form className="mz-cmd" onSubmit={handleAsk}>
+          <div className="mz-cmd__bar">
+            <input
+              type="text"
+              value={request}
+              onChange={(e) => setRequest(e.target.value)}
+              placeholder="Ask Muse… e.g. a catering order for 25 lattes Friday 9 AM"
+              aria-label="Ask Muse"
+              disabled={planningFor !== null}
+            />
+            {speechRecognition() && (
               <button
                 type="button"
-                className="text-button"
-                onClick={() => setSearchParams({ run: run.parent_run_id as string })}
+                className={`mz-mic${listening ? " is-on" : ""}`}
+                aria-label={listening ? "Stop listening" : "Speak to Muse"}
+                aria-pressed={listening}
+                onClick={toggleMic}
               >
-                See the earlier plan
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="9" y="2" width="6" height="12" rx="3" />
+                  <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 18v4" />
+                </svg>
               </button>
-            </p>
-          )}
-          <OutcomeList
-            run={run}
-            onReplan={handleReplan}
-            onOpenRun={(id) => setSearchParams({ run: id })}
-            replanning={replanning}
-          />
-
-          <div className={`run-view__body${selected ? " has-detail" : ""}`}>
-            <TicketRail run={run} selectedId={selectedId} onSelect={setSelectedId} />
-            {selected && <StepDetail step={selected} onClose={() => setSelectedId(null)} />}
+            )}
+            <button type="submit" className="mz-send" aria-label="Send" disabled={!request.trim() || planningFor !== null}>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 19V5M5 12l7-7 7 7" />
+              </svg>
+            </button>
           </div>
+          <div className="mz-audit">
+            <i />
+            {counts ? `${counts.checks} ${counts.checks === 1 ? "check" : "checks"} · ` : ""}nothing changes without your OK
+          </div>
+        </form>
+      </div>
 
-          <p className="run-view__footnote">
-            Planned {formatTime(run.created_at)} by {run.model}
-            {run.attempts > 1 ? ` after ${run.attempts} attempts` : ""}. Each step shows the date its
-            data is from.
-          </p>
-        </div>
-      )}
-
-      {recent.length > 0 && (
-        <section className="recent-runs" aria-labelledby="recent-runs-title">
-          <h2 id="recent-runs-title">Recent plans</h2>
-          <ul>
-            {recent.map((item) => (
-              <li key={item.run_id}>
-                <button
-                  type="button"
-                  className={`recent-runs__item${item.run_id === runId ? " is-current" : ""}`}
-                  onClick={() => {
-                    setSelectedId(null);
-                    setSearchParams({ run: item.run_id });
-                  }}
-                >
-                  <span className="recent-runs__goal">{item.goal}</span>
-                  <span className="recent-runs__meta">
-                    {formatTime(item.created_at)},{" "}
-                    {item.awaiting_approval > 0
-                      ? `${item.awaiting_approval} ${item.awaiting_approval === 1 ? "change" : "changes"} waiting for you`
-                      : RUN_STATUS_LABELS[item.status].toLowerCase()}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <CafeStatusPanel status={status} error={statusError} highlight={highlight} onOpenEvent={openEvent} />
     </section>
+  );
+}
+
+function PlanningSkeleton() {
+  return (
+    <div className="mz-groups mz-groups--skeleton" aria-hidden="true">
+      {["Look up", "Work out", "Needs your OK"].map((label, i) => (
+        <section key={label} className="mz-group">
+          <h4 className="mz-col-label">{label}</h4>
+          <div className="mz-group__tiles">
+            {Array.from({ length: i === 0 ? 3 : 2 }, (_, j) => (
+              <div key={j} className="mz-tile" data-s={i === 0 && j === 0 ? "running" : "pending"}>
+                <span className="mz-tile__top">
+                  <span className="mz-tile__ico" />
+                  <span className="mz-tile__title mz-shimmer" />
+                </span>
+                <span className="mz-tile__res mz-shimmer" />
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -336,31 +492,31 @@ function PlanningNotice({ planning }: { planning: Planning }) {
   const { plan, validation } = planning;
   if (plan.status === "needs_clarification") {
     return (
-      <div className="planning-notice" role="status">
-        <h2>One question first</h2>
+      <div className="mz-notice" role="status">
+        <h3>One question first</h3>
         <p>{plan.question}</p>
-        <p className="planning-notice__hint">Add the answer to your request and ask again.</p>
+        <p className="mz-muted">Add the answer to your request and ask again.</p>
       </div>
     );
   }
   if (plan.status === "out_of_scope") {
     return (
-      <div className="planning-notice" role="status">
-        <h2>That's outside what CaféPilot handles</h2>
+      <div className="mz-notice" role="status">
+        <h3>That's outside what CaféPilot handles</h3>
         <p>Ask about stock, sales, staff, deliveries or supplier orders.</p>
       </div>
     );
   }
   return (
-    <div className="planning-notice planning-notice--rejected" role="alert">
-      <h2>The plan didn't pass CaféPilot's safety checks</h2>
+    <div className="mz-notice mz-notice--bad" role="alert">
+      <h3>The plan didn't pass CaféPilot's safety checks</h3>
       <p>Nothing was run. The checks found:</p>
       <ul>
         {validation.issues.map((issue, index) => (
           <li key={index}>{issue.message}</li>
         ))}
       </ul>
-      <p className="planning-notice__hint">Try rephrasing the request with dates and quantities.</p>
+      <p className="mz-muted">Try rephrasing the request with dates and quantities.</p>
     </div>
   );
 }

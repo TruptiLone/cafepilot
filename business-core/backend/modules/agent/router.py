@@ -19,6 +19,7 @@ from backend.modules.agent.planner import (
 )
 from backend.models.cafe import Cafe
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
+from backend.modules.agent.status import CafeStatus, cafe_status, event_plan
 from backend.modules.agent.summaries import summarize_run
 from backend.modules.agent.acknowledgements import Acknowledgement, Stage, change_statuses
 from backend.modules.purchasing.service import settle_due
@@ -353,10 +354,24 @@ def decide_all_steps(
 # ---------------------------------------------------------------------------
 
 
+@router.get("/status", response_model=CafeStatus)
+def read_cafe_status(cafe_id: str = Query("CAFE001"), database_session: Session = Depends(get_db)) -> CafeStatus:
+    """The read-only café panel: stock for the next busy event, staff cover, approvals, sales, events."""
+    settle_due(database_session, cafe_id=cafe_id)
+    database_session.commit()
+    try:
+        return cafe_status(database_session, cafe_id)
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+
+
 @router.get("/events", response_model=list[DetectedEvent])
 def list_events(cafe_id: str = Query("CAFE001"), database_session: Session = Depends(get_db)) -> list[DetectedEvent]:
     """Upcoming events with expected demand computed from sales history (is_demo marks demo data)."""
-    return detected_events(database_session, cafe_id)
+    events = detected_events(database_session, cafe_id)
+    for event in events:
+        event.run_id, event.latest_run_id, event.plan_state = event_plan(database_session, event.event_id)
+    return events
 
 
 @router.get("/events/{event_id}", response_model=DetectedEvent)

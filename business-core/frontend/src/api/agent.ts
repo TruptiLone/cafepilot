@@ -186,6 +186,9 @@ export type DetectedEvent = {
   source: string;
   is_demo: boolean;
   muse_message: string;
+  run_id?: string | null;
+  latest_run_id?: string | null;
+  plan_state?: PlanState;
   expected: {
     confidence: "good" | "rough" | "none";
     examples: number;
@@ -197,6 +200,67 @@ export type DetectedEvent = {
     basis: string;
   };
 };
+
+export type PlanState = "new" | "checking" | "needs_ok" | "waiting" | "planned" | "issues";
+
+export type Kpi = {
+  label: string;
+  value: string;
+  of: string | null;
+  note: string;
+  tone: "neutral" | "good" | "warn" | "bad";
+};
+
+export type InventoryRow = {
+  ingredient_id: string;
+  name: string;
+  unit: string;
+  on_hand: string | null;
+  arriving: string;
+  on_order: string;
+  on_order_status: string | null;
+  needed: string;
+  shortfall: string;
+  status: "covered" | "short" | "ordered" | "unknown";
+  note: string;
+};
+
+export type CoverageDay = {
+  date: string;
+  label: string;
+  shifts: number;
+  is_event_day: boolean;
+  halves: { label: "AM" | "PM"; staffed: number; required: number }[];
+};
+
+export type EventStatus = {
+  event_id: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  note: string;
+  plan_state: PlanState;
+  run_id: string | null;
+  latest_run_id: string | null;
+};
+
+export type CafeStatus = {
+  cafe_id: string;
+  cafe_name: string;
+  as_of: string;
+  greeting: string;
+  date_label: string;
+  focus_event_id: string | null;
+  focus_event_name: string | null;
+  kpis: Partial<Record<"stock" | "coverage" | "approvals" | "sales", Kpi>>;
+  inventory: InventoryRow[];
+  coverage: CoverageDay[];
+  events: EventStatus[];
+};
+
+export function getCafeStatus(signal?: AbortSignal): Promise<CafeStatus> {
+  return requestJson<CafeStatus>(`/api/v1/agent/status?cafe_id=${ACTIVE_CAFE_ID}`, { signal });
+}
 
 export function listEvents(signal?: AbortSignal): Promise<DetectedEvent[]> {
   return requestJson<DetectedEvent[]>(`/api/v1/agent/events?cafe_id=${ACTIVE_CAFE_ID}`, { signal });

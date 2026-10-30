@@ -70,7 +70,8 @@ After `seed_all.sh`, load the Event Surge scenario (Thursday Oct 29 closing coun
 spill, and three existing Sunday Nov 1 shifts):
 
 ```bash
-PYTHONPATH=. python scripts/seed_event_surge.py --fresh
+PYTHONPATH=. python scripts/seed_event_surge.py --fresh                  # market planning demo
+PYTHONPATH=. python scripts/seed_event_surge.py --fresh --with-delivery  # also PO-1042 for receiving
 ```
 
 `--fresh` first removes the scenario and everything the agent changed for CAFE001 (its runs and

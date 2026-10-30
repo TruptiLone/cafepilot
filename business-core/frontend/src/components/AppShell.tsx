@@ -53,6 +53,9 @@ function AppShell() {
         />
 
         <aside className={`sidebar${isMenuOpen ? " is-open" : ""}`}>
+          <div className="sidebar__brand" aria-hidden="true">
+            <span className="sidebar__mono">CP</span>CaféPilot
+          </div>
           <div className="sidebar__mobile-header">
             <Brand compact />
             <button
@@ -81,12 +84,12 @@ function AppShell() {
           </nav>
 
           <div className="sidebar__footer">
-            <span className="sidebar__footer-label">Active café</span>
-            <strong>CAFE001</strong>
+            <strong>CafePilot Demo Cafe</strong>
+            <span>Santa Clara, CA</span>
           </div>
         </aside>
 
-        <main className="main-content">
+        <main className={`main-content${location.pathname.startsWith("/agent") ? " main-content--flush" : ""}`}>
           <Outlet />
         </main>
       </div>

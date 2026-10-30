@@ -52,7 +52,7 @@ def session(tmp_path, monkeypatch) -> Session:
         if db.get(Cafe, C) is None:
             pytest.skip("demo data not seeded; run scripts/seed_all.sh")
         apply_reset(db, plan_reset(db))
-        seed_event_surge(db)
+        seed_event_surge(db, with_delivery=True)
         yield db
     finally:
         db.close()

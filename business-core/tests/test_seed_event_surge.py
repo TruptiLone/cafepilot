@@ -49,7 +49,7 @@ def _january_counts(db: Session) -> tuple[int, int]:
 
 def test_seed_is_idempotent(session: Session) -> None:
     first = seed_event_surge(session)
-    assert (first.counts, first.count_lines, first.movements, first.shifts) == (1, 7, 1, 3)
+    assert (first.counts, first.count_lines, first.movements, first.shifts) == (1, 7, 1, 11)  # 3 Sunday + 8 roster
     again = seed_event_surge(session)
     assert (again.counts, again.count_lines, again.movements, again.shifts) == (0, 0, 0, 0)
 

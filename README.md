@@ -50,6 +50,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ./scripts/seed_all.sh           # migrations + demo café data
 PYTHONPATH=. python scripts/seed_event_surge.py --fresh   # Sunday farmers-market scenario
+# add --with-delivery for the receiving demo (PO-1042 from Willow Ridge, arriving Sun 5:30 AM)
 uvicorn backend.main:app --port 8001 --reload
 ```
 

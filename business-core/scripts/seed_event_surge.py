@@ -70,7 +70,18 @@ SUNDAY_SHIFTS = (
     # employee, start, end  (all PST, after the Nov 1 daylight-saving change)
     ("DEMO_EMP_002", "07:00", "15:00"),  # Jordan Brooks, shift lead
     ("DEMO_EMP_007", "08:00", "14:00"),  # Ava Thompson, cashier
-    ("DEMO_EMP_005", "12:00", "16:00"),  # Nora Williams, barista (afternoon only)
+    ("DEMO_EMP_005", "12:00", "17:00"),  # Nora Williams, barista (afternoon to close)
+)
+# A normal roster for the days before the market (PDT), so the café panel shows real cover.
+ROSTER_SHIFTS = (
+    ("DEMO_EMP_001", "2026-10-30T07:00", "2026-10-30T15:00"),
+    ("DEMO_EMP_002", "2026-10-30T07:00", "2026-10-30T15:00"),
+    ("DEMO_EMP_004", "2026-10-30T11:00", "2026-10-30T19:00"),
+    ("DEMO_EMP_005", "2026-10-30T12:00", "2026-10-30T19:00"),
+    ("DEMO_EMP_001", "2026-10-31T07:00", "2026-10-31T15:00"),
+    ("DEMO_EMP_007", "2026-10-31T07:00", "2026-10-31T13:00"),
+    ("DEMO_EMP_004", "2026-10-31T12:00", "2026-10-31T17:00"),
+    ("DEMO_EMP_002", "2026-10-31T13:00", "2026-10-31T17:00"),
 )
 SEEDED_AT = datetime.fromisoformat("2026-10-28T12:00:00-07:00")
 
@@ -124,6 +135,18 @@ def _shift_rows() -> list[dict]:
                 "created_at": SEEDED_AT,
             }
         )
+    for employee_id, start, end in ROSTER_SHIFTS:
+        rows.append(
+            {
+                "shift_id": f"{PREFIX}ROSTER_{start[5:10].replace('-', '')}_{employee_id[-3:]}",
+                "cafe_id": CAFE_ID,
+                "employee_id": employee_id,
+                "start_at": datetime.fromisoformat(f"{start}:00-07:00"),
+                "end_at": datetime.fromisoformat(f"{end}:00-07:00"),
+                "status": "scheduled",
+                "created_at": SEEDED_AT,
+            }
+        )
     return rows
 
 
@@ -135,7 +158,8 @@ def _require_prerequisites(session: Session) -> None:
             raise EventSurgeSeedError(f"{employee_id} is missing: run ./scripts/seed_all.sh first")
 
 
-def seed_event_surge(session: Session) -> SeedResult:
+def seed_event_surge(session: Session, *, with_delivery: bool = False) -> SeedResult:
+    """Seed the market scenario; with_delivery also adds PO-1042 for the receiving demo."""
     transaction = session.begin_nested() if session.in_transaction() else session.begin()
     with transaction:
         _require_prerequisites(session)
@@ -172,7 +196,7 @@ def seed_event_surge(session: Session) -> SeedResult:
         )
         session.flush()
         orders = 0
-        if session.get(PurchaseOrder, DEMO_ORDER_ID) is None:
+        if with_delivery and session.get(PurchaseOrder, DEMO_ORDER_ID) is None:
             delivery = datetime.fromisoformat("2026-11-01T05:30:00-08:00")
             session.add(
                 PurchaseOrder(
@@ -286,6 +310,8 @@ def main() -> int:
     parser.add_argument("--reset", action="store_true", help="remove the scenario and the agent's changes")
     parser.add_argument("--yes", action="store_true", help="actually delete (otherwise --reset is a dry run)")
     parser.add_argument("--fresh", action="store_true", help="reset (no prompt) and seed again")
+    parser.add_argument("--with-delivery", action="store_true",
+                        help="also add PO-1042 (Willow Ridge, arriving Sun 5:30 AM) for the receiving demo")
     args = parser.parse_args()
 
     with SessionLocal() as session:
@@ -306,12 +332,12 @@ def main() -> int:
                 return 0
             if not args.fresh:
                 return 0
-        result = seed_event_surge(session)
+        result = seed_event_surge(session, with_delivery=args.with_delivery)
         session.commit()
     print(
         "Event Surge scenario ready: "
         f"{result.counts} count, {result.count_lines} count lines, {result.movements} movement, "
-        f"{result.shifts} Sunday shifts, {result.orders} demo order (PO-1042) created. Ask with knowledge as of {AS_OF}."
+        f"{result.shifts} shifts" + (", demo order PO-1042" if result.orders else "") + f" created. Ask with knowledge as of {AS_OF}."
     )
     return 0
 

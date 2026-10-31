@@ -202,7 +202,6 @@ const planning = (overrides: Partial<StartRunResponse["planning"]["plan"]> = {},
   latency_ms: 1000,
 });
 
-const approvals = () => screen.findByRole("region", { name: "1 change needs your OK" });
 
 afterEach(() => {
   cleanup();
@@ -214,51 +213,153 @@ afterEach(() => {
   }
 });
 
+const decisionBox = async (title: string) => {
+  const head = await screen.findByRole("button", { name: new RegExp(title) });
+  return head.closest(".sg-box") as HTMLElement;
+};
+
 describe("AgentPage", () => {
-  it("shows a saved plan as steps grouped into look up, work out and needs your OK", async () => {
-    mockApi();
-    renderPage("/agent?run=RUN-1");
-
-    expect(await screen.findByRole("heading", { name: run.goal })).toBeTruthy();
-    const lookUp = screen.getByRole("region", { name: "Look up" });
-    expect(within(lookUp).getByText("Check the team")).toBeTruthy();
-    expect(within(lookUp).getByText("Check stock")).toBeTruthy();
-    expect(within(screen.getByRole("region", { name: "Work out" })).getByText("Who's missing")).toBeTruthy();
-    const ok = screen.getByRole("region", { name: "Needs your OK" });
-    expect(within(ok).getByRole("button", { name: "Review: Add a shift" })).toBeTruthy();
-    expect(screen.getByText("3 of 3 checks done · 1 waiting for you")).toBeTruthy();
-    expect(screen.getByText("Waiting for you")).toBeTruthy();
-  });
-
-  it("switches to the dependency map and remembers the choice", async () => {
-    mockApi();
-    renderPage("/agent?run=RUN-1");
-    await screen.findByRole("heading", { name: run.goal });
-    await userEvent.click(screen.getByRole("button", { name: "Dependencies" }));
-
-    expect(screen.getByRole("button", { name: "Dependencies" }).getAttribute("aria-pressed")).toBe("true");
-    expect(screen.queryByRole("region", { name: "Look up" })).toBeNull();
-    expect(document.querySelector(".mz-map svg.mz-wires")).toBeTruthy();
-    expect(window.localStorage.getItem("cafepilot-plan-view")).toBe("graph");
-  });
-
-  it("opens a finished step's details", async () => {
-    mockApi();
-    renderPage("/agent?run=RUN-1");
-    await userEvent.click(await screen.findByRole("button", { name: "Details: Who's missing" }));
-    const detail = screen.getByRole("complementary", { name: "Details for Check staff coverage" });
-    expect(within(detail).getByText(/Action: coverage_report/)).toBeTruthy();
-    await userEvent.click(within(detail).getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("complementary", { name: /Details for/ })).toBeNull();
-  });
-
-  it("shows the café panel beside the plan", async () => {
-    mockApi();
+  it("lists events with what Muse watches for, and plans one", async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST") return jsonResponse({ planning: planning(), run });
+      return jsonResponse(run);
+    }, [marketEvent]);
     renderPage();
-    const panel = await screen.findByRole("region", { name: "Café status" });
-    expect(await within(panel).findByText("Good evening, CafePilot Demo Cafe.")).toBeTruthy();
-    expect(within(panel).getByText("Short 1.2 L")).toBeTruthy();
-    expect(within(panel).getByText("Sunday event coverage")).toBeTruthy();
+
+    const events = await screen.findByRole("region", { name: "Events Muse found" });
+    expect(within(events).getByText(/Muse watches what's happening near the café/)).toBeTruthy();
+    expect(within(events).getByText(/0.2 miles away · usually much busier/)).toBeTruthy();
+    await userEvent.click(within(events).getByRole("button", { name: "Let's plan ✨" }));
+
+    expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")).toBe(true);
+  });
+
+  it("opens the existing plan for an event that was already checked", async () => {
+    stubFetch(() => jsonResponse(run), [{ ...marketEvent, plan_state: "needs_ok", run_id: "RUN-1", latest_run_id: "RUN-1" }]);
+    renderPage();
+    const events = await screen.findByRole("region", { name: "Events Muse found" });
+    expect(within(events).getByText("Needs your OK")).toBeTruthy();
+    await userEvent.click(within(events).getByRole("button", { name: "Open plan" }));
+    expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
+  });
+
+  it("groups the steps into owner-friendly boxes with the decision inside the graph", async () => {
+    mockApi();
+    renderPage("/agent?run=RUN-1");
+    expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ingredients" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Staff" })).toBeTruthy();
+    const add = await decisionBox("Add Ethan");
+    expect(within(add).getByRole("button", { name: "Approve" })).toBeTruthy();
+    expect(add.getAttribute("data-s")).toBe("wait");
+    expect(screen.getByText("3 of 3 checks done · 1 decision waiting · hover a step for details")).toBeTruthy();
+  });
+
+  it("shows the details behind a box when it is clicked", async () => {
+    mockApi();
+    renderPage("/agent?run=RUN-1");
+    await userEvent.click(await screen.findByRole("button", { name: "Staff" }));
+    const tip = screen.getByRole("tooltip");
+    expect(within(tip).getByText("Staff for the event hours")).toBeTruthy();
+    expect(within(tip).getByText(/coverage_report/)).toBeTruthy();
+  });
+
+  it("explains why Muse suggests a change", async () => {
+    mockApi();
+    renderPage("/agent?run=RUN-1");
+    await userEvent.click(await screen.findByRole("button", { name: /Add Ethan/ }));
+    const tip = screen.getByRole("tooltip");
+    expect(within(tip).getByText("Add a barista for the rush")).toBeTruthy();
+    expect(within(tip).getByText(/coverage is below 2 people/)).toBeTruthy();
+  });
+
+  it("approves a change inside the graph and shows what happened", async () => {
+    const fetchMock = mockApi();
+    renderPage("/agent?run=RUN-1");
+    await userEvent.click(within(await decisionBox("Add Ethan")).getByRole("button", { name: "Approve" }));
+
+    expect(await screen.findByText("Ethan Patel is on the schedule")).toBeTruthy();
+    expect((await decisionBox("Add Ethan")).getAttribute("data-s")).toBe("done");
+    const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/nodes/add_barista/decision"));
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ decision: "approved", channel: "web" });
+  });
+
+  it("declines a change", async () => {
+    const declined: AgentRun = {
+      ...run,
+      status: "completed_with_issues",
+      nodes: run.nodes.map((node) => (node.node_id === "add_barista" ? { ...node, status: "rejected", error: "rejected by owner" } : node)),
+    };
+    const fetchMock = mockApi(undefined, declined);
+    renderPage("/agent?run=RUN-1");
+    await userEvent.click(within(await decisionBox("Add Ethan")).getByRole("button", { name: "Decline" }));
+    await waitFor(async () => expect((await decisionBox("Add Ethan")).getAttribute("data-s")).toBe("declined"));
+    const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/decision"));
+    expect(JSON.parse(String(post?.[1]?.body)).decision).toBe("rejected");
+  });
+
+  it("offers Approve all when several changes wait", async () => {
+    const two: AgentRun = {
+      ...run,
+      nodes: [
+        ...run.nodes,
+        {
+          ...run.nodes[run.nodes.length - 1],
+          node_id: "order",
+          action: "propose_supplier_order",
+          only_if: null,
+          resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "2000", unit: "mL" }], requested_delivery_at: "2026-11-01T06:00:00-08:00" },
+        },
+      ],
+    };
+    const fetchMock = stubFetch((url, init) => {
+      if (url.endsWith("/RUN-1/decision") && init?.method === "POST") return jsonResponse(completedRun);
+      return jsonResponse(two);
+    });
+    renderPage("/agent?run=RUN-1");
+    expect(await decisionBox("Order milk")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Approve all" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve all" })).toBeNull());
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/RUN-1/decision"))).toBe(true);
+  });
+
+  it("keeps the change waiting and explains when a decision fails", async () => {
+    mockApi(undefined, { status: 409, detail: "add_barista is done, not waiting for approval" });
+    renderPage("/agent?run=RUN-1");
+    await userEvent.click(within(await decisionBox("Add Ethan")).getByRole("button", { name: "Approve" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("not waiting for approval");
+    expect(within(await decisionBox("Add Ethan")).getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("changes the person and start time before approving a shift", async () => {
+    const fetchMock = mockApi();
+    renderPage("/agent?run=RUN-1");
+    const box = await decisionBox("Add Ethan");
+    await userEvent.click(within(box).getByRole("button", { name: "Change" }));
+    const form = within(box).getByRole("form", { name: "Change the shift" });
+    const start = within(form).getByLabelText("Starts") as HTMLInputElement;
+    expect(start.value).toBe("07:30");
+    await userEvent.clear(start);
+    await userEvent.type(start, "08:00");
+    await userEvent.click(within(form).getByRole("button", { name: "Approve with changes" }));
+
+    await screen.findByText("Ethan Patel is on the schedule");
+    const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/nodes/add_barista/decision"));
+    expect(JSON.parse(String(post?.[1]?.body)).edited_args).toEqual({
+      employee_id: "DEMO_EMP_004",
+      start_at: "2026-11-01T08:00:00-08:00",
+      end_at: "2026-11-01T14:30:00-08:00",
+    });
+  });
+
+  it("switches to the technical view and remembers the choice", async () => {
+    mockApi();
+    renderPage("/agent?run=RUN-1");
+    await screen.findByRole("heading", { name: /Muse's plan/ });
+    await userEvent.click(screen.getByRole("button", { name: "Technical view" }));
+    expect(document.querySelector(".mz-map svg.mz-wires")).toBeTruthy();
+    expect(window.localStorage.getItem("cafepilot-plan-view")).toBe("technical");
   });
 
   it("sends a typed request and shows the new plan", async () => {
@@ -266,23 +367,19 @@ describe("AgentPage", () => {
     renderPage();
     await userEvent.type(screen.getByLabelText("Ask Muse"), "Farmers market Sunday, order milk");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
-
-    expect(await screen.findByRole("heading", { name: run.goal })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
     const post = fetchMock.mock.calls.find(([url, init]) => url === "/api/v1/agent/runs" && init?.method === "POST");
     expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({ cafe_id: "CAFE001", query: "Farmers market Sunday, order milk" });
   });
 
   it("explains a plan that failed the safety checks", async () => {
     mockApi({
-      planning: planning({}, [
-        { code: "missing_prerequisite", node_id: "add", message: "schedule_shift must come after coverage_report" },
-      ] as never),
+      planning: planning({}, [{ code: "missing_prerequisite", node_id: "add", message: "schedule_shift must come after coverage_report" }] as never),
       run: null,
     });
     renderPage();
     await userEvent.type(screen.getByLabelText("Ask Muse"), "add a barista");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
-
     expect(await screen.findByText("The plan didn't pass CaféPilot's safety checks")).toBeTruthy();
     expect(screen.getByText("schedule_shift must come after coverage_report")).toBeTruthy();
   });
@@ -303,206 +400,63 @@ describe("AgentPage", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("MODEL_API_KEY"));
   });
 
-  it("lists the change in plain words with the reasons behind it", async () => {
+  it("shows the café panel and folds it into badges", async () => {
     mockApi();
-    renderPage("/agent?run=RUN-1");
-    const panel = await approvals();
-    expect(within(panel).getByText("Schedule Ethan Patel for Sun, Nov 1, 7:30 AM–2:30 PM")).toBeTruthy();
-    expect(within(panel).getByText("coverage is below 2 people")).toBeTruthy();
-    expect(within(panel).getByText("1 of 1 hours are short: as few as 0 of 2 people scheduled.")).toBeTruthy();
-    expect(within(panel).queryByRole("button", { name: "Approve all" })).toBeNull();
+    renderPage();
+    const panel = await screen.findByRole("region", { name: "Café status" });
+    expect(await within(panel).findByText("Short 1.2 L")).toBeTruthy();
+    await userEvent.click(within(panel).getByRole("button", { name: "Hide café status" }));
+    const mini = screen.getByRole("region", { name: "Café status" });
+    expect(within(mini).getByText("2/4")).toBeTruthy();
+    expect(window.localStorage.getItem("cafepilot-status-folded")).toBe("1");
   });
 
-  it("clicking a waiting step highlights its approval card", async () => {
-    mockApi();
-    renderPage("/agent?run=RUN-1");
-    await userEvent.click(await screen.findByRole("button", { name: "Review: Add a shift" }));
-    expect(screen.getByRole("article", { name: "Change to approve: Add a shift" }).className).toContain("is-sel");
-  });
-
-  it("approves a change and shows what happened", async () => {
-    const fetchMock = mockApi();
-    renderPage("/agent?run=RUN-1");
-    await userEvent.click(within(await approvals()).getByRole("button", { name: "Approve" }));
-
-    const outcome = await screen.findByRole("region", { name: "What happened" });
-    expect(within(outcome).getByText("Ethan Patel is on the schedule")).toBeTruthy();
-    expect(within(outcome).getByText(/hasn't been notified yet/)).toBeTruthy();
-    expect(within(outcome).getByRole("link", { name: "View in Staffing" }).getAttribute("href")).toBe("/staffing");
-    expect(screen.queryByRole("region", { name: /needs your OK/ })).toBeNull();
-    expect(screen.getByText(/Done. Ethan Patel is on the schedule/)).toBeTruthy();
-    const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/nodes/add_barista/decision"));
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ decision: "approved", channel: "web" });
-  });
-
-  it("declines a change", async () => {
-    const declined: AgentRun = {
-      ...run,
-      status: "completed_with_issues",
-      nodes: run.nodes.map((node) =>
-        node.node_id === "add_barista" ? { ...node, status: "rejected", error: "rejected by owner" } : node,
-      ),
-    };
-    const fetchMock = mockApi(undefined, declined);
-    renderPage("/agent?run=RUN-1");
-    await userEvent.click(within(await approvals()).getByRole("button", { name: "Decline" }));
-
-    const outcome = await screen.findByRole("region", { name: "What happened" });
-    expect(within(outcome).getByText("Declined")).toBeTruthy();
-    const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/decision"));
-    expect(JSON.parse(String(post?.[1]?.body)).decision).toBe("rejected");
-  });
-
-  it("offers Approve all when several changes wait", async () => {
-    const two: AgentRun = {
-      ...run,
-      nodes: [
-        ...run.nodes,
-        {
-          ...run.nodes[run.nodes.length - 1],
-          node_id: "order",
-          action: "propose_supplier_order",
-          only_if: null,
-          resolved_args: {
-            lines: [{ ingredient_id: "OAT_MILK", quantity: "2000", unit: "mL" }],
-            requested_delivery_at: "2026-11-01T06:00:00-08:00",
-          },
-        },
+  it("when a supplier says no, Muse finds another way and the new order grows under it", async () => {
+    const rejectedNode = (replannedIn: string | null) => ({
+      ...run.nodes[3],
+      action: "propose_supplier_order",
+      status: "done" as const,
+      result: { order_id: "po_1" },
+      resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }], requested_delivery_at: "2026-11-01T06:00:00-08:00" },
+      replanned_in: replannedIn,
+      lifecycle: [
+        { stage: "Proposed", state: "done" as const, at: null, note: null },
+        { stage: "Sent to Bay Dairy Co.", state: "done" as const, at: null, note: null },
+        { stage: "Rejected by supplier", state: "failed" as const, at: null, note: null },
       ],
-    };
-    const fetchMock = stubFetch((url, init) => {
-      if (url.endsWith("/RUN-1/decision") && init?.method === "POST") return jsonResponse(completedRun);
-      return jsonResponse(two);
-    });
-    renderPage("/agent?run=RUN-1");
-
-    const panel = await screen.findByRole("region", { name: "2 changes need your OK" });
-    expect(within(panel).getByText(/Order 2 L/)).toBeTruthy();
-    expect(within(panel).getByText("Simulated supplier")).toBeTruthy();
-    await userEvent.click(within(panel).getByRole("button", { name: "Approve all" }));
-    await waitFor(() => expect(screen.queryByRole("region", { name: /need your OK/ })).toBeNull());
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/RUN-1/decision"))).toBe(true);
-  });
-
-  it("keeps the change waiting and explains when a decision fails", async () => {
-    mockApi(undefined, { status: 409, detail: "add_barista is done, not waiting for approval" });
-    renderPage("/agent?run=RUN-1");
-    const panel = await approvals();
-    await userEvent.click(within(panel).getByRole("button", { name: "Approve" }));
-    expect((await within(panel).findByRole("alert")).textContent).toContain("not waiting for approval");
-    expect(within(panel).getByRole("button", { name: "Approve" })).toBeTruthy();
-  });
-
-  it("changes the person and start time before approving a shift", async () => {
-    const fetchMock = mockApi();
-    renderPage("/agent?run=RUN-1");
-    const panel = await approvals();
-    await userEvent.click(within(panel).getByRole("button", { name: "Change" }));
-
-    const form = within(panel).getByRole("form", { name: "Change the shift" });
-    expect((within(form).getByLabelText("Who") as HTMLSelectElement).value).toBe("DEMO_EMP_004");
-    const start = within(form).getByLabelText("Starts") as HTMLInputElement;
-    expect(start.value).toBe("07:30");
-    await userEvent.clear(start);
-    await userEvent.type(start, "08:00");
-    await userEvent.click(within(form).getByRole("button", { name: "Approve with changes" }));
-
-    await screen.findByRole("region", { name: "What happened" });
-    const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/nodes/add_barista/decision"));
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
-      decision: "approved",
-      channel: "web",
-      edited_args: {
-        employee_id: "DEMO_EMP_004",
-        start_at: "2026-11-01T08:00:00-08:00",
-        end_at: "2026-11-01T14:30:00-08:00",
+      acknowledgement: {
+        headline: "Bay Dairy Co. can't take this order",
+        details: ["Bay Dairy Co. is out of oat milk until Mon, Nov 2."],
+        caveat: null,
+        tone: "problem" as const,
+        next_step: "find_alternative" as const,
       },
     });
-  });
-
-  it("keeps the change form open and explains when a change is not valid", async () => {
-    mockApi(undefined, { status: 422, detail: "Your changes are not valid: start_at must be before end_at" });
-    renderPage("/agent?run=RUN-1");
-    const panel = await approvals();
-    await userEvent.click(within(panel).getByRole("button", { name: "Change" }));
-    await userEvent.click(within(panel).getByRole("button", { name: "Approve with changes" }));
-
-    expect((await within(panel).findByRole("alert")).textContent).toContain("start_at must be before end_at");
-    expect(within(panel).getByRole("form", { name: "Change the shift" })).toBeTruthy();
-    await userEvent.click(within(panel).getByRole("button", { name: "Cancel" }));
-    expect(within(panel).getByRole("button", { name: "Approve" })).toBeTruthy();
-  });
-
-  it("starts a plan from a detected event", async () => {
-    const fetchMock = stubFetch((url, init) => {
-      if (url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST") return jsonResponse({ planning: planning(), run });
-      return jsonResponse(run);
-    }, [marketEvent]);
-    renderPage();
-
-    const events = await screen.findByRole("region", { name: "Events Muse found" });
-    await userEvent.click(within(events).getByRole("button", { name: "Open Santa Clara Farmers Market" }));
-    expect(within(events).getByText(/The last 6 editions brought/)).toBeTruthy();
-    await userEvent.click(within(events).getByRole("button", { name: "Check if we're ready" }));
-    expect(await screen.findByRole("heading", { name: run.goal })).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")).toBe(true);
-  });
-
-  it("opens the existing plan for an event that was already checked", async () => {
-    stubFetch(() => jsonResponse(run), [{ ...marketEvent, plan_state: "needs_ok", run_id: "RUN-1", latest_run_id: "RUN-1" }]);
-    renderPage();
-    const events = await screen.findByRole("region", { name: "Events Muse found" });
-    expect(within(events).getByText("Needs OK")).toBeTruthy();
-    await userEvent.click(within(events).getByRole("button", { name: "Open plan" }));
-    expect(await screen.findByRole("heading", { name: run.goal })).toBeTruthy();
-  });
-
-  it("shows a rejected order honestly and asks Muse for an alternative", async () => {
-    const rejected: AgentRun = {
+    const rejected = (id: string | null): AgentRun => ({ ...run, status: "completed", waiting_on: [], nodes: [...run.nodes.slice(0, 3), rejectedNode(id)] });
+    const alternative: AgentRun = {
       ...run,
-      status: "completed",
-      waiting_on: [],
-      closing_message: "Here's where things stand: Bay Dairy Co. can't take this order. Something needs another plan.",
-      nodes: run.nodes.map((node) =>
-        node.node_id === "add_barista"
-          ? {
-              ...node,
-              action: "propose_supplier_order",
-              status: "done",
-              result: { order_id: "po_1" },
-              lifecycle: [
-                { stage: "Proposed", state: "done", at: null, note: null },
-                { stage: "Approved", state: "done", at: null, note: null },
-                { stage: "Sent to Bay Dairy Co.", state: "done", at: null, note: null },
-                { stage: "Rejected by supplier", state: "failed", at: null, note: null },
-              ],
-              acknowledgement: {
-                headline: "Bay Dairy Co. can't take this order",
-                details: ["Bay Dairy Co. can't deliver on Sundays before 9 AM (requested 6 AM).", "The milk shortfall is still open."],
-                caveat: "Simulated supplier: no real order was sent.",
-                tone: "problem",
-                next_step: "find_alternative",
-              },
-            }
-          : node,
-      ),
+      run_id: "RUN-2",
+      goal: "Get the milk from Willow Ridge",
+      parent_run_id: "RUN-1",
+      parent_node_id: "add_barista",
+      nodes: [{ ...run.nodes[3], action: "propose_supplier_order", resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }], requested_delivery_at: "2026-11-01T06:00:00-08:00" }, summary: "Order 6 L oat milk for Sun Nov 1 6 AM from Willow Ridge Dairy Supply (simulated)" }],
     };
-    const replanned: AgentRun = { ...run, run_id: "RUN-2", goal: "Get the milk from Willow Ridge", parent_run_id: "RUN-1", parent_node_id: "add_barista" };
+    let replanned = false;
     const fetchMock = stubFetch((url, init) => {
-      if (url.endsWith("/nodes/add_barista/replan") && init?.method === "POST") return jsonResponse({ planning: planning(), run: replanned });
-      if (url.startsWith("/api/v1/agent/runs/RUN-2")) return jsonResponse(replanned);
-      return jsonResponse(rejected);
+      if (url.endsWith("/nodes/add_barista/replan") && init?.method === "POST") {
+        replanned = true;
+        return jsonResponse({ planning: planning(), run: alternative });
+      }
+      if (url.startsWith("/api/v1/agent/runs/RUN-2")) return jsonResponse(alternative);
+      return jsonResponse(rejected(replanned ? "RUN-2" : null));
     });
     renderPage("/agent?run=RUN-1");
 
-    const outcome = await screen.findByRole("region", { name: "What happened" });
-    expect(within(outcome).getByText("Needs another plan")).toBeTruthy();
-    expect(within(outcome).getByText("Rejected by supplier")).toBeTruthy();
-    expect(within(outcome).getByText(/before 9 AM/)).toBeTruthy();
-    await userEvent.click(within(outcome).getByRole("button", { name: "Find an alternative" }));
-
-    expect(await screen.findByRole("heading", { name: "Get the milk from Willow Ridge" })).toBeTruthy();
-    expect(screen.getByText(/a change in an earlier plan fell through/)).toBeTruthy();
-    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/nodes/add_barista/replan"))).toBe(true);
+    expect(await screen.findByText("Rejected by supplier")).toBeTruthy();
+    expect(await screen.findByText(/from Willow Ridge Dairy Supply/)).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith("/nodes/add_barista/replan"))).toHaveLength(1);
+    const boxes = document.querySelectorAll(".sg-box--decision");
+    const waiting = Array.from(boxes).find((b) => b.getAttribute("data-s") === "wait") as HTMLElement;
+    expect(within(waiting).getByRole("button", { name: "Approve" })).toBeTruthy();
   });
 });

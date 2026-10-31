@@ -19,7 +19,7 @@ from backend.modules.agent.planner import (
 )
 from backend.models.cafe import Cafe
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
-from backend.modules.agent.status import CafeStatus, cafe_status, event_plan
+from backend.modules.agent.status import CafeStatus, cafe_status, event_id_for_run, event_plan
 from backend.modules.agent.summaries import summarize_run
 from backend.modules.agent.acknowledgements import Acknowledgement, Stage, change_statuses
 from backend.modules.purchasing.service import settle_due
@@ -180,6 +180,7 @@ class RunOut(BaseModel):
     )
     parent_run_id: str | None = None
     parent_node_id: str | None = None
+    event: DetectedEvent | None = Field(default=None, description="The event this plan is for, if any.")
 
 
 def _run_out(database_session: Session, run: Any) -> RunOut:
@@ -203,6 +204,8 @@ def _run_out(database_session: Session, run: Any) -> RunOut:
                 node.summary = status_.acknowledgement.headline
     out.closing_message = closing
     out.waiting_on = waiting
+    event_id = event_id_for_run(database_session, run)
+    out.event = get_event(database_session, event_id) if event_id else None
     return out
 
 

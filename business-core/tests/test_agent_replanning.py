@@ -49,7 +49,9 @@ def _order_plan(supplier_id: str | None = None, delivery: str = "2026-11-01T06:0
     return [
         {"id": "short", "action": "calculate_shortfall", "reason": "r",
          "args": {"cafe_id": C, "as_of": AS_OF, "target_at": "2026-11-01T08:00:00-08:00",
-                  "items": [{"variation_id": "COF003_REG", "quantity": 30}]}},
+                  "items": [{"variation_id": "COF003_REG", "quantity": 30},
+                            {"variation_id": "COF003_REG", "quantity": 20,
+                             "modifiers": [{"modifier_id": "MILK_OAT", "quantity": 1}]}]}},
         {"id": "order", "action": "propose_supplier_order", "reason": "r", "args": order_args},
     ]
 
@@ -95,14 +97,14 @@ def test_approved_order_is_sent_then_answered_honestly(session: Session) -> None
         app.dependency_overrides.clear()
 
 
-def test_usual_supplier_rejects_early_sunday_and_muse_replans(session: Session, tmp_path, monkeypatch) -> None:
+def test_usual_supplier_is_out_of_oat_milk_and_muse_replans(session: Session, tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(planner_module, "LLM_LOG_PATH", tmp_path / "llm.jsonl")
     run = _run(session, _order_plan())  # Bay Dairy, the usual supplier
     run = decide(session, run.run_id, "order", "approved")
     settle_due(session, cafe_id=C, now=LATER)
     order = session.get(PurchaseOrder, next(n for n in run.nodes if n.node_id == "order").result["order_id"])
     assert order.status == "rejected"
-    assert order.response_reason == "Bay Dairy Co. can't deliver on Sundays before 9 AM (requested 6 AM)."
+    assert order.response_reason == "Bay Dairy Co. is out of oat milk until Mon, Nov 2."
 
     replan = {
         "status": "plan", "goal": "Get the milk from Willow Ridge Dairy Supply",
@@ -125,7 +127,7 @@ def test_usual_supplier_rejects_early_sunday_and_muse_replans(session: Session, 
 
         response = api.post(f"/api/v1/agent/runs/{run.run_id}/nodes/order/replan").json()
         sent = client.calls[0]["messages"][-1]["content"]
-        assert "Bay Dairy Co. rejected purchase order" in sent and "before 9 AM" in sent
+        assert "Bay Dairy Co. rejected purchase order" in sent and "out of oat milk" in sent
         new = response["run"]
         assert new["parent_run_id"] == run.run_id and new["parent_node_id"] == "order"
         resend = next(n for n in new["nodes"] if n["node_id"] == "resend")
@@ -147,3 +149,17 @@ def test_resending_needs_the_rejected_orders_quantities() -> None:
                   "requested_delivery_at": "2026-11-01T06:00:00-08:00"}}]})
     codes = {i.code for i in validate_plan(plan, C, timezone="America/Los_Angeles").issues}
     assert "unverified_quantity" in codes
+
+
+def test_find_suppliers_prices_the_order_and_code_picks_the_supplier(session: Session) -> None:
+    nodes = _order_plan()
+    nodes.insert(1, {"id": "suppliers", "action": "find_suppliers", "reason": "r",
+                     "args": {"cafe_id": C, "lines": "$short.order_lines", "deliver_by": "2026-11-01T06:00:00-08:00"}})
+    nodes[2]["args"]["supplier_id"] = "$suppliers.recommended_supplier_id"
+    run = _run(session, nodes)
+    found = next(n for n in run.nodes if n.node_id == "suppliers").result
+    assert [o["name"] for o in found["suppliers"]] == ["Bay Dairy Co.", "Willow Ridge Dairy Supply"]
+    assert all(o["carries_all"] and o["can_deliver_in_time"] for o in found["suppliers"])
+    assert found["recommended_supplier_id"] == "BAY_DAIRY"  # usual supplier; its stock-out shows only when it answers
+    order = next(n for n in run.nodes if n.node_id == "order")
+    assert order.status == "awaiting_approval" and order.resolved_args["supplier_id"] == "BAY_DAIRY"

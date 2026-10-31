@@ -11,7 +11,7 @@ export const STAGES: { id: Stage; label: string }[] = [
   { id: "ok", label: "Needs your OK" },
 ];
 
-const WORK_OUT = new Set(["calculate_shortfall", "estimate_event_demand", "project_recipe_usage", "coverage_report"]);
+const WORK_OUT = new Set(["calculate_shortfall", "estimate_event_demand", "project_recipe_usage", "coverage_report", "find_suppliers"]);
 
 /** Which column a step belongs in: data it fetched, numbers it worked out, or a change it proposes. */
 export function stageOf(step: RunStep): Stage {
@@ -27,6 +27,7 @@ const TILE_TITLES: Record<string, string> = {
   sales_summary: "Check sales",
   estimate_event_demand: "Expected demand",
   calculate_shortfall: "What to order",
+  find_suppliers: "Find suppliers",
   get_purchase_order: "Look up the order",
   propose_supplier_order: "Order from supplier",
   schedule_shift: "Add a shift",

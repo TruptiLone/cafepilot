@@ -88,6 +88,59 @@ def delivery_problem(supplier: dict[str, Any], requested: datetime, tz: ZoneInfo
     return None
 
 
+def stock_problem(supplier: dict[str, Any], ingredient_id: str, requested: datetime, tz: ZoneInfo) -> str | None:
+    """A supplier-side shortage the café can't see in advance (only revealed when it answers)."""
+    for rule in supplier.get("out_of_stock", []):
+        if rule["ingredient_id"] != ingredient_id:
+            continue
+        until = datetime.fromisoformat(rule["until"]).replace(tzinfo=tz)
+        if requested.astimezone(tz) < until:
+            return f"{supplier['name']} is out of {ingredient_id.replace('_', ' ').lower()} until {until.strftime('%a, %b %-d')}."
+    return None
+
+
+def supplier_options(session: Session, cafe_id: str, lines: list["OrderLineIn"], deliver_by: datetime | None) -> dict[str, Any]:
+    """Who carries these items, what it would cost, and whether their published hours fit.
+
+    Stock at the supplier is not known here: a supplier confirms it when it answers the order.
+    """
+    tz = _tz(session, cafe_id)
+    usual = policies_for(cafe_id).get("ordering", {}).get("default_supplier_id")
+    options = []
+    for supplier in suppliers(cafe_id):
+        catalog = supplier.get("items") or {}
+        missing = [l.ingredient_id for l in lines if l.ingredient_id not in catalog]
+        total = 0
+        priced = []
+        for line in lines:
+            item = catalog.get(line.ingredient_id)
+            if not item:
+                continue
+            packs = int((line.quantity / Decimal(item["pack_size"])).to_integral_value(rounding=ROUND_CEILING))
+            total += packs * int(item["pack_price_cents"])
+            priced.append({"ingredient_id": line.ingredient_id, "packs": packs, "pack_name": item["pack_name"],
+                           "pack_price_cents": int(item["pack_price_cents"])})
+        timing = delivery_problem(supplier, deliver_by, tz) if deliver_by else None
+        earliest = None
+        if deliver_by:
+            local = deliver_by.astimezone(tz)
+            earliest = supplier.get("earliest_delivery", {}).get(local.weekday())
+        options.append({
+            "supplier_id": supplier["supplier_id"], "name": supplier["name"], "usual": supplier["supplier_id"] == usual,
+            "carries_all": not missing, "missing": missing, "total_cents": total, "lines": priced,
+            "can_deliver_in_time": timing is None, "timing_note": timing,
+            "earliest_delivery_that_day": earliest,
+        })
+    fits = [o for o in options if o["carries_all"] and o["can_deliver_in_time"]]
+    fits.sort(key=lambda o: (not o["usual"], o["total_cents"]))
+    options.sort(key=lambda o: (not o["usual"], not o["carries_all"], o["total_cents"]))
+    return {
+        "suppliers": options,
+        "recommended_supplier_id": fits[0]["supplier_id"] if fits else usual,
+        "note": "Suppliers confirm stock and delivery when they answer the order.",
+    }
+
+
 @dataclass
 class OrderLineIn:
     ingredient_id: str
@@ -129,6 +182,7 @@ def send_order(
                 PurchaseOrderLine(line_no=number, ingredient_id=line.ingredient_id, quantity=line.quantity, unit=line.unit)
             )
             continue
+        problem = problem or stock_problem(supplier, line.ingredient_id, requested_delivery_at, tz)
         pack_size = Decimal(item["pack_size"])
         packs = int((line.quantity / pack_size).to_integral_value(rounding=ROUND_CEILING))
         total += packs * int(item["pack_price_cents"])

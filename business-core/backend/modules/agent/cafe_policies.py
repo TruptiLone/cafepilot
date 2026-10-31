@@ -33,7 +33,9 @@ CAFE_POLICIES: dict[str, dict[str, Any]] = {
                 "supplier_id": "BAY_DAIRY",
                 "name": "Bay Dairy Co.",
                 "respond_after_seconds": 8,
-                "earliest_delivery": {0: "05:00", 1: "05:00", 2: "05:00", 3: "05:00", 4: "05:00", 5: "05:00", 6: "09:00"},
+                "earliest_delivery": {d: "05:00" for d in range(7)},
+                # Known only to the supplier: revealed when it answers an order (demo).
+                "out_of_stock": [{"ingredient_id": "OAT_MILK", "until": "2026-11-02T00:00:00"}],
                 "items": {
                     "WHOLE_MILK": {"item_number": "BD-110", "description": "Whole Milk 1 L", "pack_size": "6000", "pack_name": "case of 6 × 1 L", "pack_price_cents": 1860},
                     "OAT_MILK": {"item_number": "BD-410", "description": "Oat Milk Barista 1 L", "pack_size": "6000", "pack_name": "case of 6 × 1 L", "pack_price_cents": 2520},

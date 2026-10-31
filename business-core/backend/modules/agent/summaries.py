@@ -261,7 +261,14 @@ def _order(args: Row, result: Row | None, ctx: RunContext, done: bool) -> str:
     if done:
         ref = (result or {}).get("order_ref", "")
         return f"Simulated supplier confirmed {items}{when}" + (f" ({ref})" if ref else "")
-    return f"Order {items}{when} (simulated supplier)"
+    supplier_id = args.get("supplier_id")
+    try:
+        from backend.modules.purchasing.service import get_supplier
+
+        name = get_supplier(ctx.cafe_id, supplier_id if isinstance(supplier_id, str) and not supplier_id.startswith("$") else None)["name"]
+    except Exception:  # noqa: BLE001 - the summary must never break the run view
+        name = "simulated supplier"
+    return f"Order {items}{when} from {name} (simulated)"
 
 
 def _sales_summary(result: Row, ctx: RunContext) -> str:
@@ -273,6 +280,18 @@ def _sales_summary(result: Row, ctx: RunContext) -> str:
     if revenue is not None:
         parts.append(f"${quantity(revenue, '')} revenue")
     return ", ".join(parts) or "Sales summarized"
+
+
+def _suppliers(result: Row, ctx: RunContext) -> str:
+    options = [o for o in result.get("suppliers", []) if o.get("carries_all")]
+    if not options:
+        return "No supplier carries everything on this order"
+    names = [f"{o['name']}{' (usual)' if o.get('usual') else ''}" for o in options]
+    picked = next((o for o in options if o["supplier_id"] == result.get("recommended_supplier_id")), None)
+    text = f"{_list(names)} carry it"
+    if picked:
+        text += f"; ordering from {picked['name']} (${picked['total_cents'] / 100:,.2f})"
+    return text
 
 
 def summarize_step(node: Any, ctx: RunContext) -> str | None:
@@ -312,6 +331,8 @@ def summarize_step(node: Any, ctx: RunContext) -> str | None:
         return _shifts(result, ctx)
     if action == "sales_summary" and isinstance(result, dict):
         return _sales_summary(result, ctx)
+    if action == "find_suppliers" and isinstance(result, dict):
+        return _suppliers(result, ctx)
     if node.side_effect == "write":
         return _change_line(action, args, result if isinstance(result, dict) else None, ctx, done=True)
     if isinstance(result, list):

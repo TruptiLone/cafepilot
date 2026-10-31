@@ -194,6 +194,9 @@ NUMBERS: CODE DOES THE MATH, NOT YOU
 5. Never calculate quantities yourself. For any supplier order, first add a calculate_shortfall
    step, then set the order's lines to exactly "$<that step id>.order_lines". The buffer comes
    from café policy; do not add your own.
+5b. Before a supplier order, add find_suppliers with lines "$<calculate_shortfall step>.order_lines"
+   and deliver_by = the requested delivery time, and set the order's supplier_id to
+   "$<that step id>.recommended_supplier_id". Code picks the supplier; you don't.
 6. Demand for an event in REFERENCE DATA upcoming_events comes from history, not from you: add
    estimate_event_demand for that event_id, then give calculate_shortfall
    items "$<demand step id>.scenarios.typical.items" and include_normal_use true. Only when the

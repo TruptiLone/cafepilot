@@ -19,7 +19,7 @@ const FLAG: Record<InventoryRow["status"], (row: InventoryRow) => [string, strin
 export const PLAN_STATE: Record<PlanState, [string, string]> = {
   new: ["neutral", "New"],
   checking: ["run", "Checking"],
-  needs_ok: ["wait", "Needs OK"],
+  needs_ok: ["wait", "Needs your OK"],
   waiting: ["wait", "Waiting on reply"],
   planned: ["done", "Planned"],
   issues: ["no", "Needs attention"],
@@ -29,21 +29,54 @@ type CafeStatusPanelProps = {
   status: CafeStatus | null;
   error: string | null;
   highlight: "none" | "running" | "waiting";
-  onOpenEvent: (eventId: string) => void;
+  collapsed: boolean;
+  onToggle: () => void;
 };
 
-function CafeStatusPanel({ status, error, highlight, onOpenEvent }: CafeStatusPanelProps) {
+const SHORT_LABEL: Record<string, string> = { stock: "short", coverage: "cover", approvals: "to approve", sales: "today" };
+
+function CafeStatusPanel({ status, error, highlight, collapsed, onToggle }: CafeStatusPanelProps) {
   const hl = highlight === "running" ? " is-hl" : highlight === "waiting" ? " is-hl-warn" : "";
+  const keys = ["stock", "coverage", "approvals", "sales"] as const;
+
+  if (collapsed) {
+    return (
+      <section className="mz-status mz-status--mini" aria-label="Café status">
+        <button type="button" className="mz-fold" aria-label="Show café status" onClick={onToggle}>
+          ⇤
+        </button>
+        {status &&
+          keys.map((key) => {
+            const kpi = status.kpis[key];
+            if (!kpi) return null;
+            return (
+              <div key={key} className={`mz-badge${kpi.tone === "warn" ? " is-warn" : ""}`}>
+                <b>
+                  {kpi.value}
+                  {kpi.of ? kpi.of.replace(" ", "") : ""}
+                </b>
+                {SHORT_LABEL[key]}
+              </div>
+            );
+          })}
+      </section>
+    );
+  }
+
   const updated = status
-    ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }).format(
-        new Date(status.as_of),
-      )
+    ? new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" }).format(new Date(status.as_of))
     : null;
+  const attention = status?.inventory.filter((r) => r.status !== "covered") ?? [];
+  const covered = (status?.inventory.length ?? 0) - attention.length;
+
   return (
     <section className="mz-status" aria-label="Café status">
       <header className="mz-pane-head">
         <span className="mz-label">Café status</span>
-        {updated && <span className="mz-muted mz-pane-head__right">Read-only · as of {updated}</span>}
+        {updated && <span className="mz-muted mz-pane-head__right">as of {updated}</span>}
+        <button type="button" className="mz-fold" aria-label="Hide café status" onClick={onToggle}>
+          ⇥
+        </button>
       </header>
       <div className="mz-status__scroll">
         {error && <p className="mz-error">{error}</p>}
@@ -56,7 +89,7 @@ function CafeStatusPanel({ status, error, highlight, onOpenEvent }: CafeStatusPa
             </div>
 
             <div className="mz-kpis">
-              {(["stock", "coverage", "approvals", "sales"] as const).map((key) => {
+              {keys.map((key) => {
                 const kpi = status.kpis[key];
                 if (!kpi) return null;
                 const lit = key !== "sales" && kpi.tone === "warn" ? hl : "";
@@ -81,21 +114,13 @@ function CafeStatusPanel({ status, error, highlight, onOpenEvent }: CafeStatusPa
                   </Link>
                 </div>
                 <div className="mz-card mz-inv">
-                  {status.inventory.map((row) => {
+                  {attention.map((row) => {
                     const flag = FLAG[row.status](row);
-                    const have = Number(row.on_hand ?? 0) + Number(row.arriving);
-                    const need = Math.max(Number(row.needed), 1);
-                    const pct = Math.min(100, (have / need) * 100);
-                    const ordered = Math.min(100 - pct, (Number(row.on_order) / need) * 100);
                     return (
                       <div key={row.ingredient_id} className={`mz-inv__row${row.status === "short" ? hl : ""}`}>
                         <div>
                           <div className="mz-inv__name">{row.name}</div>
                           <div className="mz-inv__sub">{row.note}</div>
-                        </div>
-                        <div className="mz-bar" aria-hidden="true">
-                          <i className={row.status === "short" ? "low" : ""} style={{ width: `${pct}%` }} />
-                          {ordered > 0 && <b style={{ left: `${pct}%`, width: `${ordered}%` }} />}
                         </div>
                         <div className="mz-inv__qty">
                           {amount(row.on_hand, row.unit)}
@@ -105,69 +130,44 @@ function CafeStatusPanel({ status, error, highlight, onOpenEvent }: CafeStatusPa
                       </div>
                     );
                   })}
+                  {covered > 0 && (
+                    <div className="mz-inv__row mz-inv__row--ok">
+                      <span className="mz-muted">
+                        {covered} more {covered === 1 ? "item" : "items"} covered
+                      </span>
+                      <span className="mz-pill is-done">OK</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
 
             <div>
               <div className="mz-sec-head">
-                <span className="mz-label">Staff coverage · next 3 days</span>
+                <span className="mz-label">Staff cover · next 3 days</span>
                 <Link className="mz-link" to="/staffing">
                   Schedule
                 </Link>
               </div>
-              <div className="mz-cover">
+              <div className="mz-card mz-cover-list">
                 {status.coverage.map((day) => {
                   const short = day.halves.some((h) => h.staffed < h.required);
                   return (
-                    <div key={day.date} className={`mz-card mz-day${day.is_event_day && short ? hl : ""}`}>
-                      <div className="mz-day__top">
-                        <span className="mz-day__name">{day.label}</span>
-                        <span className="mz-muted">
-                          {day.shifts} {day.shifts === 1 ? "shift" : "shifts"}
-                        </span>
-                      </div>
-                      {day.halves.map((half) => (
-                        <div key={half.label} className="mz-shift">
-                          <span>{half.label}</span>
-                          <span className="mz-pips" aria-hidden="true">
+                    <div key={day.date} className={`mz-cover-line${day.is_event_day && short ? " is-short" : ""}`}>
+                      <b>{day.label}</b>
+                      <span className="mz-pips" aria-hidden="true">
+                        {day.halves.map((half) => (
+                          <span key={half.label}>
                             {Array.from({ length: half.required }, (_, i) => (
                               <i key={i} className={i < half.staffed ? "on" : "gap"} />
                             ))}
                           </span>
-                          <span className="n">
-                            {Math.min(half.staffed, half.required)}/{half.required}
-                          </span>
-                        </div>
-                      ))}
+                        ))}
+                      </span>
+                      <span className="mz-muted">
+                        {day.halves.map((h) => `${h.label} ${Math.min(h.staffed, h.required)}/${h.required}`).join(" · ")}
+                      </span>
                     </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div>
-              <div className="mz-sec-head">
-                <span className="mz-label">Upcoming events</span>
-              </div>
-              <div className="mz-card mz-events">
-                {status.events.map((event) => {
-                  const [tone, label] = PLAN_STATE[event.plan_state];
-                  const start = new Date(event.starts_at);
-                  const day = new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: "America/Los_Angeles" }).format(start);
-                  const date = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" }).format(start);
-                  return (
-                    <button key={event.event_id} type="button" className="mz-ev-row" onClick={() => onOpenEvent(event.event_id)}>
-                      <span className="mz-ev-row__date">
-                        <b>{day}</b>
-                        {date}
-                      </span>
-                      <span className="mz-ev-row__main">
-                        <span className="mz-ev-row__title">{event.name}</span>
-                        <span className="mz-ev-row__sub">{event.note}</span>
-                      </span>
-                      <span className={`mz-pill is-${tone}`}>{label}</span>
-                    </button>
                   );
                 })}
               </div>

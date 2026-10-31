@@ -142,6 +142,17 @@ def _plan_state(session: Session, runs: list[AgentPlanRun]) -> PlanState:
     return "planned"
 
 
+def event_id_for_run(session: Session, run: AgentPlanRun) -> str | None:
+    """The event a plan was made for (replans inherit it from the plan they came from)."""
+    seen = set()
+    while run is not None and run.run_id not in seen:
+        seen.add(run.run_id)
+        if run.query.startswith(EVENT_PREFIX):
+            return run.query[len(EVENT_PREFIX):].split(":", 1)[0]
+        run = session.get(AgentPlanRun, run.parent_run_id) if run.parent_run_id else None
+    return None
+
+
 def event_plan(session: Session, event_id: str) -> tuple[str | None, str | None, PlanState]:
     """(first run for the event, newest run in its family, state)."""
     run = session.scalar(

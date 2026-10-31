@@ -32,8 +32,9 @@ model type a quantity, price, time offset or ID that code can compute or look up
     images only), `service.py` (compare ordered / slip / seen / counted, confirm, credit request)
   - `modules/inventory`, `sales`, `staffing`, `events`
 - `frontend/` React 19 + Vite + TypeScript. Proxy `/api` → `127.0.0.1:8001`
-  - `pages/AgentPage.tsx` Ask CaféPilot (Genspark v5 design): events → plan tiles or dependency map →
-    approval list → "What happened"; right pane `components/muse/CafeStatusPanel.tsx`
+  - `pages/AgentPage.tsx` Ask CaféPilot, 62/38 layout: Events tab → owner view (`components/muse/story.ts` +
+    `StoryGraph.tsx`: vertical business graph, decisions inside, replans grow under them) or technical view
+    (`PlanMap`); right pane `CafeStatusPanel.tsx` (compact, folds into badges)
   - `components/muse/` (`PlanMap`, `ApprovalList`, `PlanReceipt`, `stages.ts`)
   - `pages/ReceivingPage.tsx` phone-sized delivery check
   - Styles: `styles.css`; Genspark tokens/classes are prefixed `--g-` / `mz-`
@@ -73,7 +74,8 @@ Backend tests use the real Postgres and roll back. Model calls in tests use fake
 1. **Event surge (done).** Santa Clara Farmers Market, Sun Nov 1, 8 AM–2 PM. Muse finds it, estimates
    extra demand from the last 6 editions (typically +35 drinks), checks stock at event time (after
    normal use and standing deliveries), orders milk in whole cases, adds a barista (Sofia) for 2 of 4
-   staffed hours. Bay Dairy refuses a 6 AM Sunday delivery → "Find an alternative" → Willow Ridge.
+   staffed hours. find_suppliers lets code pick the usual supplier; Bay Dairy replies it's out of oat milk
+   until Monday (only known when it answers) → Muse replans automatically → Willow Ridge, approved in the graph.
    Halloween (Sat) is a quieter event: plan should find little or nothing to do.
 2. **Receiving (done, backend + phone page).** Packing slip PS-58213 for PO-1042 from Willow Ridge
    (2 cases whole, 1 case oat). Muse reads the slip, counts what it can see in the photo (whole milk

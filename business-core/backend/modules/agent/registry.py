@@ -169,6 +169,39 @@ class SupplierOrderLineOut(BaseModel):
     pack_price_cents: int | None = None
 
 
+class FindSuppliersInput(CafeScopedInput):
+    lines: list[SupplierOrderLine] = Field(min_length=1, description='Use "$<calculate_shortfall step>.order_lines".')
+    deliver_by: datetime | None = Field(default=None, description="When the order must arrive, with UTC offset.")
+
+    _aware = field_validator("deliver_by")(_require_aware)
+
+
+class SupplierOptionLine(BaseModel):
+    ingredient_id: str
+    packs: int
+    pack_name: str
+    pack_price_cents: int
+
+
+class SupplierOption(BaseModel):
+    supplier_id: str
+    name: str
+    usual: bool
+    carries_all: bool
+    missing: list[str]
+    total_cents: int
+    lines: list[SupplierOptionLine]
+    can_deliver_in_time: bool
+    timing_note: str | None
+    earliest_delivery_that_day: str | None
+
+
+class SupplierOptions(BaseModel):
+    suppliers: list[SupplierOption]
+    recommended_supplier_id: str | None = Field(description="Usual supplier if it fits, else the cheapest that does.")
+    note: str
+
+
 class GetPurchaseOrderInput(CafeScopedInput):
     order_id: str = Field(min_length=1, description="A purchase order id, e.g. from a rejected order.")
 
@@ -340,6 +373,13 @@ def _order_response(order: Any) -> SupplierOrderResponse:
         if order.simulated
         else "Sent to supplier.",
     )
+
+
+def _find_suppliers(session: Session, p: FindSuppliersInput) -> SupplierOptions:
+    from backend.modules.purchasing.service import supplier_options
+
+    lines = [OrderLineIn(ingredient_id=l.ingredient_id, quantity=l.quantity, unit=l.unit) for l in p.lines]
+    return SupplierOptions.model_validate(supplier_options(session, p.cafe_id, lines, p.deliver_by))
 
 
 def _get_purchase_order(session: Session, p: GetPurchaseOrderInput) -> PurchaseOrderOut:
@@ -666,6 +706,21 @@ _ACTIONS: list[Action] = [
         produces=("order_suggestion",),
     ),
     Action(
+        name="find_suppliers",
+        description=(
+            "Read-only: which suppliers carry the order lines, their case prices and total, and whether "
+            "their published delivery hours meet deliver_by. recommended_supplier_id is the usual supplier "
+            "when it fits, else the cheapest that does. Suppliers confirm stock only when they answer an order."
+        ),
+        domain="purchasing",
+        side_effect="read",
+        input_model=FindSuppliersInput,
+        output_type=SupplierOptions,
+        handler=_find_suppliers,
+        consumes=("order_suggestion",),
+        produces=("supplier_options",),
+    ),
+    Action(
         name="get_purchase_order",
         description=(
             "Read a purchase order: supplier, status (sent / confirmed / rejected), the supplier's reason, and "
@@ -685,7 +740,7 @@ _ACTIONS: list[Action] = [
         name="propose_supplier_order",
         description=(
             "Send an order to a SIMULATED supplier. lines MUST be \"$<calculate_shortfall step>.order_lines\" "
-            "so quantities come from code. supplier_id from REFERENCE DATA suppliers (omit for the usual one). "
+            "so quantities come from code. supplier_id: \"$<find_suppliers step>.recommended_supplier_id\", or a supplier_id from REFERENCE DATA suppliers (omit for the usual one). "
             "The supplier answers a few seconds later: confirmed, or rejected with a reason. No real order is placed."
         ),
         domain="purchasing",
@@ -695,7 +750,7 @@ _ACTIONS: list[Action] = [
         handler=_send_supplier_order,
         record_id_prefix="po",
         find_existing=_existing_order,
-        consumes=("stock_estimate", "ingredient_demand", "order_suggestion"),
+        consumes=("stock_estimate", "ingredient_demand", "order_suggestion", "supplier_options"),
         produces=("supplier_order",),
         requires=(("calculate_shortfall", "get_purchase_order"),),
         approval="owner",

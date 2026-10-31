@@ -73,6 +73,7 @@ export type AgentRun = {
   waiting_on?: string[];
   parent_run_id?: string | null;
   parent_node_id?: string | null;
+  event?: DetectedEvent | null;
 };
 
 export type RunSummary = {

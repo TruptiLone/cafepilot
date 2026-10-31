@@ -62,7 +62,7 @@ npm install
 npm run dev                     # http://localhost:5173/agent
 ```
 
-Click **Use the farmers market example**, then **Make a plan**.
+Open **Ask CaféPilot** and click **Check if we're ready** on the Santa Clara Farmers Market.
 
 Reset before each demo: `PYTHONPATH=. python scripts/seed_event_surge.py --fresh`
 (removes the agent's runs and the changes they made, then reloads the scenario).

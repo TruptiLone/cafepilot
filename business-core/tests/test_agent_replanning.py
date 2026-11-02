@@ -126,6 +126,8 @@ def test_usual_supplier_is_out_of_oat_milk_and_muse_replans(session: Session, tm
         assert "Something needs another plan" in old["closing_message"]
 
         response = api.post(f"/api/v1/agent/runs/{run.run_id}/nodes/order/replan").json()
+        logged = [json.loads(line) for line in (tmp_path / "llm.jsonl").read_text().splitlines()]
+        assert [(r["purpose"], r["attempt"]) for r in logged] == [("replan", 1)]
         sent = client.calls[0]["messages"][-1]["content"]
         assert "Bay Dairy Co. rejected purchase order" in sent and "out of oat milk" in sent
         new = response["run"]

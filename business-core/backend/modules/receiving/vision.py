@@ -89,6 +89,7 @@ def _ask(client: Any, model: str, purpose: str, prompt: str, image: bytes, mime:
         )
     except Exception as error:
         _log_call({"at": datetime.now(timezone.utc).isoformat(), "purpose": purpose, "model": model,
+                   "latency_ms": round((time.monotonic() - started) * 1000),
                    "error": f"{type(error).__name__}: {error}"})
         raise VisionError(f"Muse couldn't read the image: {str(error).splitlines()[0][:200]}") from error
     latency = round((time.monotonic() - started) * 1000)

@@ -33,12 +33,13 @@ def plan_and_validate(
     client: Any,
     model: str | None = None,
     max_attempts: int = MAX_ATTEMPTS,
+    purpose: str = "plan",
 ) -> PlanningOutcome:
     feedback: tuple[str, str] | None = None
     last_error: PlannerError | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            result = plan_query(query, context, client, model, feedback)
+            result = plan_query(query, context, client, model, feedback, purpose=purpose, attempt=attempt)
         except PlannerError as error:
             last_error = error
             feedback = (error.raw_content or "", f"- [unparseable] {error}")

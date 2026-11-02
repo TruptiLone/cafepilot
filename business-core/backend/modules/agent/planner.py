@@ -341,6 +341,25 @@ def _log_call(record: dict[str, Any]) -> None:
         pass  # logging must never break planning
 
 
+def read_calls(limit: int = 100) -> list[dict[str, Any]]:
+    """The newest model calls from the log (plans, replans, retries and failures), newest first."""
+    try:
+        lines = LLM_LOG_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    calls: list[dict[str, Any]] = []
+    for line in reversed(lines):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # a half-written line must not hide the rest
+        if isinstance(record, dict):
+            calls.append(record)
+        if len(calls) >= limit:
+            break
+    return calls
+
+
 def _describe_model_error(error: Exception) -> str:
     status = getattr(error, "status_code", None)
     name = type(error).__name__
@@ -362,11 +381,14 @@ def plan_query(
     client: ChatClient,
     model: str | None = None,
     feedback: tuple[str, str] | None = None,
+    purpose: str = "plan",
+    attempt: int = 1,
 ) -> PlannerResult:
     """Ask the model for a plan.
 
     ``feedback`` is (previous_response, problems): the earlier answer is replayed and
     the model is asked to return a corrected, complete plan.
+    ``purpose`` ("plan" or "replan" after a change fell through) and ``attempt`` go in the log.
     """
     model = model or get_settings().planner_model
     messages = build_messages(query, context)
@@ -394,8 +416,10 @@ def plan_query(
         _log_call(
             {
                 "at": datetime.now(timezone.utc).isoformat(),
-                "purpose": "replan" if feedback else "plan",
+                "purpose": purpose,
+                "attempt": attempt,
                 "model": model,
+                "latency_ms": int((time.monotonic() - started) * 1000),
                 "query": query,
                 "error": f"{type(error).__name__}: {error}",
             }
@@ -408,7 +432,8 @@ def plan_query(
     usage_dict = usage.model_dump() if hasattr(usage, "model_dump") else usage
     record = {
         "at": datetime.now(timezone.utc).isoformat(),
-        "purpose": "replan" if feedback else "plan",
+        "purpose": purpose,
+        "attempt": attempt,
         "model": model,
         "latency_ms": latency_ms,
         "usage": usage_dict,

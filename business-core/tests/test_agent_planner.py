@@ -318,3 +318,50 @@ def test_database_errors_explain_what_to_do() -> None:
     assert response.status_code == 500
     detail = response.json()["detail"]
     assert "agent_plan_runs" in detail and "alembic upgrade head" in detail
+
+
+# ---------- model-call log ------------------------------------------------------
+
+
+def test_failed_model_call_logs_latency(client_factory, database_session, no_log_files) -> None:
+    raising = RaisingClient(type("APITimeoutError", (Exception,), {})("t"))
+    app.dependency_overrides[get_db] = lambda: database_session
+    app.dependency_overrides[get_planner_client] = lambda: raising
+    try:
+        TestClient(app).post("/api/v1/agent/runs", json={"query": "x", "cafe_id": TEST_CAFE_ID})
+    finally:
+        app.dependency_overrides.clear()
+    [record] = [json.loads(line) for line in no_log_files.read_text().splitlines()]
+    assert (record["purpose"], record["attempt"]) == ("plan", 1)
+    assert isinstance(record["latency_ms"], int) and record["latency_ms"] >= 0
+    assert record["error"].startswith("APITimeoutError")
+
+
+def test_validator_retry_is_the_second_attempt_of_the_same_purpose(client_factory, no_log_files) -> None:
+    http, fake = client_factory("not json")
+    response = http.post("/api/v1/agent/runs", json={"query": "x", "cafe_id": TEST_CAFE_ID})
+    assert response.status_code == 502 and len(fake.calls) == 2
+    logged = [json.loads(line) for line in no_log_files.read_text().splitlines()]
+    assert [(r["purpose"], r["attempt"]) for r in logged] == [("plan", 1), ("plan", 2)]
+    assert all(isinstance(r["latency_ms"], int) for r in logged)
+
+
+def test_model_calls_endpoint_lists_calls_newest_first_without_raw_text(no_log_files) -> None:
+    records = [
+        {"at": "2026-11-02T10:00:00+00:00", "purpose": "plan", "attempt": 1, "model": "muse-wonder-1.0",
+         "latency_ms": 18000, "query": "secret request", "response": "{...}"},
+        {"at": "2026-11-02T10:01:00+00:00", "purpose": "replan", "attempt": 1, "model": "muse-wonder-1.0",
+         "latency_ms": 60100, "query": "q", "error": "APITimeoutError: Request timed out."},
+    ]
+    no_log_files.write_text("\n".join([json.dumps(records[0]), "{half a line", json.dumps(records[1])]) + "\n")
+    http = TestClient(app)
+
+    calls = http.get("/api/v1/agent/model-calls").json()
+    assert [(c["purpose"], c["ok"], c["latency_ms"]) for c in calls] == [("replan", False, 60100), ("plan", True, 18000)]
+    assert calls[0]["error"] == "APITimeoutError: Request timed out." and calls[1]["attempt"] == 1
+    assert all("query" not in c and "response" not in c for c in calls)
+    assert len(http.get("/api/v1/agent/model-calls?limit=1").json()) == 1
+
+
+def test_model_calls_endpoint_is_empty_without_a_log(no_log_files) -> None:
+    assert TestClient(app).get("/api/v1/agent/model-calls").json() == []

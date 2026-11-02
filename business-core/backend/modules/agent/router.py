@@ -16,6 +16,7 @@ from backend.modules.agent.planner import (
     PlannerUnavailableError,
     build_planning_context,
     create_planner_client,
+    read_calls,
 )
 from backend.models.cafe import Cafe
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
@@ -76,13 +77,15 @@ def get_planner_client() -> Any:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
 
 
-def _plan(request: PlanRequest, database_session: Session, client: Any) -> tuple[PlanningOutcome, Any]:
+def _plan(
+    request: PlanRequest, database_session: Session, client: Any, purpose: str = "plan"
+) -> tuple[PlanningOutcome, Any]:
     try:
         context = build_planning_context(database_session, request.cafe_id, request.as_of)
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     try:
-        outcome = plan_and_validate(request.query, context, client)
+        outcome = plan_and_validate(request.query, context, client, purpose=purpose)
     except (PlannerError, ModelCallError) as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
     return outcome, context
@@ -252,7 +255,7 @@ def _start(
     parent_run_id: str | None = None,
     parent_node_id: str | None = None,
 ) -> CreateRunResponse:
-    outcome, context = _plan(request, database_session, client)
+    outcome, context = _plan(request, database_session, client, "replan" if parent_run_id else "plan")
     planning = _plan_response(outcome, context)
     if not outcome.validation.valid:
         return CreateRunResponse(planning=planning, run=None)
@@ -350,6 +353,35 @@ def decide_all_steps(
         database_session, run_id, request.decision, decided_by=request.decided_by, channel=request.channel
     )
     return _run_out(database_session, run)
+
+
+class ModelCallOut(BaseModel):
+    """One model call from var/llm_calls.jsonl. The request text and raw answer stay in the file."""
+
+    at: datetime | None = None
+    model: str | None = None
+    purpose: str | None = Field(None, description="plan, replan (after a change fell through), or a vision read")
+    attempt: int | None = Field(None, description="1 for the first try, 2 after the validator sent it back")
+    latency_ms: int | None = None
+    ok: bool
+    error: str | None = None
+
+
+@router.get("/model-calls", response_model=list[ModelCallOut])
+def list_model_calls(limit: int = Query(100, ge=1, le=500)) -> list[ModelCallOut]:
+    """Read-only: the newest model calls, failed ones included, newest first."""
+    return [
+        ModelCallOut(
+            at=record.get("at"),
+            model=record.get("model"),
+            purpose=record.get("purpose"),
+            attempt=record.get("attempt"),
+            latency_ms=record.get("latency_ms"),
+            ok=not record.get("error"),
+            error=record.get("error"),
+        )
+        for record in read_calls(limit)
+    ]
 
 
 # ---------------------------------------------------------------------------

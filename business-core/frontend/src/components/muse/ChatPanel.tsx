@@ -154,10 +154,7 @@ function ChatPanel({ asOf, onPlan }: ChatPanelProps) {
 
           {turns.map((turn) => (
             <div key={turn.id} className="mz-turn">
-              <p className="mz-q">
-                {turn.channel === "voice" && <span className="mz-q__via">🎤 </span>}
-                {turn.question}
-              </p>
+              <p className="mz-q">{turn.question}</p>
               <div className="mz-a__wrap">
                 <MuseIcon />
                 <Reply

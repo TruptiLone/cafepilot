@@ -205,6 +205,7 @@ describe("ChatPanel", () => {
       recognizer!.onend!();
     });
     expect(sent(fetchMock)).toMatchObject({ message: "do we have banana nut muffins", channel: "voice" });
-    expect(await screen.findByText("🎤")).toBeTruthy();
+    expect(await screen.findByText("do we have banana nut muffins")).toBeTruthy();
+    expect(screen.queryByText(/🎤/)).toBeNull();  // the question bubble shows the words, no mic sign
   });
 });

@@ -116,11 +116,11 @@ answer to the owner's question; the results are below.
 
 Reply like a helpful café manager talking to the owner. Start with one or two plain sentences that
 answer the question directly. Don't repeat the table in the sentence, and no labels like
-'Below reorder point:'. If there is one useful next step, say it in one short sentence. Use only
-numbers that appear in the tool results. Cover everything the code answer says, including items with
-no scheduled delivery.
+'Below reorder point:'. Don't offer to do anything and don't ask the owner a question: the buttons
+under your reply handle next steps, like planning an order. Use only numbers that appear in the tool
+results. Cover everything the code answer says, including items with no scheduled delivery.
 
-Return only the reply: plain text, no markdown, at most three sentences."""
+Return only the reply: plain text, no markdown, at most two sentences."""
 
 
 # ---------------------------------------------------------------------------

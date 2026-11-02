@@ -1,7 +1,7 @@
 # CaféPilot
 
 AI operations assistant for independent cafés, built for the Meta Global AI Developer Hackathon.
-The owner describes what's coming up ("farmers market this Sunday"); Muse Spark plans the work, code
+The owner describes what's coming up ("farmers market this Sunday"); Muse Wonder plans the work, code
 checks and runs it, and nothing in the café changes until the owner approves.
 
 > **The model proposes, the code decides.** Muse writes the plan. Code validates every step, does all
@@ -13,7 +13,7 @@ checks and runs it, and nothing in the café changes until the owner approves.
 
 ```mermaid
 flowchart LR
-    Q[Owner request<br/>or event] --> P[Planner<br/>Muse Spark via Meta Model API]
+    Q[Owner request<br/>or event] --> P[Planner<br/>Muse Wonder via Meta Model API]
     P -->|plan as JSON DAG| V[Validator<br/>actions, IDs, references,<br/>dependencies, time offsets,<br/>order quantities from code]
     V -->|rejected: reasons sent back,<br/>one retry| P
     V -->|valid| E[Executor<br/>stateful, in Postgres]
@@ -37,6 +37,32 @@ flowchart LR
 - **Executor** (`executor.py`): reads run immediately; writes wait at `awaiting_approval`; approval is
   checked again before any write; stable record IDs mean a retry or crash can't create a duplicate;
   replaying a plan never repeats a completed write; owner edits are re-validated and audited.
+
+## Meta models used
+
+Both through the Meta Model API (OpenAI-compatible), with one `MODEL_API_KEY`.
+
+- **Muse Wonder** (`muse-wonder-1.0`, setting `PLANNER_MODEL`): the planner. It turns the owner's
+  request or a detected event into the plan, and plans another way when a supplier rejects an order
+  or someone declines a shift (`backend/modules/agent/planner.py`).
+- **Muse Spark** (`muse-spark-1.3`, setting `VISION_MODEL`): reads images in the delivery check. It
+  reads the packing-slip photo (`POST /api/v1/receiving/receipts/{id}/slip`) and counts what it can
+  see in the delivery photo (`POST /api/v1/receiving/receipts/{id}/photo`), in
+  `backend/modules/receiving/vision.py`. `scripts/try_vision.py` checks this against the demo images.
+
+### Spark vs Wonder for planning
+
+Measured with `scripts/compare_planners.py` on 10 café planning requests (frozen café time, one run per
+model per request, `reasoning_effort: high`). Full results:
+[`business-core/docs/agentic/planner-benchmark-results.md`](business-core/docs/agentic/planner-benchmark-results.md).
+
+| Model | Valid on the first try | Final outcome (10 requests) | Median first call | Mean total |
+|---|---:|---|---:|---:|
+| `muse-spark-1.3` | 6 of 10 | 7 plans, 3 clarifying questions | 25.87 s | 27.48 s |
+| `muse-wonder-1.0` | 7 of 10 | 7 plans, 3 clarifying questions | 12.25 s | 13.28 s |
+
+One sample per request, so this is not a statistical speed benchmark; a valid plan passed the
+validator, which checks structure, not whether the plan is the best one.
 
 ## Quick start
 
@@ -62,14 +88,23 @@ npm install
 npm run dev                     # http://localhost:5173/agent
 ```
 
-Open **Ask CaféPilot** and click **Check if we're ready** on the Santa Clara Farmers Market.
+Open **Ask CaféPilot** and click **Let's plan ✨** on the Santa Clara Farmers Market.
 
-Reset before each demo: `PYTHONPATH=. python scripts/seed_event_surge.py --fresh`
-(removes the agent's runs and the changes they made, then reloads the scenario).
+### Demo data and timing
 
-Demo only: simulated suppliers answer about 8 seconds after an order is sent. To keep
-"Waiting on <supplier>" on screen longer (for a recording), add this to `business-core/.env`
-and restart uvicorn (`--reload` doesn't pick up `.env` changes):
+Reset the demo data before each run (from `business-core`, with the virtual environment active):
+
+```bash
+PYTHONPATH=. python scripts/seed_event_surge.py --fresh                  # farmers-market scenario
+PYTHONPATH=. python scripts/seed_event_surge.py --fresh --with-delivery  # plus PO-1042 for receiving
+```
+
+This removes the agent's runs and the changes they made (orders, shifts, stock counts), then reloads
+the scenario. The server can stay running; refresh the page.
+
+Simulated suppliers answer about 8 seconds after an order is sent. To keep "Waiting on <supplier>"
+on screen longer (for a recording), add this to `business-core/.env` and restart uvicorn (`--reload`
+doesn't pick up `.env` changes):
 
 ```bash
 DEMO_SUPPLIER_REPLY_DELAY_SECONDS=30   # extra seconds before a simulated supplier replies (default 0)
@@ -99,8 +134,12 @@ CI runs both on every push and pull request (`.github/workflows/business-core.ym
 ## Status
 
 Built: business data core, agent registry, planner, validator, executor, approvals with
-Approve / Change / Decline, the farmers-market scenario. Next: event trigger and Muse chat UI,
-supplier-rejection replanning, multimodal receiving.
+Approve / Change / Decline, the farmers-market scenario, event trigger (Muse finds upcoming events),
+the Ask CaféPilot plan graph, supplier-rejection replanning (Muse finds another supplier), the
+supplier waiting state (Sent → Waiting for confirmation → Confirmed or Rejected), and receiving
+(delivery check with Muse Spark reading the packing slip and the delivery photo).
+
+Next: equipment troubleshooting from Meta glasses photos, and a chat history view.
 
 Demo data is synthetic. The supplier is simulated: orders are confirmed by a stand-in and never add
 stock; inventory only increases when goods are actually received and recorded.

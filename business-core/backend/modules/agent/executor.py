@@ -197,6 +197,9 @@ def _prepare(session: Session, run: AgentPlanRun, node: AgentNodeRun, results: d
             _finish(node, "skipped", error=reason)
             return False
         REGISTRY[node.action].input_model.model_validate(resolved)
+        normalize = REGISTRY[node.action].normalize
+        if normalize:
+            resolved = normalize(resolved)
     except (KeyError, IndexError, TypeError) as error:
         _finish(node, "failed", error=f"could not resolve arguments: {error}")
         return False
@@ -380,6 +383,9 @@ def decide(
             raise EditValidationError(f"Your changes are not valid: {details}") from error
         edited = validated.model_dump(mode="json", exclude_unset=False)
         edited = {k: v for k, v in edited.items() if k in original or k in edited_args}
+    # The approval keeps what the owner entered; the step runs with it in the form the action uses.
+    normalize = REGISTRY[node.action].normalize
+    final = normalize(edited) if edited is not None and normalize else edited
 
     session.add(
         AgentApproval(
@@ -395,9 +401,9 @@ def decide(
             decided_at=_now(),
         )
     )
-    if edited is not None and edited != original:
-        node.resolved_args = edited
-        node.idempotency_key = write_fingerprint(run.cafe_id, node.action, edited)
+    if final is not None and final != original:
+        node.resolved_args = final
+        node.idempotency_key = write_fingerprint(run.cafe_id, node.action, final)
     if decision == "approved":
         node.status = "approved"
     else:

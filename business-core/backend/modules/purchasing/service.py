@@ -53,6 +53,31 @@ def get_supplier(cafe_id: str, supplier_id: str | None) -> dict[str, Any]:
     raise SupplierNotFoundError(f"unknown supplier: {supplier_id}")
 
 
+def pack_size_for(cafe_id: str, supplier_id: str | None, ingredient_id: str) -> Decimal | None:
+    """The supplier's pack size for an item, else the café's pack-size policy, else None (sold loose)."""
+    try:
+        catalog = get_supplier(cafe_id, supplier_id).get("items") or {}
+    except SupplierNotFoundError:
+        catalog = {}
+    if ingredient_id in catalog:
+        return Decimal(catalog[ingredient_id]["pack_size"])
+    pack = policies_for(cafe_id).get("ordering", {}).get("pack_sizes", {}).get(ingredient_id)
+    return Decimal(pack["size"]) if pack else None
+
+
+def whole_packs(cafe_id: str, supplier_id: str | None, lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Round each order line up to whole packs, so the quantity the owner approves is the one sent."""
+    out = []
+    for line in lines:
+        pack_size = pack_size_for(cafe_id, supplier_id, line["ingredient_id"])
+        quantity = Decimal(str(line["quantity"]))
+        if pack_size and quantity % pack_size:
+            packs = int((quantity / pack_size).to_integral_value(rounding=ROUND_CEILING))
+            line = {**line, "quantity": f"{(pack_size * packs).normalize():f}"}
+        out.append(line)
+    return out
+
+
 def _tz(session: Session, cafe_id: str) -> ZoneInfo:
     cafe = session.get(Cafe, cafe_id)
     return ZoneInfo(cafe.timezone if cafe else "UTC")

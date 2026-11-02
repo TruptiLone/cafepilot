@@ -15,6 +15,7 @@ from backend.modules.agent.executor import (
     execute,
     get_run,
 )
+from backend.modules.agent.cafe_policies import CAFE_POLICIES
 from backend.modules.agent.models import AgentApproval
 from backend.modules.agent.planner import Plan
 from backend.modules.agent.registry import REGISTRY
@@ -193,6 +194,40 @@ def test_owner_can_change_quantities_before_approving(session: Session) -> None:
     approval = session.scalar(select(AgentApproval).where(AgentApproval.run_id == run_id))
     assert by_id(approval.original_args["lines"])[_id("WHOLE_MILK")] == "2560"
     assert by_id(approval.edited_args["lines"])[_id("WHOLE_MILK")] == "3000"
+
+
+@pytest.fixture
+def packed_supplier(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The test café's usual supplier sells milk only in cases of 6 × 1 L."""
+    case = {"pack_size": "6000", "pack_name": "case of 6 × 1 L", "pack_price_cents": 1800}
+    monkeypatch.setitem(CAFE_POLICIES, CAFE, {
+        "ordering": {"default_supplier_id": "TEST_DAIRY"},
+        "suppliers": [{"supplier_id": "TEST_DAIRY", "name": "Test Dairy", "respond_after_seconds": 8,
+                       "earliest_delivery": {d: "00:00" for d in range(7)},
+                       "items": {_id("WHOLE_MILK"): case, _id("OAT_MILK"): case}}],
+    })
+
+
+def test_order_lines_are_whole_packs_of_the_supplier(session: Session, packed_supplier: None) -> None:
+    run_id = _start(session, [_short_node(), _order_node("$short.order_lines")])  # shortfall: 2560 and 1530 mL
+    order = _node(session, run_id, "order")
+    assert {(l["ingredient_id"], l["quantity"]) for l in order.resolved_args["lines"]} == {
+        (_id("WHOLE_MILK"), "6000"), (_id("OAT_MILK"), "6000")}
+
+
+def test_owner_change_is_rounded_to_whole_packs(session: Session, packed_supplier: None) -> None:
+    """A nudged quantity (6002 mL) became '6.002 L' on screen while 2 cases were sent."""
+    run_id = _start(session, [_short_node(), _order_node("$short.order_lines")])
+    edited_lines = [{"ingredient_id": _id("WHOLE_MILK"), "quantity": "6002", "unit": "mL"},
+                    {"ingredient_id": _id("OAT_MILK"), "quantity": "6000", "unit": "mL"}]
+    run = decide(session, run_id, "order", "approved", edited_args={"lines": edited_lines})
+    order = next(n for n in run.nodes if n.node_id == "order")
+    shown = {l["ingredient_id"]: l["quantity"] for l in order.resolved_args["lines"]}
+    sent = {l["ingredient_id"]: Decimal(l["quantity"]) for l in order.result["lines"]}
+    assert shown == {_id("WHOLE_MILK"): "12000", _id("OAT_MILK"): "6000"}
+    assert sent == {k: Decimal(v) for k, v in shown.items()}  # what the owner sees is what was sent
+    approval = session.scalar(select(AgentApproval).where(AgentApproval.run_id == run_id))
+    assert {l["ingredient_id"]: l["quantity"] for l in approval.edited_args["lines"]}[_id("WHOLE_MILK")] == "6002"
 
 
 def test_invalid_change_is_refused_and_step_keeps_waiting(session: Session) -> None:

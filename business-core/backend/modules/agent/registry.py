@@ -21,7 +21,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from sqlalchemy.orm import Session
 
-from backend.modules.purchasing.service import OrderLineIn, offer_shift, send_order
+from backend.modules.purchasing.service import OrderLineIn, offer_shift, send_order, whole_packs
 from backend.modules.agent.demand import EventDemandInput, EventDemandResult, estimate_event_demand
 from backend.modules.agent.calculations import (
     ShortfallInput,
@@ -266,6 +266,8 @@ class Action:
     approval: Approval = "none"
     # Optional: given resolved args, return a reason to skip the step instead of running it.
     skip_reason: Callable[[dict[str, Any]], str | None] | None = None
+    # Optional: given resolved (or owner-edited) args, return them in the form the action really uses.
+    normalize: Callable[[dict[str, Any]], dict[str, Any]] | None = None
     # Writes that create a record: the executor passes a stable id so a retry cannot duplicate it.
     record_id_prefix: str | None = None
     # Writes: return the already-applied result for these args (and record id), or None.
@@ -755,6 +757,8 @@ _ACTIONS: list[Action] = [
         requires=(("calculate_shortfall", "get_purchase_order"),),
         approval="owner",
         skip_reason=lambda args: None if args.get("lines") else "Nothing to order: stock covers the need.",
+        # Suppliers sell whole packs: round every line up (shortfall, replan or owner edit alike).
+        normalize=lambda args: {**args, "lines": whole_packs(args["cafe_id"], args.get("supplier_id"), args["lines"])},
     ),
 ]
 

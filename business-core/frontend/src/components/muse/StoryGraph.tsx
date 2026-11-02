@@ -174,7 +174,8 @@ function StoryGraph({ story, runs, busy, reveal, onDecide, onOpenRun }: StoryGra
       const top = Math.min(...g.y2);
       const shared = g.x2.length > 1;
       const x = shared ? g.x1 : (g.x1 + g.x2[0]) / 2;
-      let y = (g.y1 + top) / 2;
+      // Halfway down, but never over the arrowhead (about 8px above the target) or the source box.
+      let y = Math.max(g.y1 + 10, Math.min((g.y1 + top) / 2, top - 19));
       // Keep the pill (about 6.5px a character, 18px tall) clear of every box: fall back to just above the target.
       const half = (g.text.length * 6.5 + 16) / 2;
       const hits = (cy: number) => boxes.some((r) => x + half > r.left && x - half < r.right && cy + 9 > r.top && cy - 9 < r.bottom);

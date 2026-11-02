@@ -3781,6 +3781,7 @@ body { background: var(--g-bg); }
 .mz-mark { width: 32px; height: 32px; border-radius: 10px; background: var(--g-indigo); color: #e2b565; display: grid; place-items: center; flex: none; }
 .mz-mark svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .mz-head-title { font-family: var(--g-serif); font-size: 18px; font-weight: 500; line-height: 1.1; }
+.mz-powered { white-space: nowrap; }
 .mz-live { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--g-line); background: #fff; font-size: 12px; font-weight: 500; color: var(--g-ink-2); white-space: nowrap; }
 .mz-live i { width: 7px; height: 7px; border-radius: 50%; background: #6f9468; }
 .mz-live[data-live="working"] i { background: var(--g-indigo); animation: mz-blink 1.4s ease-in-out infinite; }
@@ -3977,6 +3978,7 @@ body { background: var(--g-bg); }
 }
 @media (max-width: 860px) {
   .mz-pane-head { padding: 0 16px; }
+  .mz-powered__by { display: none; } /* phones: just the model name, so the header stays on one line */
   .mz-scroll { padding: 16px; }
   .mz-ev { grid-template-columns: minmax(0, 1fr); }
   .mz-ev .mz-btn { width: 100%; justify-content: center; }

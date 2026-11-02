@@ -184,6 +184,9 @@ afterEach(() => {
   }
 });
 
+/** The header line; on phones "Powered by" is hidden by CSS, so the text sits in two elements. */
+const powered = (text: string) => (_: string, el: Element | null) => !!el?.classList.contains("mz-powered") && el.textContent === text;
+
 const decisionBox = async (title: string) => {
   const head = await screen.findByRole("button", { name: new RegExp(title) });
   return head.closest(".sg-box") as HTMLElement;
@@ -374,12 +377,12 @@ describe("AgentPage", () => {
   it("says Meta Muse models before any plan, then the model that made the plan", async () => {
     stubFetch(() => undefined, [marketEvent]);
     renderPage();
-    expect(await screen.findByText("Powered by Meta Muse models")).toBeTruthy();
+    expect(await screen.findByText(powered("Powered by Meta Muse models"))).toBeTruthy();
     cleanup();
 
     stubFetch((url) => (url.startsWith("/api/v1/agent/runs/RUN-1") ? jsonResponse({ ...run, model: "muse-wonder-1.0" }) : undefined));
     renderPage("/agent?run=RUN-1");
-    expect(await screen.findByText("Powered by Muse Wonder 1.0")).toBeTruthy();
+    expect(await screen.findByText(powered("Powered by Muse Wonder 1.0"))).toBeTruthy();
     expect(screen.getByText(/Planned by muse-wonder-1\.0/)).toBeTruthy();
   });
 
@@ -434,6 +437,15 @@ describe("AgentPage", () => {
     renderPage("/agent?run=RUN-1");
     expect(await screen.findByText("Waiting on Willow Ridge Dairy Supply")).toBeTruthy();
     expect(screen.getByText("Replan · Muse Wonder 1.0")).toBeTruthy();
+  });
+
+  it("shows the All set card instead of the closing line once every change is done", async () => {
+    stubFetch((url) => (url.startsWith("/api/v1/agent/runs/RUN-1") ? jsonResponse(completedRun) : undefined));
+    renderPage("/agent?run=RUN-1");
+    expect(await screen.findByText("All set")).toBeTruthy();
+    expect(screen.getByText("Ethan Patel is on the schedule (Sun, Nov 1, 7:30 AM–2:30 PM).")).toBeTruthy();
+    expect(screen.queryByText(/^Done\. Ethan Patel is on the schedule/)).toBeNull();
+    expect(screen.queryByText("In short")).toBeNull();
   });
 
   it("shows only the tabs that work: Events and Deliveries", async () => {

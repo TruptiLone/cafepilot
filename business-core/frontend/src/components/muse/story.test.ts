@@ -227,7 +227,7 @@ function afterReplan(willow: "confirmed" | "sent"): [AgentRun, Record<string, Ag
             acknowledgement: ack("Bay Dairy Co. can't take this order", ["Bay Dairy Co. is out of oat milk until Mon, Nov 2."], "problem", "find_alternative") }
         : n === barista
           ? { ...n, status: "done", result: { shift_id: "S9" },
-              acknowledgement: ack("Ethan Patel is on the schedule", ["Sun, Nov 1, 8 AM–10 AM", "Sun, Nov 1 staffing now: 8 AM–2 PM: 4 of 4"], "done") }
+              acknowledgement: ack("Ethan Patel is on the schedule", ["", "Sun, Nov 1 staffing now: 8 AM–2 PM: 4 of 4"], "done") }
           : n,
     ),
   };

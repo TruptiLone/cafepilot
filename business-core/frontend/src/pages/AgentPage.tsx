@@ -394,7 +394,10 @@ function AgentPage() {
           </div>
           <div>
             <h1 className="mz-head-title">Muse</h1>
-            <div className="mz-muted">Powered by {run ? modelName(run.model) : "Meta Muse models"}</div>
+            <div className="mz-muted mz-powered">
+              <span className="mz-powered__by">Powered by </span>
+              {run ? modelName(run.model) : "Meta Muse models"}
+            </div>
           </div>
           <div className="mz-live" data-live={live[0]} role="status">
             <i />
@@ -532,7 +535,7 @@ function AgentPage() {
                 </div>
               )}
 
-              {closing && <p className="mz-muse-line">{closing}</p>}
+              {closing && !story.allSet && <p className="mz-muse-line">{closing}</p>}
 
               {story.summary.length > 0 && (
                 <div className={`mz-card mz-short${story.allSet ? " is-done" : ""}`}>

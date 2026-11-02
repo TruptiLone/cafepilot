@@ -4,7 +4,7 @@
  * real dependencies; every number comes from what the steps returned.
  */
 import type { AgentRun, RunStep } from "../../api/agent";
-import { describeChange, employeeName, formatClock, formatDay } from "../agent/changes";
+import { describeChange, employeeName, formatClock, formatDay, timeRange } from "../agent/changes";
 import { policyRoles } from "./roles";
 
 type Row = Record<string, unknown>;
@@ -341,7 +341,10 @@ function changeSummary({ step, run }: Change, names: Map<string, string>): strin
     return `${items} sent to ${supplier}; waiting for them to confirm.`;
   }
   if (!ack) return step.status === "done" ? describeChange(step, run) : null;
-  const when = step.action === "schedule_shift" && ack.details[0] ? ` (${ack.details[0]})` : "";
+  // The shift's hours come from the change's own arguments (the owner may have edited them).
+  const args = (step.resolved_args ?? step.args) as Row;
+  const window = step.action === "schedule_shift" ? timeRange(args.start_at, args.end_at) : "";
+  const when = window ? ` (${window})` : "";
   return `${ack.headline}${when}${ack.tone === "waiting" ? "; waiting for a reply" : ""}.`;
 }
 

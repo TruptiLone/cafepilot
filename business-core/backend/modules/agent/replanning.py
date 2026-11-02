@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.cafe import Cafe
 from backend.modules.agent.models import AgentPlanRun
-from backend.modules.agent.summaries import RunContext, clock, day, quantity, span
+from backend.modules.agent.summaries import RunContext, clock, day, local_time, quantity, span
 from backend.modules.purchasing.models import PurchaseOrder
 from backend.modules.purchasing.service import offer_for, order_for, settle_due
 
@@ -64,9 +64,11 @@ def replan_request(session: Session, run: AgentPlanRun, node_id: str) -> str:
             None,
         )
         target = f" Our staffing target for those hours is {required} people." if required else ""
+        start, end = local_time(node.result.get("start_at"), tz), local_time(node.result.get("end_at"), tz)
+        exact = f" ({start.isoformat()} to {end.isoformat()})" if start and end else ""
         return (
-            f"{who} ({node.result.get('employee_id')}) declined the shift {when} "
-            f"({node.result.get('start_at')} to {node.result.get('end_at')}).{target} Find someone else "
+            f"{who} ({node.result.get('employee_id')}) declined the shift {when}"
+            f"{exact}.{target} Find someone else "
             f"who can cover those hours, or tell me nobody is available. Do not order anything."
         )
     raise NothingToReplanError("only rejected orders and declined shifts can be replanned")

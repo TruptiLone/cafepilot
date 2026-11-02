@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Literal
@@ -127,17 +127,20 @@ def _check_offsets(node: PlanNode, tz: ZoneInfo, issues: list[PlanIssue]) -> Non
         if moment.tzinfo is None:
             continue
         expected = moment.astimezone(tz).utcoffset()
-        if moment.utcoffset() != expected:
+        if moment.utcoffset() == expected:
+            continue
+        if moment.utcoffset() == timedelta(0):
+            # A UTC value (Z or +00:00) names an instant: suggest that same instant in café time.
+            message = f"{path}={text} is in UTC; the same moment in café time is {moment.astimezone(tz).isoformat()}"
+        else:
+            # Another offset (e.g. Thursday's offset on Sunday): keep the clock time, fix the offset.
             hours = expected.total_seconds() / 3600
             correct = moment.replace(tzinfo=None).isoformat() + f"{'+' if hours >= 0 else '-'}{abs(int(hours)):02d}:00"
-            issues.append(
-                PlanIssue(
-                    "wrong_time_offset",
-                    f"{path}={text} uses the wrong UTC offset for {moment.date()} in {tz.key}; "
-                    f"local {moment.strftime('%H:%M')} that day is {correct}",
-                    node.id,
-                )
+            message = (
+                f"{path}={text} uses the wrong UTC offset for {moment.date()} in {tz.key}; "
+                f"local {moment.strftime('%H:%M')} that day is {correct}"
             )
+        issues.append(PlanIssue("wrong_time_offset", message, node.id))
 
 
 def _check_order_quantities(node: PlanNode, by_id: dict[str, PlanNode], issues: list[PlanIssue]) -> None:

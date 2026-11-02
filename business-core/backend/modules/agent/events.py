@@ -167,7 +167,9 @@ def get_event(session: Session, event_id: str) -> DetectedEvent | None:
 
 
 def upcoming_for_planner(session: Session, cafe_id: str, as_of: datetime) -> list[dict]:
-    """Compact list for the planner's reference data."""
+    """Compact list for the planner's reference data, times in café time."""
+    cafe = session.get(Cafe, cafe_id)
+    tz = ZoneInfo(cafe.timezone if cafe else "UTC")
     rows = session.scalars(
         select(CafeEvent)
         .where(CafeEvent.cafe_id == cafe_id, CafeEvent.status == "upcoming", CafeEvent.ends_at >= as_of)
@@ -179,8 +181,8 @@ def upcoming_for_planner(session: Session, cafe_id: str, as_of: datetime) -> lis
             "event_id": e.event_id,
             "name": e.name,
             "event_type": e.event_type,
-            "starts_at": e.starts_at.isoformat(),
-            "ends_at": e.ends_at.isoformat(),
+            "starts_at": e.starts_at.astimezone(tz).isoformat(),
+            "ends_at": e.ends_at.astimezone(tz).isoformat(),
         }
         for e in rows
     ]

@@ -21,6 +21,7 @@ from scripts.seed_event_surge import apply_reset, plan_reset, seed_event_surge
 from tests.test_agent_planner import FakeClient
 
 TZ = "America/Los_Angeles"
+AS_OF_THU = "2026-10-29T18:00:00-07:00"
 
 
 def step(node_id: str, action: str, result=None, *, status="done", side_effect="read", args=None, **extra):
@@ -146,6 +147,29 @@ def market_day(session: Session) -> Session:
     apply_reset(session, plan_reset(session))
     seed_event_surge(session)
     return session
+
+
+def test_planner_sees_upcoming_events_in_cafe_time(session: Session) -> None:
+    from backend.modules.agent.events import upcoming_for_planner
+    from backend.modules.events.models import CafeEvent
+
+    listed = {e["event_id"]: e for e in upcoming_for_planner(session, "CAFE001", datetime.fromisoformat(AS_OF_THU))}
+    market = listed[MARKET]
+    assert (market["starts_at"], market["ends_at"]) == ("2026-11-01T08:00:00-08:00", "2026-11-01T14:00:00-08:00")
+    stored = session.get(CafeEvent, MARKET)
+    assert datetime.fromisoformat(market["starts_at"]) == stored.starts_at  # same moment
+    assert listed["EVT_HALLOWEEN_20261031"]["starts_at"] == "2026-10-31T14:00:00-07:00"
+
+
+def test_local_time_reads_utc_z_as_the_same_moment() -> None:
+    from zoneinfo import ZoneInfo
+
+    from backend.modules.agent.summaries import local_time
+
+    moment = local_time("2026-11-01T16:00:00Z", ZoneInfo(TZ))
+    assert moment.isoformat() == "2026-11-01T08:00:00-08:00"
+    assert moment == datetime.fromisoformat("2026-11-01T16:00:00+00:00")
+    assert local_time("not a time", ZoneInfo(TZ)) is None
 
 
 def test_event_staffing_shows_short_windows_and_roster(market_day: Session) -> None:

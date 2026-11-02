@@ -143,6 +143,18 @@ def test_wrong_daylight_saving_offset_is_rejected_with_the_fix() -> None:
     assert "2026-11-01T06:00:00-08:00" in result.issues[0].message
 
 
+def test_utc_value_is_rejected_and_converted_to_the_same_moment_in_cafe_time() -> None:
+    short = _short_node()
+    short["args"]["as_of"] = "2026-10-30T01:00:00+00:00"
+    result = validate_plan(_plan([short, _order_node("$short.order_lines")]), CAFE, timezone=TZ)
+    assert [i.code for i in result.issues] == ["wrong_time_offset"]
+    suggested = result.issues[0].message.rsplit(" ", 1)[-1]
+    assert suggested == "2026-10-29T18:00:00-07:00"
+    assert datetime.fromisoformat(suggested) == datetime.fromisoformat("2026-10-30T01:00:00+00:00")
+    short["args"]["as_of"] = suggested
+    assert validate_plan(_plan([short, _order_node("$short.order_lines")]), CAFE, timezone=TZ).valid
+
+
 def test_offset_check_accepts_both_sides_of_the_switch() -> None:
     result = validate_plan(_plan([_short_node(), _order_node("$short.order_lines")]), CAFE, timezone=TZ)
     assert result.valid  # as_of uses -07:00 (Thu), target and delivery use -08:00 (Sun)

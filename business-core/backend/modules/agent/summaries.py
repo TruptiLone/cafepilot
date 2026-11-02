@@ -38,11 +38,13 @@ def quantity(value: Any, unit: str | None) -> str:
     return text if unit in ("", "each") else f"{text} {unit}"
 
 
-def _local(value: Any, tz: ZoneInfo) -> datetime | None:
+def local_time(value: Any, tz: ZoneInfo) -> datetime | None:
+    """An ISO timestamp as the same moment in café time. Accepts a trailing "Z" (step results use it;
+    Python 3.10's fromisoformat does not)."""
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value).astimezone(tz)
+        return datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value).astimezone(tz)
     except ValueError:
         return None
 
@@ -57,7 +59,7 @@ def day(moment: datetime) -> str:
 
 
 def span(start: Any, end: Any, tz: ZoneInfo, *, with_day: bool = True) -> str:
-    a, b = _local(start, tz), _local(end, tz)
+    a, b = local_time(start, tz), local_time(end, tz)
     if a is None or b is None:
         return ""
     times = f"{clock(a)}–{clock(b)}"
@@ -206,7 +208,7 @@ def _coverage(result: Row, ctx: RunContext) -> str | None:
     # group consecutive hours with the same headcount
     groups: list[tuple[datetime, datetime, int]] = []
     for hour in hours:
-        start = _local(hour["hour_start"], ctx.tz)
+        start = local_time(hour["hour_start"], ctx.tz)
         if start is None:
             continue
         count = int(hour["scheduled_employees"])
@@ -218,7 +220,7 @@ def _coverage(result: Row, ctx: RunContext) -> str | None:
     parts = [f"{clock(a)}–{clock(b)} has {n} of {required}" for a, b, n in groups if n < (required or 0)]
     if not parts:
         return None
-    first = _local(hours[0]["hour_start"], ctx.tz)
+    first = local_time(hours[0]["hour_start"], ctx.tz)
     prefix = f"{day(first)}: " if first else ""
     return f"Short-staffed {prefix}" + ", ".join(parts) + " people"
 
@@ -256,7 +258,7 @@ def _order(args: Row, result: Row | None, ctx: RunContext, done: bool) -> str:
     if isinstance(lines, str):
         return "Order the shortfall from the simulated supplier"
     items = _list(f"{quantity(l['quantity'], l.get('unit'))} {ctx.ingredient(l['ingredient_id']).lower()}" for l in lines)
-    delivery = _local((result or {}).get("confirmed_delivery_at") or args.get("requested_delivery_at"), ctx.tz)
+    delivery = local_time((result or {}).get("confirmed_delivery_at") or args.get("requested_delivery_at"), ctx.tz)
     when = f" for {day(delivery)} {clock(delivery)}" if delivery else ""
     if done:
         ref = (result or {}).get("order_ref", "")

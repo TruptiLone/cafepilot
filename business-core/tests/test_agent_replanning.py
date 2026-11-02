@@ -1,6 +1,7 @@
 """Honest statuses for orders, supplier rejection, and Muse replanning (simulated supplier)."""
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -161,6 +162,28 @@ def test_usual_supplier_is_out_of_oat_milk_and_muse_replans(session: Session, tm
         assert api.post(f"/api/v1/agent/runs/{new['run_id']}/nodes/po/replan").status_code == 409
     finally:
         app.dependency_overrides.clear()
+
+
+def test_declined_shift_replan_states_the_shift_in_cafe_time(session: Session, monkeypatch) -> None:
+    from backend.modules.agent.cafe_policies import CAFE_POLICIES
+    from backend.modules.agent.replanning import replan_request
+
+    monkeypatch.setitem(CAFE_POLICIES["CAFE001"], "staff_replies", {"respond_after_seconds": 10, "declines": ["DEMO_EMP_004"]})
+    window = {"start_at": "2026-11-01T08:00:00-08:00", "end_at": "2026-11-01T12:00:00-08:00"}
+    run = _run(session, [
+        {"id": "cov", "action": "coverage_report", "reason": "r",
+         "args": {"cafe_id": C, "start_at": "2026-11-01T08:00:00-08:00", "end_at": "2026-11-01T14:00:00-08:00", "required_staff": 4}},
+        {"id": "staff", "action": "list_employees", "reason": "r", "args": {"cafe_id": C}},
+        {"id": "shifts", "action": "list_shifts", "reason": "r", "args": {"cafe_id": C, **window}},
+        {"id": "add", "action": "schedule_shift", "reason": "r", "args": {"cafe_id": C, "employee_id": "DEMO_EMP_004", **window}},
+    ])
+    run = decide(session, run.run_id, "add", "approved")
+    assert next(n for n in run.nodes if n.node_id == "add").result["start_at"].endswith("Z")  # results are UTC
+    settle_due(session, cafe_id=C, now=LATER)
+
+    text = replan_request(session, run, "add")
+    assert "declined the shift Sun Nov 1, 8 AM–12 PM (2026-11-01T08:00:00-08:00 to 2026-11-01T12:00:00-08:00)" in text
+    assert not re.search(r"T\d\d:\d\d(:\d\d)?(Z|\+00:00)", text)  # no UTC timestamps left
 
 
 def test_resending_needs_the_rejected_orders_quantities() -> None:

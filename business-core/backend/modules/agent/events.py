@@ -6,7 +6,8 @@ the expected demand are computed from sales history (``estimate_event_demand``),
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
@@ -15,9 +16,12 @@ from sqlalchemy.orm import Session
 
 from backend.db.config import get_settings
 from backend.models.cafe import Cafe
+from backend.modules.agent.cafe_policies import event_required_staff
 from backend.modules.agent.demand import EventDemandInput, EventDemandResult, estimate_event_demand
 from backend.modules.agent.summaries import clock, day
 from backend.modules.events.models import CafeEvent
+from backend.modules.staffing.models import Employee
+from backend.modules.staffing.service import StaffingService
 
 
 class ExpectedDemand(BaseModel):
@@ -180,3 +184,50 @@ def upcoming_for_planner(session: Session, cafe_id: str, as_of: datetime) -> lis
         }
         for e in rows
     ]
+
+
+def event_staffing(session: Session, cafe_id: str, event_id: str) -> dict[str, Any] | None:
+    """Staffing for an event, worked out in code for the planner: required vs scheduled people per
+    window of the event hours (the coverage_report code, consecutive hours with the same count
+    merged) and that day's roster. The model reads these numbers; it never recalculates them."""
+    event = session.get(CafeEvent, event_id)
+    cafe = session.get(Cafe, event.cafe_id) if event else None
+    if event is None or cafe is None or event.cafe_id != cafe_id:
+        return None
+    tz = ZoneInfo(cafe.timezone)
+    required, basis = event_required_staff(event.cafe_id, event.event_type)
+    service = StaffingService(session)
+    windows: list[dict[str, Any]] = []
+    for hour in service.coverage_report(event.cafe_id, event.starts_at, event.ends_at, required).hours:
+        start = hour.hour_start.astimezone(tz)
+        end = min(start + timedelta(hours=1), event.ends_at.astimezone(tz))
+        if windows and windows[-1]["scheduled"] == hour.scheduled_employees:
+            windows[-1]["end_at"] = end.isoformat()
+            continue
+        windows.append({
+            "start_at": start.isoformat(),
+            "end_at": end.isoformat(),
+            "scheduled": hour.scheduled_employees,
+            "required": required,
+            "short_by": max(required - hour.scheduled_employees, 0),
+        })
+    day = event.starts_at.astimezone(tz).date()
+    day_start = datetime.combine(day, time.min, tz)
+    day_end = datetime.combine(day + timedelta(days=1), time.min, tz)
+    roles = dict(session.execute(select(Employee.employee_id, Employee.role).where(Employee.cafe_id == event.cafe_id)).all())
+    roster = [
+        {"employee_id": s.employee_id, "name": s.employee_name, "role": roles.get(s.employee_id),
+         "start_at": s.start_at.astimezone(tz).isoformat(), "end_at": s.end_at.astimezone(tz).isoformat()}
+        for s in service.list_shifts(event.cafe_id, day_start, day_end)
+        if s.status == "scheduled"
+    ]
+    return {
+        "event_id": event.event_id,
+        "event_hours": {"start_at": event.starts_at.astimezone(tz).isoformat(), "end_at": event.ends_at.astimezone(tz).isoformat()},
+        "required_staff": required,
+        "required_from": f"cafe_policies.staffing.{basis}",
+        "coverage_by_window": windows,
+        "short_windows": [w for w in windows if w["short_by"] > 0],
+        "roster": roster,
+        "note": "Worked out in code from the schedule (coverage_report and list_shifts). Use these numbers as given.",
+    }

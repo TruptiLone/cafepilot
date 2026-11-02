@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
@@ -14,6 +15,9 @@ from backend.modules.agent import planner as planner_module
 from backend.modules.agent.events import detected_events, get_event
 from backend.modules.agent.router import get_planner_client
 from backend.modules.agent.summaries import quantity, summarize_run
+from backend.modules.agent.events import event_staffing
+from backend.modules.agent.planner import SYSTEM_PROMPT
+from scripts.seed_event_surge import apply_reset, plan_reset, seed_event_surge
 from tests.test_agent_planner import FakeClient
 
 TZ = "America/Los_Angeles"
@@ -132,6 +136,62 @@ def test_events_name_the_configured_planner_model(session: Session, monkeypatch)
     assert listed[MARKET]["planner_model"] == "muse-test-9.9"
     assert one["planner_model"] == "muse-test-9.9"
     assert {e["planner_model"] for e in listed.values()} == {"muse-test-9.9"}
+
+
+@pytest.fixture
+def market_day(session: Session) -> Session:
+    """The demo Sunday as seeded: 2 people 8 AM-12 PM, 3 people 12-2 PM, before any plan."""
+    apply_reset(session, plan_reset(session))
+    seed_event_surge(session)
+    return session
+
+
+def test_event_staffing_shows_short_windows_and_roster(market_day: Session) -> None:
+    staffing = event_staffing(market_day, "CAFE001", MARKET)
+    assert staffing["required_staff"] == 4
+    assert staffing["required_from"] == "cafe_policies.staffing.busy_event_required_staff"
+    windows = [(w["start_at"][11:16], w["end_at"][11:16], w["scheduled"], w["required"], w["short_by"])
+               for w in staffing["coverage_by_window"]]
+    assert windows == [("08:00", "12:00", 2, 4, 2), ("12:00", "14:00", 3, 4, 1)]
+    assert staffing["short_windows"] == staffing["coverage_by_window"]
+    on_shift = {r["employee_id"] for r in staffing["roster"]}
+    assert len(on_shift) == len(staffing["roster"]) > 0
+    assert all(r["start_at"].startswith("2026-11-01") and r["role"] for r in staffing["roster"])
+
+
+def test_event_staffing_follows_the_schedule_and_policy(market_day: Session) -> None:
+    from backend.modules.staffing.schemas import ShiftCreate
+    from backend.modules.staffing.service import StaffingService
+
+    roster = event_staffing(market_day, "CAFE001", MARKET)["roster"]
+    free = next(e for e in ("DEMO_EMP_003", "DEMO_EMP_004") if e not in {r["employee_id"] for r in roster})
+    StaffingService(market_day).schedule_shift(ShiftCreate(
+        cafe_id="CAFE001", employee_id=free,
+        start_at=datetime.fromisoformat("2026-11-01T08:00:00-08:00"), end_at=datetime.fromisoformat("2026-11-01T12:00:00-08:00")))
+    staffing = event_staffing(market_day, "CAFE001", MARKET)
+    assert [(w["scheduled"], w["short_by"]) for w in staffing["coverage_by_window"]] == [(3, 1)]
+    assert free in {r["employee_id"] for r in staffing["roster"]}
+    assert event_staffing(market_day, "CAFE001", "EVT_HALLOWEEN_20261031")["required_from"].endswith("normal_required_staff")
+    assert event_staffing(market_day, "ANOTHER_CAFE", MARKET) is None
+
+
+def test_event_plans_get_the_staffing_typed_requests_do_not(market_day: Session, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(planner_module, "LLM_LOG_PATH", tmp_path / "llm.jsonl")
+    plan = {"status": "plan", "goal": "g", "assumptions": [],
+            "nodes": [{"id": "staff", "action": "list_employees", "args": {"cafe_id": "CAFE001"}, "reason": "who"}]}
+    client = FakeClient(json.dumps(plan))
+    app.dependency_overrides[get_db] = lambda: market_day
+    app.dependency_overrides[get_planner_client] = lambda: client
+    try:
+        api = TestClient(app)
+        api.post(f"/api/v1/agent/events/{MARKET}/runs")
+        api.post("/api/v1/agent/runs", json={"query": "who works Sunday?", "cafe_id": "CAFE001"})
+    finally:
+        app.dependency_overrides.clear()
+    sent = [json.loads(call["messages"][-1]["content"])["reference_data"] for call in client.calls]
+    assert [(w["short_by"]) for w in sent[0]["event_staffing"]["short_windows"]] == [2, 1]
+    assert "event_staffing" not in sent[1]
+    assert "9b." in SYSTEM_PROMPT and "9c." in SYSTEM_PROMPT and "event_staffing" in SYSTEM_PROMPT
 
 
 def test_saying_yes_to_an_event_starts_a_run(session: Session, tmp_path, monkeypatch) -> None:

@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from backend.db.config import get_settings
 from backend.models.cafe import Cafe
 from backend.modules.agent.cafe_policies import policies_for
-from backend.modules.agent.events import upcoming_for_planner
+from backend.modules.agent.events import event_staffing, upcoming_for_planner
 from backend.modules.agent.registry import describe_for_planner
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.sales.models import MenuProduct, Modifier, ModifierGroup, ProductVariation
@@ -92,8 +92,10 @@ class PlanningContext:
 
 
 def build_planning_context(
-    session: Session, cafe_id: str, as_of: datetime | None = None
+    session: Session, cafe_id: str, as_of: datetime | None = None, event_id: str | None = None
 ) -> PlanningContext:
+    """Reference data for the planner. For an event's plan (and its replans) it adds event_staffing:
+    coverage per window of the event hours and that day's roster, worked out in code."""
     cafe = session.get(Cafe, cafe_id)
     if cafe is None:
         raise LookupError(f"cafe not found: {cafe_id}")
@@ -156,6 +158,9 @@ def build_planning_context(
         ],
         "upcoming_events": upcoming_for_planner(session, cafe_id, effective_as_of),
     }
+    staffing = event_staffing(session, cafe_id, event_id) if event_id else None
+    if staffing:
+        reference["event_staffing"] = staffing
     return PlanningContext(cafe_id, cafe.timezone, effective_as_of, now, reference)
 
 
@@ -215,6 +220,11 @@ STAFFING
    with no shift that day. Propose the fewest shifts that reach the target, one node per shift.
 9b. Staff only the time windows the coverage report shows as short; do not schedule a person for
    hours that are already covered.
+9c. When REFERENCE DATA has event_staffing, it is that coverage for the event hours, worked out in
+   code: required vs scheduled people per window, the short windows and the day's roster. Set
+   shift times from short_windows only: in each window add exactly short_by people, using the
+   fewest shifts (one person can cover several adjacent short windows). Use these numbers as given;
+   never recalculate them.
 
 WRITES
 10. Read first, then write. Add a write only when the owner asked for that kind of change.

@@ -76,5 +76,15 @@ def policies_for(cafe_id: str) -> dict[str, Any]:
     return CAFE_POLICIES.get(cafe_id, {})
 
 
+def event_required_staff(cafe_id: str, event_type: str) -> tuple[int, str]:
+    """People needed during an event, and the policy it comes from. Holidays count as normal days
+    (the same split the café status panel uses)."""
+    staffing = policies_for(cafe_id).get("staffing", {})
+    normal = int(staffing.get("normal_required_staff", 2))
+    if event_type == "holiday":
+        return normal, "normal_required_staff"
+    return int(staffing.get("busy_event_required_staff", normal)), "busy_event_required_staff"
+
+
 def opening_hours(cafe_id: str) -> dict[int, tuple[int, int]]:
     return policies_for(cafe_id).get("opening_hours", {d: (7, 19) for d in range(7)})

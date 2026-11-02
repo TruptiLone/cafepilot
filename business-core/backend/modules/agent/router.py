@@ -78,10 +78,10 @@ def get_planner_client() -> Any:
 
 
 def _plan(
-    request: PlanRequest, database_session: Session, client: Any, purpose: str = "plan"
+    request: PlanRequest, database_session: Session, client: Any, purpose: str = "plan", event_id: str | None = None
 ) -> tuple[PlanningOutcome, Any]:
     try:
-        context = build_planning_context(database_session, request.cafe_id, request.as_of)
+        context = build_planning_context(database_session, request.cafe_id, request.as_of, event_id=event_id)
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     try:
@@ -254,8 +254,10 @@ def _start(
     client: Any,
     parent_run_id: str | None = None,
     parent_node_id: str | None = None,
+    event_id: str | None = None,
 ) -> CreateRunResponse:
-    outcome, context = _plan(request, database_session, client, "replan" if parent_run_id else "plan")
+    purpose = "replan" if parent_run_id else "plan"
+    outcome, context = _plan(request, database_session, client, purpose, event_id)
     planning = _plan_response(outcome, context)
     if not outcome.validation.valid:
         return CreateRunResponse(planning=planning, run=None)
@@ -428,7 +430,7 @@ def start_run_for_event(
     if event is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     request = PlanRequest(query=event.request, cafe_id=event.cafe_id, as_of=event.knowledge_as_of)
-    return start_run(request, database_session, client)
+    return _start(request, database_session, client, event_id=event_id)
 
 
 @router.post("/runs/{run_id}/nodes/{node_id}/replan", response_model=CreateRunResponse)
@@ -447,4 +449,5 @@ def replan_step(
     except NothingToReplanError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     request = PlanRequest(query=query, cafe_id=run.cafe_id, as_of=run.as_of)
-    return _start(request, database_session, client, parent_run_id=run_id, parent_node_id=node_id)
+    return _start(request, database_session, client, parent_run_id=run_id, parent_node_id=node_id,
+                  event_id=event_id_for_run(database_session, run))

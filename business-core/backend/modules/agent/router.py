@@ -19,6 +19,7 @@ from backend.modules.agent.planner import (
     read_calls,
 )
 from backend.models.cafe import Cafe
+from backend.modules.agent.chat import ChatTimeoutError, answer as chat_answer, create_chat_client
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
 from backend.modules.agent.status import CafeStatus, cafe_status, event_id_for_run, event_plan
 from backend.modules.agent.summaries import summarize_run
@@ -355,6 +356,44 @@ def decide_all_steps(
         database_session, run_id, request.decision, decided_by=request.decided_by, channel=request.channel
     )
     return _run_out(database_session, run)
+
+
+class ChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    message: str = Field(min_length=1, max_length=1000)
+    channel: Literal["text", "voice"] = "text"
+    cafe_id: str = "CAFE001"
+    as_of: datetime | None = Field(default=None, description="Reference time for 'today'; defaults to now, like plans.")
+
+    @field_validator("as_of")
+    @classmethod
+    def _aware(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("as_of must include a UTC offset")
+        return value
+
+
+def get_chat_client() -> Any:
+    try:
+        return create_chat_client()
+    except PlannerUnavailableError as error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
+
+
+@router.post("/chat")
+def chat(request: ChatRequest, database_session: Session = Depends(get_db), client: Any = Depends(get_chat_client)) -> dict:
+    """Ask Muse a question. Read-only: Spark picks lookups, code runs them and writes the answer.
+    A request to change something comes back as intent needs_plan with plan_request for the plan flow."""
+    try:
+        return chat_answer(database_session, client, request.message, cafe_id=request.cafe_id,
+                           channel=request.channel, as_of=request.as_of)
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+    except ChatTimeoutError as error:
+        raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(error)) from error
+    except ModelCallError as error:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
 
 
 class ModelCallOut(BaseModel):

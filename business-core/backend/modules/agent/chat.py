@@ -217,8 +217,9 @@ def _when(value: Any, tz: ZoneInfo) -> str | None:
 
 
 def _stock_rows(
-    result: list[dict], reorder: dict[str, Any], tz: ZoneInfo, now: datetime, whole_list: bool
-) -> tuple[list[ChatRow], list[str]]:
+    result: list[dict], reorder: dict[str, Any], tz: ZoneInfo, now: datetime, whole_list: bool, summary: str | None
+) -> tuple[list[ChatRow], list[str], list[str]]:
+    """Rows, the answer (items below their reorder point first) and notes for the end."""
     rows, low, checked = [], [], 0
     for r in result:
         known = r.get("stock_status") == "known"
@@ -241,12 +242,25 @@ def _stock_rows(
             estimated=bool(r.get("included_movement_count") or r.get("has_estimated_movements")),
             detail="; ".join(detail) or (None if known else f"stock {r.get('stock_status')}"),
         ))
-    lines = []
-    if checked:
-        lines.append("Below reorder point: " + "; ".join(low) + "." if low else "Nothing here is below its reorder point.")
-    elif whole_list:  # "are we low on anything" needs reorder points; say so rather than guess
-        lines.append("No reorder points are set in the stock list, so I can't tell what's low.")
-    return rows, lines
+    lead = ("Below reorder point: " + "; ".join(low) + ".") if low else None
+    unsure = [r["name"] for r in result if r.get("stock_status") != "known"]
+    if whole_list:  # "are we low on anything": the low items, not a count of everything
+        if lead:
+            lines = [lead]
+        elif checked:
+            lines = ["Nothing is below its reorder point."]
+        else:  # needs reorder points; say so rather than guess
+            lines = ["No reorder points are set in the stock list, so I can't tell what's low."]
+        notes = [f"Not sure about {', '.join(unsure)}."] if unsure else []
+        return rows, lines, notes
+    if lead and len(low) == len(result):  # every item asked about is low: that line says it all
+        return rows, [lead], []
+    lines = [lead] if lead else []
+    if summary:
+        lines.append(summary)
+    if checked and not lead:
+        lines.append("Nothing here is below its reorder point.")
+    return rows, lines, []
 
 
 def _rows(action: str, result: Any, args: dict[str, Any], names: dict[str, str], tz: ZoneInfo) -> list[ChatRow]:
@@ -343,7 +357,7 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
     reference, now, tz = build_reference(session, cafe_id, as_of)
     routing, latency_ms = _route(client, model, message, reference, channel)
     out: dict[str, Any] = {"intent": routing.intent, "message": message, "channel": channel, "model": model,
-                           "latency_ms": latency_ms, "as_of": now.isoformat(), "lines": [], "rows": [],
+                           "latency_ms": latency_ms, "as_of": now.isoformat(), "lines": [], "rows": [], "notes": [],
                            "lookups": [], "plan_request": None}
     # A write anywhere means the owner wants a change: hand the text to the plan flow, run nothing.
     if routing.intent == "needs_plan" or any(a.action in REGISTRY and a.action not in READ_ACTIONS for a in routing.actions):
@@ -359,6 +373,7 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
     names = {iid: name for iid, name, _ in items}
     reorder = {iid: point for iid, _, point in items if point is not None}
     lookups: list[ChatLookup] = []
+    notes: list[str] = []  # small lines after the rows
     try:
         for chosen in routing.actions:
             action = READ_ACTIONS.get(chosen.action)
@@ -393,7 +408,9 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
                 summary = None
             extra: list[str] = []
             if chosen.action == "get_stock_estimates" and isinstance(result, list):
-                rows, extra = _stock_rows(result, reorder, tz, now, whole_list=not _ingredient_ids(args))
+                rows, extra, stock_notes = _stock_rows(result, reorder, tz, now, not _ingredient_ids(args), summary)
+                summary = None  # the stock answer is built from the rows above
+                notes.extend(stock_notes)
             else:
                 rows = _rows(chosen.action, result, args, names, tz)
             if chosen.action == "sales_summary" and len(rows) == 5:
@@ -404,6 +421,7 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
         session.rollback()  # the chat path never writes
 
     out["lookups"] = [l.model_dump() for l in lookups]
+    out["notes"] = notes
     out["lines"] = [l.summary for l in lookups if l.summary] or (
         ["I couldn't look that up."] if any(l.error for l in lookups)
         else ["I couldn't find a lookup for that. Ask about stock, sales, staff, orders or events."]

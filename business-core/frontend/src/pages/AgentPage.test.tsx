@@ -470,7 +470,9 @@ describe("AgentPage", () => {
     }, [demoEvent]);
     renderPage();
     await screen.findByText("Santa Clara Farmers Market");
+    expect(screen.getByText(powered("Powered by Meta Muse models"))).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Chat" }));
+    expect(screen.getByText(powered("Powered by Muse Spark"))).toBeTruthy();
     expect(screen.getByLabelText("Ask Muse").closest("form")!.hidden).toBe(true);  // the plan bar steps aside
     await userEvent.type(screen.getByLabelText("Ask Muse a question"), "order more oat milk{enter}");
     const chatCall = fetchMock.mock.calls.find(([url]) => url === "/api/v1/agent/chat");

@@ -88,6 +88,17 @@ describe("ChatPanel", () => {
     expect(screen.getAllByRole("rowheader")).toHaveLength(19);
   });
 
+  it("puts notes in a small line after the rows", async () => {
+    respond(reply({ notes: ["Not sure about Tea Bags."] }));
+    render(<ChatPanel onPlan={() => undefined} />);
+    await userEvent.type(screen.getByLabelText("Ask Muse a question"), "are we low on anything{enter}");
+    const note = await screen.findByText("Not sure about Tea Bags.");
+    expect(note.className).toBe("mz-a__note");
+    const card = note.closest(".mz-a") as HTMLElement;
+    expect(card.querySelector("table")!.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(card.firstElementChild!.textContent).toMatch(/^Banana Nut Muffin 9 on hand/);
+  });
+
   it("keeps the first five rows when nothing is low", () => {
     const { shown, hidden } = rowsThatMatter(Array.from({ length: 8 }, (_, i) => stock(`Item ${i}`)));
     expect([shown.length, hidden]).toEqual([5, 3]);

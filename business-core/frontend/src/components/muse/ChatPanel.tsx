@@ -274,6 +274,11 @@ function Reply({ turn, onPlan, onRetry }: { turn: Turn; onPlan: (request: string
           Show all {a.rows.length}
         </button>
       )}
+      {a.notes?.map((note) => (
+        <p key={note} className="mz-a__note">
+          {note}
+        </p>
+      ))}
       {meta}
     </div>
   );

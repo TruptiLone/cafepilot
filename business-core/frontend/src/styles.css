@@ -4119,6 +4119,7 @@ body { background: var(--g-bg); }
 .mz-a__rows th { font-weight: 500; white-space: nowrap; }
 .mz-a__rows td:nth-child(2) { white-space: nowrap; font-variant-numeric: tabular-nums; }
 .mz-a__meta { font-size: 11px; color: var(--g-ink-3); }
+.mz-a__note { font-size: 12px; color: var(--g-ink-3); }
 .mz-chat__foot { justify-content: space-between; flex-wrap: wrap; gap: 6px 16px; }
 .mz-chat__foot > span { display: inline-flex; align-items: center; gap: 8px; }
 .mz-speak { display: inline-flex; align-items: center; gap: 6px; color: var(--g-ink-2); cursor: pointer; }

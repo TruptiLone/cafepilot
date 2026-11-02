@@ -134,8 +134,16 @@ def test_low_means_below_the_reorder_point_in_the_database(session: Session) -> 
     assert low == ["Banana Nut Muffin", "Oat Milk"]  # the demo seed puts these two below
     flagged = sorted(r["name"] for r in body["rows"] if "below reorder point" in (r["detail"] or ""))
     assert flagged == low
-    assert body["lines"][0].endswith(
-        "Below reorder point: Banana Nut Muffin (9 left, reorder at 12); Oat Milk (1.25 L left, reorder at 3 L).")
+    # The low items lead; no count of everything, and the unknown item is a note at the end.
+    assert body["lines"] == ["Below reorder point: Banana Nut Muffin (9 left, reorder at 12); Oat Milk (1.25 L left, reorder at 3 L)."]
+    unsure = sorted(e.name for e in truth.values() if e.stock_status != "known")
+    assert body["notes"] == [f"Not sure about {', '.join(unsure)}."]
+
+
+def test_one_low_item_is_answered_by_its_reorder_line(session: Session) -> None:
+    body = ask(session, "do you have banana nut muffins", answer(("get_stock_estimates", {"ingredient_id": "BANANA_NUT_MUFFIN"})))
+    assert body["lines"] == ["Below reorder point: Banana Nut Muffin (9 left, reorder at 12)."]
+    assert [(r["name"], r["quantity"]) for r in body["rows"]] == [("Banana Nut Muffin", num(estimates(session)["BANANA_NUT_MUFFIN"].estimated_quantity))]
 
 
 def test_without_reorder_points_low_is_not_guessed(session: Session) -> None:
@@ -143,7 +151,7 @@ def test_without_reorder_points_low_is_not_guessed(session: Session) -> None:
         item.reorder_point = None  # rolled back with the test
     session.commit()
     body = ask(session, "are we low on anything", answer(("get_stock_estimates", {})))
-    assert "No reorder points are set in the stock list, so I can't tell what's low." in body["lines"][0]
+    assert body["lines"] == ["No reorder points are set in the stock list, so I can't tell what's low."]
     assert not any("below reorder point" in (r["detail"] or "") for r in body["rows"])
 
 

@@ -158,6 +158,8 @@ export type ChatAnswer = {
   as_of: string;
   lines: string[];
   rows: ChatRow[];
+  /** Small lines after the rows, e.g. items with no usable count. */
+  notes?: string[];
   lookups: { action: string; summary: string | null; error: string | null }[];
   plan_request: string | null;
 };

@@ -393,7 +393,7 @@ function AgentPage() {
             <h1 className="mz-head-title">Muse</h1>
             <div className="mz-muted mz-powered">
               <span className="mz-powered__by">Powered by </span>
-              {run ? modelName(run.model) : "Meta Muse models"}
+              {tab === "chat" ? "Muse Spark" : run ? modelName(run.model) : "Meta Muse models"}
             </div>
           </div>
           <div className="mz-live" data-live={live[0]} role="status">

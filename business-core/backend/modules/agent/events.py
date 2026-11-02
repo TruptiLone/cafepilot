@@ -107,7 +107,7 @@ def _describe(event: CafeEvent, demand: EventDemandResult, tz: ZoneInfo) -> tupl
     message = f"{event.name}: {when}{where}. {effect} Want me to check if we're ready?"
     request = (
         f"Upcoming event {event.event_id}: {event.name}, {when}. Use estimate_event_demand for this event "
-        f"and the typical scenario, with knowledge as of {demand.as_of.isoformat()}. Order milk for a 6 AM "
+        f"and the typical scenario, with knowledge as of {demand.as_of.astimezone(tz).isoformat()}. Order milk for a 6 AM "
         f"delivery on the event day if we'll run short (count normal use and regular deliveries), and add "
         f"baristas for any event hours below our event staffing target."
     )

@@ -119,6 +119,8 @@ def test_demo_event_comes_from_the_calendar_with_history_numbers(session: Sessio
     assert expected.extra_drinks_low <= expected.extra_drinks_typical <= expected.extra_drinks_high
     assert f"typically +{expected.extra_drinks_typical}" in market.muse_message
     assert MARKET in market.request and "estimate_event_demand" in market.request
+    # In café time, like knowledge_as_of in the planning context (a UTC time here failed rule 7 every run).
+    assert "knowledge as of 2026-10-29T18:00:00-07:00" in market.request
     assert events["EVT_HALLOWEEN_20261031"].expected.confidence == "rough"
     assert detected_events(session, "ANOTHER_CAFE") == []
 

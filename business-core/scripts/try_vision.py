@@ -69,7 +69,7 @@ def main() -> None:
     except PlannerUnavailableError as error:
         print(f"Can't run: {error}")
         return
-    model = get_settings().planner_model
+    model = get_settings().vision_model
     print(f"Model: {model}")
     results = {
         "model": model,

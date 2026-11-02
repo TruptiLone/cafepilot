@@ -382,7 +382,14 @@ def plan_query(
         ]
     started = time.monotonic()
     try:
-        response = client.chat.completions.create(model=model, messages=messages, temperature=0)
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0,
+            # Without these, Wonder reasons ~3x longer and runs past the 60s timeout.
+            reasoning_effort="high",
+            max_tokens=16384,
+        )
     except Exception as error:  # openai.APIError, timeouts, connection failures
         _log_call(
             {

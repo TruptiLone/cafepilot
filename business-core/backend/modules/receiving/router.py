@@ -228,7 +228,7 @@ def add_slip(receipt_id: str, body: ImageIn, database_session: Session = Depends
     """Muse reads the packing slip photo; code matches it to the order."""
     receipt = _load(database_session, receipt_id)
     image, mime = _image(body, "slip")
-    model = get_settings().planner_model
+    model = get_settings().vision_model
     try:
         slip, _ = read_slip(client, model, image, mime)
     except VisionError as error:
@@ -244,7 +244,7 @@ def add_photo(receipt_id: str, body: ImageIn, database_session: Session = Depend
     """Muse counts what it can see in the delivery photo; code compares with the slip and the order."""
     receipt = _load(database_session, receipt_id)
     image, mime = _image(body, "photo")
-    model = get_settings().planner_model
+    model = get_settings().vision_model
     try:
         photo, _ = read_photo(client, model, image, mime)
     except VisionError as error:

@@ -160,6 +160,11 @@ export type ChatAnswer = {
   rows: ChatRow[];
   /** Small lines after the rows, e.g. items with no usable count. */
   notes?: string[];
+  /** The reply to show and speak: Spark's sentences when every number checked out, else the code answer. */
+  reply?: string | null;
+  reply_by?: "muse" | "code";
+  /** Up to two next steps chosen by code: "ask" is another question, "plan" hands off to the plan flow. */
+  follow_ups?: { label: string; kind: "ask" | "plan"; text: string }[];
   lookups: { action: string; summary: string | null; error: string | null }[];
   plan_request: string | null;
 };

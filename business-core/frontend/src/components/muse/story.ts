@@ -363,11 +363,11 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
   // Edges between boxes from the real step dependencies.
   const edgeKey = new Set<string>();
   const edges: Edge[] = [];
-  const add = (from: string, to: string, dashed = false) => {
+  const add = (from: string, to: string, dashed = false, label?: string) => {
     const key = `${from}>${to}`;
     if (from === to || edgeKey.has(key)) return;
     edgeKey.add(key);
-    edges.push({ from, to, dashed });
+    edges.push({ from, to, dashed, ...(label ? { label } : {}) });
   };
   for (const step of run.nodes) {
     const to = boxOf.get(step.node_id);
@@ -377,14 +377,23 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
       if (from) add(from, to);
     }
   }
-  for (const box of boxes) {
-    if (box.id !== "event" && !edges.some((e) => e.to === box.id)) add("event", box.id);
-  }
   // Decisions reading data that a group produced without an explicit $ref still depend on it (safety edges).
   for (const e of run.edges) {
     const from = boxOf.get(e.source);
     const to = boxOf.get(e.target);
     if (from && to) add(from, to);
+  }
+  // Boxes nothing feeds into: the forecast hangs off the event, and the rest hang off the forecast so the
+  // owner reads event -> busier day -> what to get ready. Staff doesn't really use the forecast (staffing
+  // targets come from café policy for the event hours), so these are presentation edges: dashed and
+  // labelled, unlike the solid edges from real dependencies. Without a forecast box, they hang off the event.
+  const reaches = (from: string, to: string, seen = new Set<string>()): boolean =>
+    from === to || (!seen.has(from) && (seen.add(from), edges.some((e) => e.from === from && reaches(e.to, to, seen))));
+  const forecast = boxes.find((b) => b.kind === "demand");
+  for (const box of boxes) {
+    if (box.id === "event" || edges.some((e) => e.to === box.id)) continue;
+    if (forecast && box !== forecast && !reaches(box.id, forecast.id)) add(forecast.id, box.id, true, "event hours");
+    else add("event", box.id);
   }
 
   // Levels: longest path from the event; decisions share the bottom row.

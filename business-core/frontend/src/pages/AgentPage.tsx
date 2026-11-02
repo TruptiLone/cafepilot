@@ -2,14 +2,13 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { Link, useSearchParams } from "react-router-dom";
 import {
   type AgentRun,
-  type CafeStatus,
   type DetectedEvent,
+  type PlanState,
   type Planning,
   type RunStep,
   AgentApiError,
   decideAll,
   decideStep,
-  getCafeStatus,
   getRun,
   listEvents,
   replanStep,
@@ -17,7 +16,6 @@ import {
   startRun,
 } from "../api/agent";
 import StepDetail from "../components/agent/StepDetail";
-import CafeStatusPanel, { PLAN_STATE } from "../components/muse/CafeStatusPanel";
 import PlanMap from "../components/muse/PlanMap";
 import StoryGraph from "../components/muse/StoryGraph";
 import { planCounts } from "../components/muse/stages";
@@ -25,7 +23,15 @@ import { buildStory, storyClosing } from "../components/muse/story";
 
 const POLL_MS = 2000;
 const VIEW_KEY = "cafepilot-plan-view";
-const FOLD_KEY = "cafepilot-status-folded";
+
+const PLAN_STATE: Record<PlanState, [string, string]> = {
+  new: ["neutral", "New"],
+  checking: ["run", "Checking"],
+  needs_ok: ["wait", "Needs your OK"],
+  waiting: ["wait", "Waiting on reply"],
+  planned: ["done", "Planned"],
+  issues: ["no", "Needs attention"],
+};
 
 type View = "owner" | "technical";
 type Toast = { id: number; tone: "good" | "bad" | "wait"; who: string; title: string; text: string };
@@ -73,7 +79,7 @@ function eventLine(event: DetectedEvent) {
   return `${fmt(event.starts_at, { weekday: "short", month: "short", day: "numeric" })} · ${fmt(event.starts_at, { hour: "numeric" })}–${fmt(event.ends_at, { hour: "numeric" })}${miles} · ${feel}`;
 }
 
-/** Everything that can change what the café panel shows or what a box says. */
+/** Everything that can change an event's plan state or what a box says. */
 function signature(runs: (AgentRun | null | undefined)[]) {
   return runs
     .filter(Boolean)
@@ -103,8 +109,6 @@ function AgentPage() {
   const eventId = searchParams.get("event");
 
   const [events, setEvents] = useState<DetectedEvent[]>([]);
-  const [status, setStatus] = useState<CafeStatus | null>(null);
-  const [statusError, setStatusError] = useState<string | null>(null);
   const [run, setRun] = useState<AgentRun | null>(null);
   const [children, setChildren] = useState<Record<string, AgentRun>>({});
   const [runError, setRunError] = useState<string | null>(null);
@@ -113,7 +117,6 @@ function AgentPage() {
   const [rejectedPlanning, setRejectedPlanning] = useState<Planning | null>(null);
   const [request, setRequest] = useState("");
   const [view, setView] = useState<View>(() => (readPref(VIEW_KEY) === "technical" ? "technical" : "owner"));
-  const [folded, setFolded] = useState(() => readPref(FOLD_KEY) === "1");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [replanning, setReplanning] = useState<string | null>(null);
@@ -128,20 +131,6 @@ function AgentPage() {
     listEvents()
       .then(setEvents)
       .catch(() => setEvents([]));
-  }, []);
-
-  const statusRequest = useRef(0);
-  const refreshStatus = useCallback(() => {
-    const ticket = ++statusRequest.current;
-    getCafeStatus()
-      .then((next) => {
-        if (ticket !== statusRequest.current) return; // a newer refresh is on its way
-        setStatus(next);
-        setStatusError(null);
-      })
-      .catch((error) => {
-        if (ticket === statusRequest.current) setStatusError(errorMessage(error));
-      });
   }, []);
 
   useEffect(refreshEvents, [refreshEvents]);
@@ -201,12 +190,11 @@ function AgentPage() {
     return () => window.clearTimeout(timer);
   }, [run, children, childIds]);
 
-  // The café panel follows the plan.
+  // Event plan states follow the plan.
   const sig = signature([run, ...childIds.map((id) => children[id])]);
   useEffect(() => {
-    refreshStatus();
     if (sig) refreshEvents();
-  }, [sig, refreshStatus, refreshEvents]);
+  }, [sig, refreshEvents]);
 
   // Supplier and staff replies become notifications.
   useEffect(() => {
@@ -261,13 +249,6 @@ function AgentPage() {
   function chooseView(next: View) {
     setView(next);
     writePref(VIEW_KEY, next);
-  }
-
-  function toggleFold() {
-    setFolded((f) => {
-      writePref(FOLD_KEY, f ? "0" : "1");
-      return !f;
-    });
   }
 
   async function plan(start: () => ReturnType<typeof startRun>, forEvent: string | null) {
@@ -391,11 +372,10 @@ function AgentPage() {
       : run?.waiting_on && run.waiting_on.length > 0
         ? ["waiting", `Waiting on ${run.waiting_on.join(" and ")}`]
         : ["watching", "Watching for events"];
-  const highlight = planningFor || run?.status === "running" ? "running" : anyWaiting ? "waiting" : "none";
   const showPlan = !!run || !!planningFor || !!rejectedPlanning;
 
   return (
-    <section className={`page page--muse mz${folded ? " is-folded" : ""}`} aria-label="Ask CaféPilot">
+    <section className="page page--muse mz" aria-label="Ask CaféPilot">
       <div className="mz-muse">
         <header className="mz-pane-head">
           <div className="mz-mark" aria-hidden="true">
@@ -613,8 +593,6 @@ function AgentPage() {
           </div>
         </form>
       </div>
-
-      <CafeStatusPanel status={status} error={statusError} highlight={highlight} collapsed={folded} onToggle={toggleFold} />
 
       <div className="mz-toasts" aria-live="polite">
         {toasts.map((t) => (

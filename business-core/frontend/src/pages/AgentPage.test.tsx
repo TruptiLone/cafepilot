@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { AgentRun, CafeStatus, DetectedEvent, StartRunResponse } from "../api/agent";
+import type { AgentRun, DetectedEvent, StartRunResponse } from "../api/agent";
 import AgentPage from "./AgentPage";
 
 function step(overrides: Partial<AgentRun["nodes"][number]>): AgentRun["nodes"][number] {
@@ -116,34 +116,6 @@ const completedRun: AgentRun = {
   ),
 };
 
-const cafeStatus: CafeStatus = {
-  cafe_id: "CAFE001",
-  cafe_name: "CafePilot Demo Cafe",
-  as_of: "2026-10-30T01:00:00Z",
-  greeting: "Good evening, CafePilot Demo Cafe.",
-  date_label: "Thursday, October 29",
-  focus_event_id: "EVT_1",
-  focus_event_name: "Santa Clara Farmers Market",
-  kpis: {
-    stock: { label: "Short for Sunday", value: "2", of: null, note: "Whole milk & oat milk", tone: "warn" },
-    coverage: { label: "Sunday event coverage", value: "2", of: "/ 4", note: "2 short", tone: "warn" },
-    approvals: { label: "Pending approvals", value: "1", of: null, note: "From Muse", tone: "warn" },
-    sales: { label: "Today's sales", value: "$776", of: null, note: "+1% vs last Thu", tone: "good" },
-  },
-  inventory: [
-    { ingredient_id: "WHOLE_MILK", name: "Whole Milk", unit: "mL", on_hand: "3000", arriving: "36000", on_order: "0",
-      on_order_status: null, needed: "40218", shortfall: "1218", status: "short", note: "Needs 40.2 L through Sun · 36 L arriving" },
-  ],
-  coverage: [
-    { date: "2026-11-01", label: "Sun, Nov 1", shifts: 3, is_event_day: true,
-      halves: [{ label: "AM", staffed: 2, required: 4 }, { label: "PM", staffed: 3, required: 4 }] },
-  ],
-  events: [
-    { event_id: "EVT_1", name: "Santa Clara Farmers Market", starts_at: "2026-11-01T16:00:00Z", ends_at: "2026-11-01T22:00:00Z",
-      note: "8 AM–2 PM · usually +35 drinks", plan_state: "new", run_id: null, latest_run_id: null },
-  ],
-};
-
 const marketEvent: DetectedEvent = {
   event_id: "EVT_1", title: "Santa Clara Farmers Market", category: "farmers_market",
   starts_at: "2026-11-01T16:00:00Z", ends_at: "2026-11-01T22:00:00Z",
@@ -156,11 +128,10 @@ const marketEvent: DetectedEvent = {
 
 type Route = (url: string, init?: RequestInit) => Promise<Response> | undefined;
 
-/** Fetch stub: café status and events always answer; `route` handles the rest. */
+/** Fetch stub: events always answer; `route` handles the rest. */
 function stubFetch(route: Route, events: DetectedEvent[] = []) {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.startsWith("/api/v1/agent/status")) return jsonResponse(cafeStatus);
     if (url.startsWith("/api/v1/agent/events?")) return jsonResponse(events);
     return route(url, init) ?? jsonResponse({ detail: "not found" }, 404);
   });
@@ -400,15 +371,12 @@ describe("AgentPage", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("MODEL_API_KEY"));
   });
 
-  it("shows the café panel and folds it into badges", async () => {
-    mockApi();
-    renderPage();
-    const panel = await screen.findByRole("region", { name: "Café status" });
-    expect(await within(panel).findByText("Short 1.2 L")).toBeTruthy();
-    await userEvent.click(within(panel).getByRole("button", { name: "Hide café status" }));
-    const mini = screen.getByRole("region", { name: "Café status" });
-    expect(within(mini).getByText("2/4")).toBeTruthy();
-    expect(window.localStorage.getItem("cafepilot-status-folded")).toBe("1");
+  it("gives the plan the whole page: no café status panel", async () => {
+    const fetchMock = mockApi();
+    renderPage("/agent?run=RUN-1");
+    await decisionBox("Add Ethan");
+    expect(screen.queryByRole("region", { name: "Café status" })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).startsWith("/api/v1/agent/status"))).toBe(false);
   });
 
   it("when a supplier says no, Muse finds another way and the new order grows under it", async () => {

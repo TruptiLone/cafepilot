@@ -16,7 +16,9 @@ import {
   startRun,
 } from "../api/agent";
 import StepDetail from "../components/agent/StepDetail";
+import ChatPanel from "../components/muse/ChatPanel";
 import PlanMap from "../components/muse/PlanMap";
+import { type SpeechRecognitionLike, speechRecognition } from "../components/muse/speech";
 import StoryGraph from "../components/muse/StoryGraph";
 import { planCounts } from "../components/muse/stages";
 import { buildStory, modelName, storyClosing } from "../components/muse/story";
@@ -87,20 +89,6 @@ function signature(runs: (AgentRun | null | undefined)[]) {
     .join("#");
 }
 
-type SpeechRecognitionLike = {
-  lang: string;
-  interimResults: boolean;
-  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
-  onend: (() => void) | null;
-  start: () => void;
-  stop: () => void;
-};
-
-function speechRecognition(): (new () => SpeechRecognitionLike) | null {
-  const w = window as unknown as Record<string, unknown>;
-  return (w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null) as (new () => SpeechRecognitionLike) | null;
-}
-
 const FINAL_STAGES = /^(Confirmed|Rejected|Accepted|Declined)/;
 
 function AgentPage() {
@@ -118,6 +106,7 @@ function AgentPage() {
   // How long the model took, per run: the API reports it only when the plan comes back.
   const [planTimes, setPlanTimes] = useState<Record<string, number>>({});
   const [request, setRequest] = useState("");
+  const [tab, setTab] = useState<"events" | "chat">("events");
   const [view, setView] = useState<View>(() => (readPref(VIEW_KEY) === "technical" ? "technical" : "owner"));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -330,6 +319,12 @@ function AgentPage() {
     }
   }
 
+  // A change asked in chat goes to the normal plan flow (it still waits for the owner's OK).
+  function planFromChat(text: string) {
+    setTab("events");
+    void plan(() => startRun(text), null);
+  }
+
   async function handleAsk(event: FormEvent) {
     event.preventDefault();
     const query = request.trim();
@@ -368,6 +363,8 @@ function AgentPage() {
   const waitingChild = Object.values(children).some((c) => c.status === "awaiting_approval");
   const selectedStep = run?.nodes.find((n) => n.node_id === selectedId) ?? null;
   const selectedEvent = events.find((e) => e.event_id === eventId) ?? null;
+  // Chat uses the same reference time as the demo event's plan ("today" = its knowledge time).
+  const chatAsOf = events.find((e) => e.is_demo && e.knowledge_as_of)?.knowledge_as_of;
 
   const anyWaiting = run?.status === "awaiting_approval" || waitingChild;
   // Suppliers and staff we're waiting on, in the plan and in any replan that took over.
@@ -406,15 +403,33 @@ function AgentPage() {
         </header>
 
         <nav className="mz-tabs" aria-label="Muse">
-          <button type="button" className="mz-tab is-on" aria-current="page" onClick={backToEvents}>
+          <button
+            type="button"
+            className={`mz-tab${tab === "events" ? " is-on" : ""}`}
+            aria-current={tab === "events" ? "page" : undefined}
+            onClick={() => {
+              setTab("events");
+              backToEvents();
+            }}
+          >
             Events <span className="mz-tab__n">{events.length}</span>
+          </button>
+          <button
+            type="button"
+            className={`mz-tab${tab === "chat" ? " is-on" : ""}`}
+            aria-current={tab === "chat" ? "page" : undefined}
+            onClick={() => setTab("chat")}
+          >
+            Chat
           </button>
           <Link className="mz-tab" to="/receiving">
             Deliveries
           </Link>
         </nav>
 
-        <div className="mz-scroll">
+        {tab === "chat" && <ChatPanel asOf={chatAsOf} onPlan={planFromChat} />}
+
+        <div className="mz-scroll" hidden={tab === "chat"}>
           {!showPlan && (
             <section className="mz-events" aria-label="Events Muse found">
               <p className="mz-label">
@@ -557,7 +572,7 @@ function AgentPage() {
           )}
         </div>
 
-        <form className="mz-cmd" onSubmit={handleAsk}>
+        <form className="mz-cmd" onSubmit={handleAsk} hidden={tab === "chat"}>
           <div className="mz-cmd__bar">
             <input
               type="text"

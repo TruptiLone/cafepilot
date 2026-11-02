@@ -140,6 +140,36 @@ const json = (body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
+export type ChatRow = {
+  name: string;
+  quantity: string | null;
+  unit: string | null;
+  as_of: string | null;
+  estimated: boolean;
+  detail: string | null;
+};
+
+export type ChatAnswer = {
+  intent: "answer" | "needs_plan" | "out_of_scope";
+  message: string;
+  channel: "text" | "voice";
+  model: string;
+  latency_ms: number;
+  as_of: string;
+  lines: string[];
+  rows: ChatRow[];
+  lookups: { action: string; summary: string | null; error: string | null }[];
+  plan_request: string | null;
+};
+
+/** Ask Muse a question: read-only lookups; every number in the answer comes from code. */
+export function askMuse(message: string, channel: "text" | "voice", asOf?: string): Promise<ChatAnswer> {
+  return requestJson<ChatAnswer>(
+    "/api/v1/agent/chat",
+    json({ message, channel, cafe_id: ACTIVE_CAFE_ID, ...(asOf ? { as_of: asOf } : {}) }),
+  );
+}
+
 export function startRun(query: string, asOf?: string): Promise<StartRunResponse> {
   return requestJson<StartRunResponse>(
     "/api/v1/agent/runs",
@@ -187,6 +217,8 @@ export type DetectedEvent = {
   source: string;
   is_demo: boolean;
   muse_message: string;
+  knowledge_as_of?: string;
+  planner_model?: string;
   run_id?: string | null;
   latest_run_id?: string | null;
   plan_state?: PlanState;

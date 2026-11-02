@@ -448,13 +448,37 @@ describe("AgentPage", () => {
     expect(screen.queryByText("In short")).toBeNull();
   });
 
-  it("shows only the tabs that work: Events and Deliveries", async () => {
+  it("shows only the tabs that work: Events, Chat and Deliveries", async () => {
     mockApi();
     renderPage();
     const tabs = within(await screen.findByRole("navigation", { name: "Muse" }));
     expect(tabs.getByRole("button", { name: /Events/ })).toBeTruthy();
+    expect(tabs.getByRole("button", { name: "Chat" })).toBeTruthy();
     expect(tabs.getByRole("link", { name: "Deliveries" })).toBeTruthy();
     for (const soon of ["Chats", "Insta post", "Fix-it"]) expect(tabs.queryByText(soon)).toBeNull();
+  });
+
+  it("chat asks with the demo event's reference time, and Plan it starts a plan", async () => {
+    const demoEvent = { ...marketEvent, knowledge_as_of: "2026-10-29T18:00:00-07:00" };
+    const fetchMock = stubFetch((url, init) => {
+      if (url === "/api/v1/agent/chat")
+        return jsonResponse({ intent: "needs_plan", message: "order more oat milk", channel: "text", model: "muse-spark-1.3",
+          latency_ms: 1800, as_of: demoEvent.knowledge_as_of, lines: [], rows: [], lookups: [], plan_request: "order more oat milk" });
+      if (url === "/api/v1/agent/runs" && init?.method === "POST") return jsonResponse({ planning: planning(), run });
+      if (url.startsWith("/api/v1/agent/runs/RUN-1")) return jsonResponse(run);
+      return undefined;
+    }, [demoEvent]);
+    renderPage();
+    await screen.findByText("Santa Clara Farmers Market");
+    await userEvent.click(screen.getByRole("button", { name: "Chat" }));
+    expect(screen.getByLabelText("Ask Muse").closest("form")!.hidden).toBe(true);  // the plan bar steps aside
+    await userEvent.type(screen.getByLabelText("Ask Muse a question"), "order more oat milk{enter}");
+    const chatCall = fetchMock.mock.calls.find(([url]) => url === "/api/v1/agent/chat");
+    expect(JSON.parse(String(chatCall?.[1]?.body))).toMatchObject({ message: "order more oat milk", as_of: demoEvent.knowledge_as_of });
+    await userEvent.click(await screen.findByRole("button", { name: "Plan it" }));
+    const planCall = fetchMock.mock.calls.find(([url, init]) => url === "/api/v1/agent/runs" && init?.method === "POST");
+    expect(JSON.parse(String(planCall?.[1]?.body))).toMatchObject({ query: "order more oat milk" });
+    expect(await decisionBox("Add Ethan")).toBeTruthy();  // back on the plan view
   });
 
   it("gives the plan the whole page: no café status panel", async () => {

@@ -55,7 +55,13 @@ const marketRun: AgentRun = {
   nodes: [
     step({ node_id: "demand", action: "estimate_event_demand" }),
     step({ node_id: "stock", action: "get_stock_estimates" }),
-    step({ node_id: "shortfall", action: "calculate_shortfall", depends_on: ["demand", "stock"] }),
+    step({ node_id: "shortfall", action: "calculate_shortfall", depends_on: ["demand", "stock"], result: {
+      lines: [
+        { name: "Oat Milk", unit: "mL", status: "short", shortfall: "4100", packs: 1, pack_name: "case of 6 × 1 L", needed_with_buffer: "9000" },
+        { name: "Whole Milk", unit: "mL", status: "short", shortfall: "1200", packs: 1, pack_name: "case of 6 × 1 L", needed_with_buffer: "40000" },
+        { name: "Almond Milk", unit: "mL", status: "enough", shortfall: null, packs: null, pack_name: "case of 6 × 1 L", needed_with_buffer: "350" },
+      ],
+    } }),
     step({ node_id: "suppliers", action: "find_suppliers", depends_on: ["shortfall"] }),
     step({ node_id: "order", action: "propose_supplier_order", depends_on: ["shortfall", "suppliers"], ...write }),
     step({ node_id: "coverage", action: "coverage_report" }),
@@ -65,8 +71,20 @@ const marketRun: AgentRun = {
   ],
 };
 
-const edge = (story: ReturnType<typeof buildStory>, from: string, to: string) =>
-  story.edges.find((e) => e.from === from && e.to === to);
+type Story = ReturnType<typeof buildStory>;
+
+const edge = (story: Story, from: string, to: string) => story.edges.find((e) => e.from === from && e.to === to);
+
+/** One read per owner box kind: ingredients, staff, sales and "other checks". */
+const MIDDLE = ["get_stock_estimates", "coverage_report", "sales_summary", "check_weather"];
+
+function expectNoOverlap(story: Story) {
+  for (let level = 0; level < story.levels; level++) {
+    const cols = story.boxes.filter((b) => b.level === level).map((b) => b.col).sort((a, b) => a - b);
+    cols.slice(1).forEach((col, i) => expect(col - cols[i]).toBeGreaterThanOrEqual(2)); // a box spans two half-columns
+  }
+  expect(Math.min(...story.boxes.map((b) => b.col))).toBe(0);
+}
 
 describe("buildStory", () => {
   it("reads event, then the busier day, then what to get ready", () => {
@@ -93,6 +111,52 @@ describe("buildStory", () => {
     const decisions = story.boxes.filter((b) => b.id.startsWith("d:"));
     expect(new Set(decisions.map((d) => d.level)).size).toBe(1);
     expect(decisions[0].level).toBeGreaterThan(box("suppliers").level);
+  });
+
+  it("centres the event over the forecast and balances the diagram", () => {
+    const story = buildStory(marketRun);
+    const box = (id: string) => story.boxes.find((b) => b.id === id)!;
+    expect(box("event").col).toBe(box("demand").col);
+    expect(box("event").col + 1).toBe(story.cols / 2);
+    expectNoOverlap(story);
+  });
+
+  it.each([2, 3, 4])("centres the forecast over %i boxes in the middle row", (n) => {
+    const reads = MIDDLE.slice(0, n);
+    const story = buildStory({
+      ...marketRun,
+      nodes: [
+        step({ node_id: "demand", action: "estimate_event_demand" }),
+        ...reads.map((action) => step({ node_id: action, action })),
+        ...reads.map((action) => step({ node_id: `do_${action}`, action: "record_inventory_movement", depends_on: [action], ...write })),
+      ],
+    });
+    const box = (id: string) => story.boxes.find((b) => b.id === id)!;
+    const middle = story.boxes.filter((b) => b.level === 2);
+    expect(middle).toHaveLength(n);
+    expect(story.cols).toBe(n * 2);
+    expect(box("event").col).toBe(box("demand").col);
+    expect(box("demand").col + 1).toBe(story.cols / 2);
+    expectNoOverlap(story);
+  });
+
+  it("names each item per case in the order line, from the shortfall lines", () => {
+    const story = buildStory(marketRun);
+    expect(story.summary[0]).toBe(
+      "Short 4.1 L oat milk & 1.2 L whole milk. 1 case oat milk (6 × 1 L) and 1 case whole milk (6 × 1 L) cover it.",
+    );
+  });
+
+  it("counts several cases, and falls back to the pack name as given", () => {
+    const shortfall = marketRun.nodes.find((n) => n.node_id === "shortfall")!;
+    const story = buildStory({
+      ...marketRun,
+      nodes: marketRun.nodes.map((n) => (n === shortfall ? { ...n, result: { lines: [
+        { name: "Oat Milk", unit: "mL", status: "short", shortfall: "9000", packs: 2, pack_name: "case of 6 × 1 L", needed_with_buffer: "9000" },
+        { name: "Espresso Beans", unit: "g", status: "short", shortfall: "500", packs: 1, pack_name: "bag", needed_with_buffer: "500" },
+      ] } } : n)),
+    });
+    expect(story.summary[0]).toBe("Short 9 L oat milk & 0.5 kg espresso beans. 2 cases oat milk (6 × 1 L) and 1 bag espresso beans cover it.");
   });
 
   it("hangs boxes off the event when there is no forecast", () => {

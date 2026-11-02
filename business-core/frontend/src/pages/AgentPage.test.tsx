@@ -371,6 +371,27 @@ describe("AgentPage", () => {
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("MODEL_API_KEY"));
   });
 
+  it("says Meta Muse models before any plan, then the model that made the plan", async () => {
+    stubFetch(() => undefined, [marketEvent]);
+    renderPage();
+    expect(await screen.findByText("Powered by Meta Muse models")).toBeTruthy();
+    cleanup();
+
+    stubFetch((url) => (url.startsWith("/api/v1/agent/runs/RUN-1") ? jsonResponse({ ...run, model: "muse-wonder-1.0" }) : undefined));
+    renderPage("/agent?run=RUN-1");
+    expect(await screen.findByText("Powered by Muse Wonder 1.0")).toBeTruthy();
+    expect(screen.getByText(/Planned by muse-wonder-1\.0/)).toBeTruthy();
+  });
+
+  it("shows only the tabs that work: Events and Deliveries", async () => {
+    mockApi();
+    renderPage();
+    const tabs = within(await screen.findByRole("navigation", { name: "Muse" }));
+    expect(tabs.getByRole("button", { name: /Events/ })).toBeTruthy();
+    expect(tabs.getByRole("link", { name: "Deliveries" })).toBeTruthy();
+    for (const soon of ["Chats", "Insta post", "Fix-it"]) expect(tabs.queryByText(soon)).toBeNull();
+  });
+
   it("gives the plan the whole page: no café status panel", async () => {
     const fetchMock = mockApi();
     renderPage("/agent?run=RUN-1");

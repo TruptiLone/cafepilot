@@ -59,6 +59,14 @@ function writePref(key: string, value: string) {
 const fmt = (value: string, options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat("en-US", { ...options, timeZone: "America/Los_Angeles" }).format(new Date(value));
 
+/** "muse-wonder-1.0" -> "Muse Wonder 1.0": the model id recorded on the run, made readable. */
+function modelName(model: string): string {
+  return model
+    .split("-")
+    .map((part) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ");
+}
+
 function eventChip(event: DetectedEvent) {
   return fmt(event.starts_at, { month: "short", day: "numeric" }).toUpperCase();
 }
@@ -387,7 +395,7 @@ function AgentPage() {
           </div>
           <div>
             <h1 className="mz-head-title">Muse</h1>
-            <div className="mz-muted">Powered by Muse Spark</div>
+            <div className="mz-muted">Powered by {run ? modelName(run.model) : "Meta Muse models"}</div>
           </div>
           <div className="mz-live" data-live={live[0]} role="status">
             <i />
@@ -399,18 +407,9 @@ function AgentPage() {
           <button type="button" className="mz-tab is-on" aria-current="page" onClick={backToEvents}>
             Events <span className="mz-tab__n">{events.length}</span>
           </button>
-          <span className="mz-tab is-soon" aria-disabled="true">
-            Chats
-          </span>
-          <span className="mz-tab is-soon" aria-disabled="true">
-            Insta post
-          </span>
           <Link className="mz-tab" to="/receiving">
             Deliveries
           </Link>
-          <span className="mz-tab is-soon" aria-disabled="true">
-            Fix-it
-          </span>
         </nav>
 
         <div className="mz-scroll">

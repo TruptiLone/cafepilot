@@ -132,7 +132,8 @@ function DetailCard({ box, run }: { box: Box; run: AgentRun | undefined }) {
 /** The owner view of a plan: a vertical graph, decisions inside it, details on hover (click to pin). */
 function StoryGraph({ story, runs, busy, reveal, onDecide, onOpenRun }: StoryGraphProps) {
   const ref = useRef<HTMLDivElement>(null);
-  const [paths, setPaths] = useState<{ d: string; dashed: boolean; label?: string; lx: number; ly: number }[]>([]);
+  const [paths, setPaths] = useState<{ d: string; dashed: boolean }[]>([]);
+  const [labels, setLabels] = useState<{ text: string; x: number; y: number }[]>([]);
   const [hover, setHover] = useState<string | null>(null);
   const [pinned, setPinned] = useState<string | null>(null);
   const open = pinned ?? hover;
@@ -141,21 +142,47 @@ function StoryGraph({ story, runs, busy, reveal, onDecide, onOpenRun }: StoryGra
     const el = ref.current;
     if (!el) return;
     const m = el.getBoundingClientRect();
+    const rect = (id: string) => {
+      const box = el.querySelector<HTMLElement>(`[data-box="${id.replace(/"/g, "\\\"")}"]`);
+      if (!box) return null;
+      const r = box.getBoundingClientRect();
+      return { left: r.left - m.left, right: r.right - m.left, top: r.top - m.top, bottom: r.bottom - m.top };
+    };
     const out: typeof paths = [];
+    const ends = new Map<string, { text: string; x1: number; y1: number; x2: number[]; y2: number[] }>();
     for (const e of story.edges) {
-      const a = el.querySelector<HTMLElement>(`[data-box="${e.from.replace(/"/g, "\\\"")}"]`);
-      const b = el.querySelector<HTMLElement>(`[data-box="${e.to.replace(/"/g, "\\\"")}"]`);
-      if (!a || !b) continue;
-      const ra = a.getBoundingClientRect();
-      const rb = b.getBoundingClientRect();
-      const x1 = ra.left - m.left + ra.width / 2;
-      const y1 = ra.bottom - m.top + 2;
-      const x2 = rb.left - m.left + rb.width / 2;
-      const y2 = rb.top - m.top - 3;
+      const ra = rect(e.from);
+      const rb = rect(e.to);
+      if (!ra || !rb) continue;
+      const x1 = (ra.left + ra.right) / 2;
+      const y1 = ra.bottom + 2;
+      const x2 = (rb.left + rb.right) / 2;
+      const y2 = rb.top - 3;
       const k = (y2 - y1) * 0.55;
-      out.push({ d: `M${x1} ${y1} C${x1} ${y1 + k},${x2} ${y2 - k},${x2} ${y2}`, dashed: !!e.dashed, label: e.label, lx: (x1 + x2) / 2 + 8, ly: (y1 + y2) / 2 });
+      out.push({ d: `M${x1} ${y1} C${x1} ${y1 + k},${x2} ${y2 - k},${x2} ${y2}`, dashed: !!e.dashed });
+      if (!e.label) continue;
+      // The same label on several edges from one box is shown once, where they split.
+      const key = `${e.from}>${e.label}`;
+      const group = ends.get(key) ?? { text: e.label, x1, y1, x2: [], y2: [] };
+      group.x2.push(x2);
+      group.y2.push(y2);
+      ends.set(key, group);
+    }
+    const boxes = story.boxes.map((b) => rect(b.id)).filter((r): r is NonNullable<typeof r> => !!r);
+    const next: typeof labels = [];
+    for (const g of ends.values()) {
+      const top = Math.min(...g.y2);
+      const shared = g.x2.length > 1;
+      const x = shared ? g.x1 : (g.x1 + g.x2[0]) / 2;
+      let y = (g.y1 + top) / 2;
+      // Keep the pill (about 6.5px a character, 18px tall) clear of every box: fall back to just above the target.
+      const half = (g.text.length * 6.5 + 16) / 2;
+      const hits = (cy: number) => boxes.some((r) => x + half > r.left && x - half < r.right && cy + 9 > r.top && cy - 9 < r.bottom);
+      if (hits(y)) y = top - 12;
+      next.push({ text: g.text, x, y });
     }
     setPaths(out);
+    setLabels(next);
   }, [story]);
 
   useLayoutEffect(() => {
@@ -171,7 +198,7 @@ function StoryGraph({ story, runs, busy, reveal, onDecide, onOpenRun }: StoryGra
     <div
       className="sg"
       ref={ref}
-      style={{ gridTemplateColumns: `repeat(${story.lanes}, minmax(0, 290px))`, gridTemplateRows: `repeat(${story.levels}, auto)` }}
+      style={{ gridTemplateColumns: `repeat(${story.cols}, minmax(0, 173px))`, gridTemplateRows: `repeat(${story.levels}, auto)` }}
     >
       <svg className="sg-wires" aria-hidden="true">
         <defs>
@@ -192,16 +219,15 @@ function StoryGraph({ story, runs, busy, reveal, onDecide, onOpenRun }: StoryGra
               strokeDasharray={p.dashed ? "4 4" : undefined}
               markerEnd={`url(#${p.dashed ? "sg-g" : "sg-a"})`}
             />
-            {p.label && (
-              <text x={p.lx} y={p.ly} fontSize="11" fill="#6e747c">
-                {p.label}
-              </text>
-            )}
           </g>
         ))}
       </svg>
+      {labels.map((l) => (
+        <span key={`${l.text}@${l.x},${l.y}`} className="sg-elabel" aria-hidden="true" style={{ left: l.x, top: l.y }}>
+          {l.text}
+        </span>
+      ))}
       {story.boxes.map((box) => {
-        const spanAll = box.kind === "event" || box.kind === "share";
         const run = runs[box.runId];
         const isOpen = open === box.id;
         const hasDetail = box.kind === "decision" ? box.steps.length > 0 : !!box.detail;
@@ -213,7 +239,7 @@ function StoryGraph({ story, runs, busy, reveal, onDecide, onOpenRun }: StoryGra
             className={`sg-box sg-box--${box.kind}${isOpen ? " is-open" : ""}${reveal ? " is-reveal" : ""}`}
             data-s={box.state}
             style={{
-              gridColumn: spanAll ? `1 / span ${story.lanes}` : box.lane + 1,
+              gridColumn: `${box.col + 1} / span 2`,
               gridRow: box.level + 1,
               ["--d" as string]: `${box.level * 380}ms`,
             }}

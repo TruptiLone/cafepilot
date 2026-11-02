@@ -25,11 +25,13 @@ export type Box = {
   detail: Detail | null;
   level: number;
   lane: number;
+  /** Left edge in half-box columns (a box spans two), so a parent can sit between two children. */
+  col: number;
   runId: string;
 };
 
 export type Edge = { from: string; to: string; dashed?: boolean; label?: string };
-export type Story = { boxes: Box[]; edges: Edge[]; lanes: number; levels: number; summary: string[] };
+export type Story = { boxes: Box[]; edges: Edge[]; lanes: number; cols: number; levels: number; summary: string[] };
 
 const GROUP_OF: Record<string, BoxKind> = {
   estimate_event_demand: "demand",
@@ -67,9 +69,17 @@ function litres(value: unknown, unit: unknown): string {
   return `${n.toLocaleString("en-US", { maximumFractionDigits: 1 })} ${unit ?? ""}`.trim();
 }
 
-function list(names: string[]): string {
+function list(names: string[], and = "&"): string {
   if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} & ${names[names.length - 1]}`;
+  return `${names.slice(0, -1).join(", ")} ${and} ${names[names.length - 1]}`;
+}
+
+/** "1 case oat milk (6 × 1 L)" from a shortfall line's packs and pack_name ("case of 6 × 1 L"). */
+function packLine(line: Row): string {
+  const packs = Number(line.packs ?? 1);
+  const name = String(line.name).toLowerCase();
+  const [unit, contents] = String(line.pack_name ?? "pack").split(/ of (.+)/);
+  return `${packs} ${unit}${packs > 1 ? "s" : ""} ${name}${contents ? ` (${contents})` : ""}`;
 }
 
 function groupState(steps: RunStep[]): BoxState {
@@ -316,6 +326,7 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
     detail: null,
     level: 0,
     lane: 0,
+    col: 0,
     runId: run.run_id,
   };
   boxes.push(root);
@@ -337,7 +348,7 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
                   subtitle: steps.map((s) => s.summary).filter(Boolean)[0] ?? "",
                   detail: null,
                 };
-    const box: Box = { id: kind, kind, state: groupState(steps), steps, level: 0, lane: 0, runId: run.run_id, ...content };
+    const box: Box = { id: kind, kind, state: groupState(steps), steps, level: 0, lane: 0, col: 0, runId: run.run_id, ...content };
     if (!box.detail && steps.some((s) => s.summary))
       box.detail = { title: box.title, rows: steps.map((s) => ({ label: s.action.replaceAll("_", " "), value: s.summary ?? "" })), steps: steps.map((s) => s.action) };
     boxes.push(box);
@@ -355,6 +366,7 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
       detail: null,
       level: 0,
       lane: 0,
+      col: 0,
       runId: run.run_id,
     });
     boxOf.set(step.node_id, id);
@@ -419,7 +431,7 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
         const id = `c:${child.run_id}:${write.node_id}`;
         boxes.push({
           id, kind: "decision", title: decisionTitle(write, child), subtitle: changeLine(write, child),
-          state: decisionState(write), steps: [write], detail: null, level: decisionLevel + 1, lane: 0, runId: child.run_id,
+          state: decisionState(write), steps: [write], detail: null, level: decisionLevel + 1, lane: 0, col: 0, runId: child.run_id,
         });
         edges.push({ from: parentId, to: id, label: "Muse found another way" });
         bottom = decisionLevel + 1;
@@ -428,7 +440,7 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
       const id = `r:${step.node_id}`;
       boxes.push({
         id, kind: "decision", title: step.action === "schedule_shift" ? "Finding someone else" : "Finding another supplier",
-        subtitle: "Muse is planning…", state: "running", steps: [], detail: null, level: decisionLevel + 1, lane: 0, runId: run.run_id,
+        subtitle: "Muse is planning…", state: "running", steps: [], detail: null, level: decisionLevel + 1, lane: 0, col: 0, runId: run.run_id,
       });
       edges.push({ from: parentId, to: id });
       bottom = decisionLevel + 1;
@@ -447,6 +459,7 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
       detail: { title: "Coming next", intro: "Muse drafts a post about the event for your OK. Not connected yet.", rows: [], steps: [] },
       level: bottom + 1,
       lane: 0,
+      col: 0,
       runId: run.run_id,
     });
     const leaves = boxes.filter((b) => b.kind === "decision" && !edges.some((e) => e.from === b.id));
@@ -482,6 +495,36 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
     } else b.lane = laneOf.get(b.id) ?? 0;
   }
 
+  // Columns: each box sits over the middle of the boxes it feeds (bottom row first), so the event is
+  // centred over the forecast and neither side is left empty. Replans and "Share it?" then sit under
+  // the boxes that lead to them. Positions move in half-box steps; boxes in a row never overlap.
+  const byId = new Map(boxes.map((b) => [b.id, b]));
+  const trailing = (b: Box) => b.kind === "share" || b.id.startsWith("c:") || b.id.startsWith("r:");
+  const x = new Map<string, number>();
+  const mean = (values: number[]) => values.reduce((s, v) => s + v, 0) / values.length;
+  const place = (row: Box[], want: (b: Box) => number) => {
+    let prev = -Infinity;
+    for (const { b, w } of row.map((b) => ({ b, w: want(b) })).sort((p, q) => p.w - q.w || p.b.lane - q.b.lane)) {
+      prev = Math.max(Math.round(w * 2) / 2, prev + 1);
+      x.set(b.id, prev);
+    }
+  };
+  for (let l = levels - 1; l >= 0; l--) {
+    place((byLevel.get(l) ?? []).filter((b) => !trailing(b)), (b) => {
+      const fed = edges.map((e) => (e.from === b.id ? byId.get(e.to) : undefined)).filter((c): c is Box => !!c && c.level > b.level && x.has(c.id));
+      return fed.length ? mean(fed.map((c) => x.get(c.id) as number)) : b.lane;
+    });
+  }
+  for (let l = 0; l < levels; l++) {
+    place((byLevel.get(l) ?? []).filter(trailing), (b) => {
+      const from = edges.filter((e) => e.to === b.id && x.has(e.from)).map((e) => x.get(e.from) as number);
+      return from.length ? mean(from) : 0;
+    });
+  }
+  const left = Math.min(...boxes.map((b) => x.get(b.id) ?? 0));
+  for (const b of boxes) b.col = ((x.get(b.id) ?? 0) - left) * 2;
+  const cols = Math.max(...boxes.map((b) => b.col)) + 2;
+
   // Owner-friendly label on the edge into a staff decision.
   const coverage = resultOf(groups.get("staff") ?? [], "coverage_report") as Row | undefined;
   if (coverage) {
@@ -496,7 +539,8 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
     if (lines.length)
       summary.push(
         `Short ${list(lines.map((l) => `${litres(l.shortfall, l.unit)} ${String(l.name).toLowerCase()}`))}. ${list(
-          lines.map((l) => `${l.packs ?? 1} ${String(l.pack_name ?? "pack")}${Number(l.packs) > 1 ? "s" : ""}`),
+          lines.map(packLine),
+          "and",
         )} cover${lines.length === 1 ? "s" : ""} it.`,
       );
     else summary.push("Ingredients are covered.");
@@ -507,5 +551,5 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
   if (sup && sup.state === "done" && sup.title === "Suppliers")
     summary.push(`${sup.subtitle.replaceAll(" · ", " and ")} carry it; suppliers confirm stock when we order.`);
 
-  return { boxes, edges, lanes, levels, summary };
+  return { boxes, edges, lanes, cols, levels, summary };
 }

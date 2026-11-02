@@ -9,13 +9,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
+from functools import lru_cache
 from decimal import ROUND_CEILING, Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.db.config import ENV_FILE
 from backend.models.cafe import Cafe
 from backend.modules.agent.cafe_policies import policies_for
 from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, ShiftOffer
@@ -27,6 +31,19 @@ class SupplierNotFoundError(LookupError):
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class DemoTiming(BaseSettings):
+    """Demo only: hold simulated supplier replies back so "Waiting on <supplier>" stays on screen."""
+
+    model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
+
+    demo_supplier_reply_delay_seconds: int = Field(default=0, ge=0)
+
+
+@lru_cache
+def demo_timing() -> DemoTiming:
+    return DemoTiming()
 
 
 def suppliers(cafe_id: str) -> list[dict[str, Any]]:
@@ -229,7 +246,8 @@ def send_order(
         status="sent",
         requested_delivery_at=requested_delivery_at,
         sent_at=sent_at,
-        respond_at=sent_at + timedelta(seconds=int(supplier.get("respond_after_seconds", 8))),
+        respond_at=sent_at
+        + timedelta(seconds=int(supplier.get("respond_after_seconds", 8)) + demo_timing().demo_supplier_reply_delay_seconds),
         pending_decision="rejected" if problem else "confirmed",
         pending_reason=problem,
         total_cents=total,

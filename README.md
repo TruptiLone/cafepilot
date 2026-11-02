@@ -67,6 +67,14 @@ Open **Ask CaféPilot** and click **Check if we're ready** on the Santa Clara Fa
 Reset before each demo: `PYTHONPATH=. python scripts/seed_event_surge.py --fresh`
 (removes the agent's runs and the changes they made, then reloads the scenario).
 
+Demo only: simulated suppliers answer about 8 seconds after an order is sent. To keep
+"Waiting on <supplier>" on screen longer (for a recording), add this to `business-core/.env`
+and restart uvicorn (`--reload` doesn't pick up `.env` changes):
+
+```bash
+DEMO_SUPPLIER_REPLY_DELAY_SECONDS=30   # extra seconds before a simulated supplier replies (default 0)
+```
+
 ## Tests
 
 ```bash

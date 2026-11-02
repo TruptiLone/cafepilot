@@ -1,7 +1,7 @@
 """Honest statuses for orders, supplier rejection, and Muse replanning (simulated supplier)."""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -16,7 +16,8 @@ from backend.modules.agent.planner import Plan
 from backend.modules.agent.router import get_planner_client
 from backend.modules.agent.validator import validate_plan
 from backend.modules.purchasing.models import PurchaseOrder
-from backend.modules.purchasing.service import settle_due
+from backend.modules.purchasing import service as purchasing_service
+from backend.modules.purchasing.service import DemoTiming, settle_due
 from scripts.seed_event_surge import apply_reset, plan_reset, seed_event_surge
 from tests.test_agent_planner import FakeClient
 
@@ -95,6 +96,25 @@ def test_approved_order_is_sent_then_answered_honestly(session: Session) -> None
         assert body["waiting_on"] == []
     finally:
         app.dependency_overrides.clear()
+
+
+def _reply_wait(session: Session) -> timedelta:
+    run = decide(session, _run(session, _order_plan("WILLOW_RIDGE")).run_id, "order", "approved")
+    order = session.get(PurchaseOrder, next(n for n in run.nodes if n.node_id == "order").result["order_id"])
+    return order.respond_at - order.sent_at
+
+
+def test_suppliers_reply_after_their_usual_time_by_default(session: Session, monkeypatch) -> None:
+    monkeypatch.setattr(purchasing_service, "demo_timing", lambda: DemoTiming(demo_supplier_reply_delay_seconds=0))
+    assert _reply_wait(session) == timedelta(seconds=8)
+    assert DemoTiming(_env_file=None).demo_supplier_reply_delay_seconds == 0
+
+
+def test_demo_delay_holds_the_supplier_reply_back(session: Session, monkeypatch) -> None:
+    monkeypatch.setattr(purchasing_service, "demo_timing", lambda: DemoTiming(demo_supplier_reply_delay_seconds=30))
+    assert _reply_wait(session) == timedelta(seconds=38)
+    monkeypatch.setenv("DEMO_SUPPLIER_REPLY_DELAY_SECONDS", "12")
+    assert DemoTiming(_env_file=None).demo_supplier_reply_delay_seconds == 12
 
 
 def test_usual_supplier_is_out_of_oat_milk_and_muse_replans(session: Session, tmp_path, monkeypatch) -> None:

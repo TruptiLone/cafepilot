@@ -59,6 +59,8 @@ class AgentPlanRun(Base):
     edges: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     levels: Mapped[list[list[str]]] = mapped_column(JSONB, nullable=False)
     warnings: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    parent_run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    parent_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 

@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from backend.db.config import get_settings
 from backend.models.cafe import Cafe
 from backend.modules.agent.cafe_policies import policies_for
+from backend.modules.agent.events import event_staffing, upcoming_for_planner
 from backend.modules.agent.registry import describe_for_planner
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.sales.models import MenuProduct, Modifier, ModifierGroup, ProductVariation
@@ -91,8 +92,10 @@ class PlanningContext:
 
 
 def build_planning_context(
-    session: Session, cafe_id: str, as_of: datetime | None = None
+    session: Session, cafe_id: str, as_of: datetime | None = None, event_id: str | None = None
 ) -> PlanningContext:
+    """Reference data for the planner. For an event's plan (and its replans) it adds event_staffing:
+    coverage per window of the event hours and that day's roster, worked out in code."""
     cafe = session.get(Cafe, cafe_id)
     if cafe is None:
         raise LookupError(f"cafe not found: {cafe_id}")
@@ -145,8 +148,19 @@ def build_planning_context(
             {"employee_id": e.employee_id, "name": e.name, "role": e.role}
             for e in employees
         ],
-        "cafe_policies": policies_for(cafe_id),
+        "cafe_policies": {
+            k: v for k, v in policies_for(cafe_id).items() if k not in ("standing_deliveries", "suppliers", "staff_replies")
+        },
+        "suppliers": [
+            {"supplier_id": s["supplier_id"], "name": s["name"], "earliest_delivery": s.get("earliest_delivery", {}),
+             "items": sorted(s.get("items", {}))}
+            for s in policies_for(cafe_id).get("suppliers", [])
+        ],
+        "upcoming_events": upcoming_for_planner(session, cafe_id, effective_as_of),
     }
+    staffing = event_staffing(session, cafe_id, event_id) if event_id else None
+    if staffing:
+        reference["event_staffing"] = staffing
     return PlanningContext(cafe_id, cafe.timezone, effective_as_of, now, reference)
 
 
@@ -183,10 +197,16 @@ ACTIONS AND ARGUMENTS
 
 NUMBERS: CODE DOES THE MATH, NOT YOU
 5. Never calculate quantities yourself. For any supplier order, first add a calculate_shortfall
-   step with the expected extra product mix, then set the order's lines to exactly
-   "$<that step id>.order_lines". The buffer comes from café policy; do not add your own.
-6. Express expected demand as product variations and modifiers (e.g. COF003_REG with MILK_OAT).
-   State the mix in assumptions; it is a scenario, not a forecast.
+   step, then set the order's lines to exactly "$<that step id>.order_lines". The buffer comes
+   from café policy; do not add your own.
+5b. Before a supplier order, add find_suppliers with lines "$<calculate_shortfall step>.order_lines"
+   and deliver_by = the requested delivery time, and set the order's supplier_id to
+   "$<that step id>.recommended_supplier_id". Code picks the supplier; you don't.
+6. Demand for an event in REFERENCE DATA upcoming_events comes from history, not from you: add
+   estimate_event_demand for that event_id, then give calculate_shortfall
+   items "$<demand step id>.scenarios.typical.items" and include_normal_use true. Only when the
+   owner states a product mix themselves (or no event applies) write the items directly from
+   their words and state them in assumptions.
 
 TIME
 7. Every timestamp needs the café's UTC offset FOR THAT DATE, taken from CONTEXT
@@ -198,6 +218,13 @@ STAFFING
    Before schedule_shift include coverage_report, list_employees and list_shifts.
 9. Only schedule people whose role fits the work, one shift per person per day, and prefer people
    with no shift that day. Propose the fewest shifts that reach the target, one node per shift.
+9b. Staff only the time windows the coverage report shows as short; do not schedule a person for
+   hours that are already covered.
+9c. When REFERENCE DATA has event_staffing, it is that coverage for the event hours, worked out in
+   code: required vs scheduled people per window, the short windows and the day's roster. Set
+   shift times from short_windows only: in each window add exactly short_by people, using the
+   fewest shifts (one person can cover several adjacent short windows). Use these numbers as given;
+   never recalculate them.
 
 WRITES
 10. Read first, then write. Add a write only when the owner asked for that kind of change.
@@ -209,6 +236,14 @@ SCOPE
 12. If a detail that cannot reasonably be assumed is missing (e.g. no date), return
     needs_clarification with one question and no nodes. If the request is not about running this
     café, return out_of_scope with no nodes.
+
+REPLANNING
+13. When a supplier rejected an order, add get_purchase_order for it and send
+    "$<that step>.reorder_lines" to a supplier from REFERENCE DATA suppliers whose earliest_delivery
+    for that weekday is at or before the time needed. If none can, say so in assumptions and propose
+    the earliest possible delivery that still arrives before the café opens or the event starts.
+14. When an employee declined a shift, look for someone else (coverage_report, list_employees,
+    list_shifts) for the same hours; if nobody fits, say so in assumptions and propose no shift.
 """
 
 
@@ -318,6 +353,25 @@ def _log_call(record: dict[str, Any]) -> None:
         pass  # logging must never break planning
 
 
+def read_calls(limit: int = 100) -> list[dict[str, Any]]:
+    """The newest model calls from the log (plans, replans, retries and failures), newest first."""
+    try:
+        lines = LLM_LOG_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    calls: list[dict[str, Any]] = []
+    for line in reversed(lines):
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # a half-written line must not hide the rest
+        if isinstance(record, dict):
+            calls.append(record)
+        if len(calls) >= limit:
+            break
+    return calls
+
+
 def _describe_model_error(error: Exception) -> str:
     status = getattr(error, "status_code", None)
     name = type(error).__name__
@@ -339,11 +393,14 @@ def plan_query(
     client: ChatClient,
     model: str | None = None,
     feedback: tuple[str, str] | None = None,
+    purpose: str = "plan",
+    attempt: int = 1,
 ) -> PlannerResult:
     """Ask the model for a plan.
 
     ``feedback`` is (previous_response, problems): the earlier answer is replayed and
     the model is asked to return a corrected, complete plan.
+    ``purpose`` ("plan" or "replan" after a change fell through) and ``attempt`` go in the log.
     """
     model = model or get_settings().planner_model
     messages = build_messages(query, context)
@@ -359,13 +416,22 @@ def plan_query(
         ]
     started = time.monotonic()
     try:
-        response = client.chat.completions.create(model=model, messages=messages, temperature=0)
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0,
+            # Without these, Wonder reasons ~3x longer and runs past the 60s timeout.
+            reasoning_effort="high",
+            max_tokens=16384,
+        )
     except Exception as error:  # openai.APIError, timeouts, connection failures
         _log_call(
             {
                 "at": datetime.now(timezone.utc).isoformat(),
-                "purpose": "replan" if feedback else "plan",
+                "purpose": purpose,
+                "attempt": attempt,
                 "model": model,
+                "latency_ms": int((time.monotonic() - started) * 1000),
                 "query": query,
                 "error": f"{type(error).__name__}: {error}",
             }
@@ -378,7 +444,8 @@ def plan_query(
     usage_dict = usage.model_dump() if hasattr(usage, "model_dump") else usage
     record = {
         "at": datetime.now(timezone.utc).isoformat(),
-        "purpose": "replan" if feedback else "plan",
+        "purpose": purpose,
+        "attempt": attempt,
         "model": model,
         "latency_ms": latency_ms,
         "usage": usage_dict,

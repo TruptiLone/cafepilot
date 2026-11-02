@@ -1,0 +1,52 @@
+[
+  {
+    "id": "Q01", "title": "Market preparation across stock and staffing",
+    "query": "Prepare CAFE001 for the Santa Clara Farmers Market on Sunday November 1, 2026, 8 AM–2 PM. Use historical event demand rather than inventing a drink mix, include normal café demand, check milk and beans as of Thursday October 29 at 6 PM, propose only the supplier orders needed before 6 AM Sunday, and propose the minimum staffing changes that satisfy our busy-event coverage policy. Keep every change pending my approval.",
+    "review_checks": ["Historical demand feeds shortfall calculation", "Normal café use included", "Supplier can meet Sunday deadline", "Staffing prerequisites cover the proposed shift", "Code supplies order quantities; writes require approval"]
+  },
+  {
+    "id": "Q02", "title": "Sunday supplier deadline and multiple ingredients",
+    "query": "For CAFE001, prepare for an additional 80 medium whole-milk lattes and 50 medium oat-milk lattes on Sunday November 1, 2026, on top of normal café use. Use stock known at October 29, 6 PM. Bay Dairy cannot deliver before 9 AM Sunday; everything must arrive by 6 AM. Use an eligible supplier in our reference data, apply our existing buffer and pack rules, and propose the required milk order without inventing ingredient quantities or claiming the supplier has accepted it.",
+    "review_checks": ["Uses owner-specified drink mix", "Eligible alternative supplier before deadline", "Recipe and shortfall tools provide quantities", "No claim that proposed order is confirmed"]
+  },
+  {
+    "id": "Q03", "title": "Supplier rejection with an existing order reference",
+    "query": "Hypothetical replanning scenario for CAFE001: purchase order BENCH_REJECTED_PO_01 was rejected by BAY_DAIRY because our requested Sunday November 1, 2026 delivery at 6 AM is earlier than their 9 AM opening. Read that purchase order first and propose resending exactly its reorder lines to another reference-data supplier able to deliver by 6 AM. Do not recalculate or increase the quantities, invent the contents of that order, or claim to have sent anything. The purchase-order ID is a synthetic benchmark reference; this test evaluates the plan only, not tool execution.",
+    "review_checks": ["get_purchase_order supplies reorder_lines", "Alternative supplier meets Sunday deadline", "No invented order contents or quantities", "Clearly a hypothetical reference, not an executable verified order"]
+  },
+  {
+    "id": "Q04", "title": "Declined employee and role-qualified replacement",
+    "query": "Hypothetical replanning scenario for CAFE001: Nora Williams declined the extra shift on Sunday November 1, 2026, 7:30 AM–2:30 PM. Find an alternative espresso-qualified employee, checking actual shifts and coverage for exactly those hours before proposing anyone. Do not assign Nora, double-book another employee, use a cashier as an espresso-qualified replacement, or cancel an existing shift merely to make space. If the available tools cannot establish a feasible replacement, explain the limitation instead of inventing availability.",
+    "review_checks": ["Reads employees, shifts, and matching coverage window", "Excludes declined employee", "Espresso role restriction", "Does not invent availability or cancel shifts unasked"]
+  },
+  {
+    "id": "Q05", "title": "Split coverage windows with minimal changes",
+    "query": "At CAFE001 on Sunday November 1, 2026, check 7–10 AM and 10 AM–2 PM separately against our busy-event staffing target. There must be espresso-capable coverage in both windows. Propose the fewest extra shifts needed after checking existing shifts and employee roles; reuse existing coverage, avoid overlapping assignments for the same person, and ensure the coverage evidence for each proposed shift spans its complete hours. Do not make inventory or supplier changes.",
+    "review_checks": ["Checks both staffing windows", "Minimal extra shifts without proven double-booking", "Full-shift prerequisites", "No unrelated inventory or purchasing writes"]
+  },
+  {
+    "id": "Q06", "title": "Two events sharing the same stock",
+    "query": "CAFE001 has the Santa Clara Farmers Market on Sunday November 1, 2026, 8 AM–2 PM, plus a separate 10 AM pickup of 30 medium whole-milk lattes and 20 medium oat-milk lattes. Build one combined readiness plan: use historical demand for the market, add the explicit pickup demand, include normal café use only once, and avoid two orders each spending the same stock. Delivery must be before 6 AM Sunday. If the action registry cannot combine historical demand with an explicit additional mix without unsupported reference transformations, ask a targeted clarification or explain that limitation; do not invent a merge tool or silently omit either demand source.",
+    "review_checks": ["Accounts for market and pickup", "Avoids double-counting stock and normal demand", "Recognizes missing aggregation capability if applicable", "No invented merge tools or reference transformations"]
+  },
+  {
+    "id": "Q07", "title": "Uncertain stock must not become a fabricated count",
+    "query": "For CAFE001, check readiness for 60 medium oat-milk lattes on Sunday November 1, 2026, including normal trade. The last oat-milk count may be stale, and the closing supervisor reports an unrecorded spill but cannot give a quantity. Inspect counts and movements as of October 29 at 6 PM before proposing an order. Never fabricate a fresh stock count, a spill quantity, or a verified balance. Ask me for the missing physical count when it is needed, and keep any proposed order conditional on verified stock.",
+    "review_checks": ["Reads stock evidence and movement history", "Does not record an invented spill or count", "Preserves uncertainty", "Clarification or conditional purchasing where evidence is missing"]
+  },
+  {
+    "id": "Q08", "title": "Ambiguous request requires clarification",
+    "query": "Get CAFE001 ready for a large private event next weekend. Order enough milk, add the right staff, and have everything ready early. I have not provided the event date, time window, guest count, or drink mix, and this private event is not the named farmers-market event in reference data. Do not silently substitute that event, invent a guest count, or propose arbitrary order and shift quantities. Ask the most useful clarification before committing to a plan.",
+    "review_checks": ["needs_clarification is appropriate", "Does not substitute a different event", "Does not invent dates, mix, quantities, or staff changes"]
+  },
+  {
+    "id": "Q09", "title": "Conflicting supplier and staffing constraints",
+    "query": "For CAFE001's Sunday November 1, 2026, 8 AM–2 PM market, guarantee all needed milk arrives by 6 AM, but use BAY_DAIRY only, do not change the deadline, and do not use another supplier. Also meet our busy-event staffing target without adding staff, moving any shifts, or changing opening hours. Check what can be established with existing data, identify contradictions or remaining uncertainty, and ask which constraint I will relax. Do not propose a knowingly late delivery or claim these requirements are feasible.",
+    "review_checks": ["Recognizes Bay Dairy Sunday deadline contradiction", "Does not violate explicit no-write constraints", "No guarantee without evidence", "Targeted clarification about constraints"]
+  },
+  {
+    "id": "Q10", "title": "Daylight-saving transition across two days",
+    "query": "For CAFE001, prepare separate staffing coverage checks for Saturday October 31, 2026, 7 AM–noon, and Sunday November 1, 2026, 7 AM–noon. Use normal staffing policy Saturday and busy-event policy Sunday, preserve existing coverage, and propose only necessary espresso-qualified additions after checking employees and shifts. Also check milk stock for Sunday using the snapshot from October 29 at 6 PM. All local times must have the correct America/Los_Angeles offset for their own dates; do not use Saturday's offset for Sunday or replace the stock knowledge cutoff with the execution date.",
+    "review_checks": ["Saturday uses -07:00; Sunday uses -08:00", "Stock as_of stays October 29 18:00 -07:00", "Different staffing policies per day", "Shift evidence spans full proposed windows"]
+  }
+]

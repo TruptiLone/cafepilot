@@ -5,7 +5,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export PYTHONPATH=.
 alembic upgrade head
-for script in seed_inventory seed_sales seed_sales_catalog seed_sales_recipes seed_demo_operations; do
+for script in seed_inventory seed_sales seed_sales_catalog seed_sales_recipes seed_demo_operations seed_sales_history; do
   echo "==> ${script}"
   python "scripts/${script}.py"
 done

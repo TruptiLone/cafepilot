@@ -1,10 +1,13 @@
 import json
+from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from backend.db.config import get_settings
 from backend.db.session import engine, get_db
 from backend.main import app
 from backend.models.cafe import Cafe
@@ -12,9 +15,13 @@ from backend.modules.agent import planner as planner_module
 from backend.modules.agent.events import detected_events, get_event
 from backend.modules.agent.router import get_planner_client
 from backend.modules.agent.summaries import quantity, summarize_run
+from backend.modules.agent.events import event_staffing
+from backend.modules.agent.planner import SYSTEM_PROMPT
+from scripts.seed_event_surge import apply_reset, plan_reset, seed_event_surge
 from tests.test_agent_planner import FakeClient
 
 TZ = "America/Los_Angeles"
+AS_OF_THU = "2026-10-29T18:00:00-07:00"
 
 
 def step(node_id: str, action: str, result=None, *, status="done", side_effect="read", args=None, **extra):
@@ -84,14 +91,7 @@ def test_a_broken_result_never_breaks_the_run() -> None:
 
 # ---------- events ----------------------------------------------------------------
 
-
-def test_demo_event_is_labeled_and_uses_the_cafe_offsets() -> None:
-    (event,) = detected_events("CAFE001")
-    assert event.is_demo and "(demo)" in event.source
-    assert event.starts_at.isoformat() == "2026-11-01T08:00:00-08:00"  # after daylight saving ends
-    assert event.knowledge_as_of.isoformat() == "2026-10-29T18:00:00-07:00"
-    assert [d.label for d in event.expected_demand] == ["40 extra whole-milk lattes", "20 extra oat-milk lattes"]
-    assert detected_events("ANOTHER_CAFE") == []
+MARKET = "EVT_SC_FARMERS_MARKET_20261101"
 
 
 @pytest.fixture
@@ -100,13 +100,124 @@ def session() -> Session:
     transaction = connection.begin()
     db = sessionmaker(bind=connection, join_transaction_mode="create_savepoint")()
     try:
-        if db.get(Cafe, "CAFE001") is None:
-            pytest.skip("demo data not seeded; run scripts/seed_all.sh")
+        if db.get(Cafe, "CAFE001") is None or get_event(db, MARKET) is None:
+            pytest.skip("demo history not seeded; run scripts/seed_sales_history.py")
         yield db
     finally:
         db.close()
         transaction.rollback()
         connection.close()
+
+
+def test_demo_event_comes_from_the_calendar_with_history_numbers(session: Session) -> None:
+    events = {e.event_id: e for e in detected_events(session, "CAFE001")}
+    market = events[MARKET]
+    assert market.is_demo and "(demo)" in market.source
+    assert market.starts_at.isoformat().startswith("2026-11-01T16:00:00")  # 8 AM PST, after DST ends
+    assert market.knowledge_as_of.isoformat().startswith("2026-10-30T01:00:00")  # Thu 6 PM PDT
+    expected = market.expected
+    assert expected.confidence == "good" and expected.examples == 6
+    assert expected.extra_drinks_low <= expected.extra_drinks_typical <= expected.extra_drinks_high
+    assert f"typically +{expected.extra_drinks_typical}" in market.muse_message
+    assert MARKET in market.request and "estimate_event_demand" in market.request
+    # In café time, like knowledge_as_of in the planning context (a UTC time here failed rule 7 every run).
+    assert "knowledge as of 2026-10-29T18:00:00-07:00" in market.request
+    assert events["EVT_HALLOWEEN_20261031"].expected.confidence == "rough"
+    assert detected_events(session, "ANOTHER_CAFE") == []
+
+
+def test_events_name_the_configured_planner_model(session: Session, monkeypatch) -> None:
+    """So the UI can say "Planning · <model>" before the plan comes back."""
+    monkeypatch.setattr(get_settings(), "planner_model", "muse-test-9.9")
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        api = TestClient(app)
+        listed = {e["event_id"]: e for e in api.get("/api/v1/agent/events").json()}
+        one = api.get(f"/api/v1/agent/events/{MARKET}").json()
+    finally:
+        app.dependency_overrides.clear()
+    assert listed[MARKET]["planner_model"] == "muse-test-9.9"
+    assert one["planner_model"] == "muse-test-9.9"
+    assert {e["planner_model"] for e in listed.values()} == {"muse-test-9.9"}
+
+
+@pytest.fixture
+def market_day(session: Session) -> Session:
+    """The demo Sunday as seeded: 2 people 8 AM-12 PM, 3 people 12-2 PM, before any plan."""
+    apply_reset(session, plan_reset(session))
+    seed_event_surge(session)
+    return session
+
+
+def test_planner_sees_upcoming_events_in_cafe_time(session: Session) -> None:
+    from backend.modules.agent.events import upcoming_for_planner
+    from backend.modules.events.models import CafeEvent
+
+    listed = {e["event_id"]: e for e in upcoming_for_planner(session, "CAFE001", datetime.fromisoformat(AS_OF_THU))}
+    market = listed[MARKET]
+    assert (market["starts_at"], market["ends_at"]) == ("2026-11-01T08:00:00-08:00", "2026-11-01T14:00:00-08:00")
+    stored = session.get(CafeEvent, MARKET)
+    assert datetime.fromisoformat(market["starts_at"]) == stored.starts_at  # same moment
+    assert listed["EVT_HALLOWEEN_20261031"]["starts_at"] == "2026-10-31T14:00:00-07:00"
+
+
+def test_local_time_reads_utc_z_as_the_same_moment() -> None:
+    from zoneinfo import ZoneInfo
+
+    from backend.modules.agent.summaries import local_time
+
+    moment = local_time("2026-11-01T16:00:00Z", ZoneInfo(TZ))
+    assert moment.isoformat() == "2026-11-01T08:00:00-08:00"
+    assert moment == datetime.fromisoformat("2026-11-01T16:00:00+00:00")
+    assert local_time("not a time", ZoneInfo(TZ)) is None
+
+
+def test_event_staffing_shows_short_windows_and_roster(market_day: Session) -> None:
+    staffing = event_staffing(market_day, "CAFE001", MARKET)
+    assert staffing["required_staff"] == 4
+    assert staffing["required_from"] == "cafe_policies.staffing.busy_event_required_staff"
+    windows = [(w["start_at"][11:16], w["end_at"][11:16], w["scheduled"], w["required"], w["short_by"])
+               for w in staffing["coverage_by_window"]]
+    assert windows == [("08:00", "12:00", 2, 4, 2), ("12:00", "14:00", 3, 4, 1)]
+    assert staffing["short_windows"] == staffing["coverage_by_window"]
+    on_shift = {r["employee_id"] for r in staffing["roster"]}
+    assert len(on_shift) == len(staffing["roster"]) > 0
+    assert all(r["start_at"].startswith("2026-11-01") and r["role"] for r in staffing["roster"])
+
+
+def test_event_staffing_follows_the_schedule_and_policy(market_day: Session) -> None:
+    from backend.modules.staffing.schemas import ShiftCreate
+    from backend.modules.staffing.service import StaffingService
+
+    roster = event_staffing(market_day, "CAFE001", MARKET)["roster"]
+    free = next(e for e in ("DEMO_EMP_003", "DEMO_EMP_004") if e not in {r["employee_id"] for r in roster})
+    StaffingService(market_day).schedule_shift(ShiftCreate(
+        cafe_id="CAFE001", employee_id=free,
+        start_at=datetime.fromisoformat("2026-11-01T08:00:00-08:00"), end_at=datetime.fromisoformat("2026-11-01T12:00:00-08:00")))
+    staffing = event_staffing(market_day, "CAFE001", MARKET)
+    assert [(w["scheduled"], w["short_by"]) for w in staffing["coverage_by_window"]] == [(3, 1)]
+    assert free in {r["employee_id"] for r in staffing["roster"]}
+    assert event_staffing(market_day, "CAFE001", "EVT_HALLOWEEN_20261031")["required_from"].endswith("normal_required_staff")
+    assert event_staffing(market_day, "ANOTHER_CAFE", MARKET) is None
+
+
+def test_event_plans_get_the_staffing_typed_requests_do_not(market_day: Session, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(planner_module, "LLM_LOG_PATH", tmp_path / "llm.jsonl")
+    plan = {"status": "plan", "goal": "g", "assumptions": [],
+            "nodes": [{"id": "staff", "action": "list_employees", "args": {"cafe_id": "CAFE001"}, "reason": "who"}]}
+    client = FakeClient(json.dumps(plan))
+    app.dependency_overrides[get_db] = lambda: market_day
+    app.dependency_overrides[get_planner_client] = lambda: client
+    try:
+        api = TestClient(app)
+        api.post(f"/api/v1/agent/events/{MARKET}/runs")
+        api.post("/api/v1/agent/runs", json={"query": "who works Sunday?", "cafe_id": "CAFE001"})
+    finally:
+        app.dependency_overrides.clear()
+    sent = [json.loads(call["messages"][-1]["content"])["reference_data"] for call in client.calls]
+    assert [(w["short_by"]) for w in sent[0]["event_staffing"]["short_windows"]] == [2, 1]
+    assert "event_staffing" not in sent[1]
+    assert "9b." in SYSTEM_PROMPT and "9c." in SYSTEM_PROMPT and "event_staffing" in SYSTEM_PROMPT
 
 
 def test_saying_yes_to_an_event_starts_a_run(session: Session, tmp_path, monkeypatch) -> None:
@@ -118,17 +229,89 @@ def test_saying_yes_to_an_event_starts_a_run(session: Session, tmp_path, monkeyp
     app.dependency_overrides[get_planner_client] = lambda: client
     try:
         api = TestClient(app)
-        events = api.get("/api/v1/agent/events").json()
-        event_id = events[0]["event_id"]
-        assert api.get(f"/api/v1/agent/events/{event_id}").json()["title"] == "Santa Clara Farmers Market"
-        response = api.post(f"/api/v1/agent/events/{event_id}/runs")
+        assert MARKET in {e["event_id"] for e in api.get("/api/v1/agent/events").json()}
+        assert api.get(f"/api/v1/agent/events/{MARKET}").json()["title"] == "Santa Clara Farmers Market"
+        response = api.post(f"/api/v1/agent/events/{MARKET}/runs")
         assert api.post("/api/v1/agent/events/NOPE/runs").status_code == 404
     finally:
         app.dependency_overrides.clear()
-    body = response.json()
-    run = body["run"]
-    assert run["query"] == get_event(event_id).request
-    assert run["as_of"].startswith("2026-10-30T01:00:00")  # Thu 6 PM PDT, stored in UTC
+    run = response.json()["run"]
+    assert run["query"] == get_event(session, MARKET).request
+    assert run["as_of"].startswith("2026-10-30T01:00:00")
     assert run["nodes"][0]["summary"].endswith("can make espresso")
     sent = client.calls[0]["messages"][-1]["content"]
-    assert "Farmers market this Sunday Nov 1" in sent
+    assert MARKET in sent and "upcoming_events" in sent
+
+
+def test_demand_and_packed_order_lines_read_naturally() -> None:
+    demand = step("demand", "estimate_event_demand", {
+        "confidence": "good", "drinks": {"normal": 96, "extra_low": 19, "extra_typical": 35, "extra_high": 53},
+        "food": {"extra_typical": 7}, "examples": [{"name": "Farmers Market"}] * 6})
+    short = step("short", "calculate_shortfall", {"buffer_pct": "10", "include_normal_use": True, "lines": [
+        {"ingredient_id": "OAT_MILK", "name": "Oat Milk", "unit": "mL", "status": "short", "order_quantity": "5000",
+         "packs": 5, "pack_name": "1 L carton"},
+        *[{"ingredient_id": f"I{i}", "name": f"Item {i}", "unit": "each", "status": "enough", "order_quantity": "0"}
+          for i in range(3)]]})
+    lines = summarize_run([demand, short], "CAFE001", TZ)
+    assert lines["demand"] == "Last 6 Farmers Markets: +19 to +53 (typically +35) drinks on a normal 96; pastries +7"
+    assert lines["short"] == ("Order 5 L oat milk (5 × 1 L carton); everything else is covered "
+                              "(after normal use and regular deliveries; includes 10% buffer)")
+
+
+def test_cafe_orders_are_rounded_up_to_whole_packs(session: Session) -> None:
+    from backend.modules.agent.registry import REGISTRY
+
+    result = REGISTRY["calculate_shortfall"].run(session, {
+        "cafe_id": "CAFE001", "as_of": "2026-10-29T18:00:00-07:00", "target_at": "2026-11-01T08:00:00-08:00",
+        "items": [{"variation_id": "COF003_REG", "quantity": 30}], "buffer_pct": "0"})
+    whole = next(l for l in result["lines"] if l["ingredient_id"] == "WHOLE_MILK")
+    assert whole["status"] == "short"  # 30 x 240 mL = 7.2 L against 3 L counted on Thursday
+    assert Decimal(whole["shortfall"]) == Decimal("4200")
+    assert whole["order_quantity"] == "6000" and whole["packs"] == 1 and whole["pack_name"] == "case of 6 × 1 L"
+
+
+def test_approved_changes_are_acknowledged_with_real_coverage(session: Session) -> None:
+    from datetime import datetime as dt
+
+    from backend.modules.agent.executor import create_run, decide, execute
+    from backend.modules.agent.planner import Plan
+    from backend.modules.agent.validator import validate_plan
+    from backend.modules.agent.acknowledgements import change_statuses
+    from backend.modules.purchasing.service import settle_due
+    from scripts.seed_event_surge import apply_reset, plan_reset, seed_event_surge
+
+    apply_reset(session, plan_reset(session))  # clean scenario inside this rolled-back test
+    seed_event_surge(session)
+    window = {"start_at": "2026-11-01T08:00:00-08:00", "end_at": "2026-11-01T14:00:00-08:00"}
+    nodes = [
+        {"id": "cov", "action": "coverage_report", "reason": "r", "args": {"cafe_id": "CAFE001", **window, "required_staff": 4}},
+        {"id": "staff", "action": "list_employees", "reason": "r", "args": {"cafe_id": "CAFE001"}},
+        {"id": "shifts", "action": "list_shifts", "reason": "r", "args": {"cafe_id": "CAFE001", **window}},
+        {"id": "add", "action": "schedule_shift", "reason": "r", "args": {
+            "cafe_id": "CAFE001", "employee_id": "DEMO_EMP_003",
+            "start_at": "2026-11-01T07:30:00-08:00", "end_at": "2026-11-01T14:30:00-08:00"}},
+    ]
+    plan = Plan.model_validate({"status": "plan", "goal": "g", "nodes": nodes})
+    run = create_run(session, query="q", cafe_id="CAFE001", as_of=dt.fromisoformat("2026-10-29T18:00:00-07:00"),
+                     plan=plan, validation=validate_plan(plan, "CAFE001"), model="m", attempts=1)
+    run = execute(session, run.run_id)
+    statuses, closing, waiting = change_statuses(session, run)
+    assert closing is None and [st.stage for st in statuses["add"].lifecycle] == ["Proposed"]
+
+    before = next(n for n in run.nodes if n.node_id == "cov").result["hours"][0]["scheduled_employees"]
+    run = decide(session, run.run_id, "add", "approved")
+    statuses, closing, waiting = change_statuses(session, run)
+    status = statuses["add"]
+    assert [st.stage for st in status.lifecycle] == ["Proposed", "Approved", "Offered to Sofia", "Waiting for Sofia"]
+    assert status.external_status == "offered" and waiting == ["Sofia"]
+    assert status.acknowledgement.headline == "Shift offered to Sofia Ramirez"
+    assert "once offers are accepted" in status.acknowledgement.details[1]
+    assert f"{before + 1} of 4" in status.acknowledgement.details[1]  # re-measured from the schedule
+
+    settle_due(session, now=dt.fromisoformat("2030-01-01T00:00:00+00:00"))  # Sofia's simulated reply
+    statuses, closing, waiting = change_statuses(session, run)
+    status = statuses["add"]
+    assert status.lifecycle[-1].stage == "Accepted" and status.external_status == "accepted"
+    assert status.acknowledgement.headline == "Sofia Ramirez accepted: Sofia will be in"
+    assert "staffing now" in status.acknowledgement.details[1] and waiting == []
+    assert closing.startswith("Here's where things stand: Sofia Ramirez accepted")

@@ -89,3 +89,13 @@ export function AgentIcon(props: IconProps) {
     </svg>
   );
 }
+
+export function ReceivingIcon(props: IconProps) {
+  return (
+    <svg {...iconProps} {...props}>
+      <path d="M3 7.5 12 3l9 4.5v9L12 21l-9-4.5v-9Z" />
+      <path d="M3 7.5 12 12l9-4.5M12 12v9" />
+      <path d="m8.5 15.5 1.6 1.6 3-3" />
+    </svg>
+  );
+}

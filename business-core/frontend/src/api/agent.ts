@@ -29,6 +29,26 @@ export type RunStep = {
   replay_of: string | null;
   started_at: string | null;
   finished_at: string | null;
+  summary?: string | null;
+  acknowledgement?: Acknowledgement | null;
+  lifecycle?: LifecycleStage[] | null;
+  external_status?: string | null;
+  replanned_in?: string | null;
+};
+
+export type Acknowledgement = {
+  headline: string;
+  details: string[];
+  caveat: string | null;
+  tone?: "done" | "waiting" | "problem" | "declined";
+  next_step?: "find_alternative" | "find_cover" | null;
+};
+
+export type LifecycleStage = {
+  stage: string;
+  state: "done" | "current" | "failed" | "pending";
+  at: string | null;
+  note: string | null;
 };
 
 export type RunEdge = { source: string; target: string; kind: "data" | "safety" };
@@ -49,6 +69,11 @@ export type AgentRun = {
   created_at: string;
   updated_at: string;
   nodes: RunStep[];
+  closing_message?: string | null;
+  waiting_on?: string[];
+  parent_run_id?: string | null;
+  parent_node_id?: string | null;
+  event?: DetectedEvent | null;
 };
 
 export type RunSummary = {
@@ -148,5 +173,110 @@ export function decideAll(runId: string, decision: "approved" | "rejected"): Pro
   return requestJson<AgentRun>(
     `/api/v1/agent/runs/${encodeURIComponent(runId)}/decision`,
     json({ decision, channel: "web" }),
+  );
+}
+
+export type DetectedEvent = {
+  event_id: string;
+  title: string;
+  category: string;
+  starts_at: string;
+  ends_at: string;
+  location: string | null;
+  distance_m: number | null;
+  source: string;
+  is_demo: boolean;
+  muse_message: string;
+  run_id?: string | null;
+  latest_run_id?: string | null;
+  plan_state?: PlanState;
+  expected: {
+    confidence: "good" | "rough" | "none";
+    examples: number;
+    normal_drinks: number;
+    extra_drinks_low: number;
+    extra_drinks_typical: number;
+    extra_drinks_high: number;
+    extra_food_typical: number;
+    basis: string;
+  };
+};
+
+export type PlanState = "new" | "checking" | "needs_ok" | "waiting" | "planned" | "issues";
+
+export type Kpi = {
+  label: string;
+  value: string;
+  of: string | null;
+  note: string;
+  tone: "neutral" | "good" | "warn" | "bad";
+};
+
+export type InventoryRow = {
+  ingredient_id: string;
+  name: string;
+  unit: string;
+  on_hand: string | null;
+  arriving: string;
+  on_order: string;
+  on_order_status: string | null;
+  needed: string;
+  shortfall: string;
+  status: "covered" | "short" | "ordered" | "unknown";
+  note: string;
+};
+
+export type CoverageDay = {
+  date: string;
+  label: string;
+  shifts: number;
+  is_event_day: boolean;
+  halves: { label: "AM" | "PM"; staffed: number; required: number }[];
+};
+
+export type EventStatus = {
+  event_id: string;
+  name: string;
+  starts_at: string;
+  ends_at: string;
+  note: string;
+  plan_state: PlanState;
+  run_id: string | null;
+  latest_run_id: string | null;
+};
+
+export type CafeStatus = {
+  cafe_id: string;
+  cafe_name: string;
+  as_of: string;
+  greeting: string;
+  date_label: string;
+  focus_event_id: string | null;
+  focus_event_name: string | null;
+  kpis: Partial<Record<"stock" | "coverage" | "approvals" | "sales", Kpi>>;
+  inventory: InventoryRow[];
+  coverage: CoverageDay[];
+  events: EventStatus[];
+};
+
+export function getCafeStatus(signal?: AbortSignal): Promise<CafeStatus> {
+  return requestJson<CafeStatus>(`/api/v1/agent/status?cafe_id=${ACTIVE_CAFE_ID}`, { signal });
+}
+
+export function listEvents(signal?: AbortSignal): Promise<DetectedEvent[]> {
+  return requestJson<DetectedEvent[]>(`/api/v1/agent/events?cafe_id=${ACTIVE_CAFE_ID}`, { signal });
+}
+
+export function startEventRun(eventId: string): Promise<StartRunResponse> {
+  return requestJson<StartRunResponse>(
+    `/api/v1/agent/events/${encodeURIComponent(eventId)}/runs`,
+    { method: "POST", headers: { Accept: "application/json" } },
+  );
+}
+
+export function replanStep(runId: string, nodeId: string): Promise<StartRunResponse> {
+  return requestJson<StartRunResponse>(
+    `/api/v1/agent/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/replan`,
+    { method: "POST", headers: { Accept: "application/json" } },
   );
 }

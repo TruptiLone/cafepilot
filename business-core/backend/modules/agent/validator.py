@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from graphlib import CycleError, TopologicalSorter
 from typing import Any, Literal
@@ -35,6 +35,7 @@ IssueCode = Literal[
     "wrong_time_offset",
     "unverified_quantity",
     "unrelated_prerequisite",
+    "unverified_demand",
 ]
 
 
@@ -126,17 +127,20 @@ def _check_offsets(node: PlanNode, tz: ZoneInfo, issues: list[PlanIssue]) -> Non
         if moment.tzinfo is None:
             continue
         expected = moment.astimezone(tz).utcoffset()
-        if moment.utcoffset() != expected:
+        if moment.utcoffset() == expected:
+            continue
+        if moment.utcoffset() == timedelta(0):
+            # A UTC value (Z or +00:00) names an instant: suggest that same instant in café time.
+            message = f"{path}={text} is in UTC; the same moment in café time is {moment.astimezone(tz).isoformat()}"
+        else:
+            # Another offset (e.g. Thursday's offset on Sunday): keep the clock time, fix the offset.
             hours = expected.total_seconds() / 3600
             correct = moment.replace(tzinfo=None).isoformat() + f"{'+' if hours >= 0 else '-'}{abs(int(hours)):02d}:00"
-            issues.append(
-                PlanIssue(
-                    "wrong_time_offset",
-                    f"{path}={text} uses the wrong UTC offset for {moment.date()} in {tz.key}; "
-                    f"local {moment.strftime('%H:%M')} that day is {correct}",
-                    node.id,
-                )
+            message = (
+                f"{path}={text} uses the wrong UTC offset for {moment.date()} in {tz.key}; "
+                f"local {moment.strftime('%H:%M')} that day is {correct}"
             )
+        issues.append(PlanIssue("wrong_time_offset", message, node.id))
 
 
 def _check_order_quantities(node: PlanNode, by_id: dict[str, PlanNode], issues: list[PlanIssue]) -> None:
@@ -144,11 +148,35 @@ def _check_order_quantities(node: PlanNode, by_id: dict[str, PlanNode], issues: 
         return
     ref = parse_ref(node.args.get("lines"))
     source = by_id.get(ref[0]) if ref else None
-    if not ref or ref[1] != ".order_lines" or source is None or source.action != "calculate_shortfall":
+    allowed = {("calculate_shortfall", ".order_lines"), ("get_purchase_order", ".reorder_lines")}
+    if not ref or source is None or (source.action, ref[1]) not in allowed:
         issues.append(
             PlanIssue(
                 "unverified_quantity",
-                'order quantities must come from code: set lines to "$<calculate_shortfall step>.order_lines"',
+                'order quantities must come from code: set lines to "$<calculate_shortfall step>.order_lines" '
+                '(or "$<get_purchase_order step>.reorder_lines" when re-sending a rejected order)',
+                node.id,
+            )
+        )
+
+
+_SCENARIO_PATH = re.compile(r"^\.scenarios\.(low|typical|high)\.items$")
+
+
+def _check_demand_source(node: PlanNode, by_id: dict[str, PlanNode], issues: list[PlanIssue]) -> None:
+    """When the plan reads demand from history, the order math must use those numbers."""
+    if node.action != "calculate_shortfall":
+        return
+    demand_steps = [n for n in by_id.values() if n.action == "estimate_event_demand"]
+    if not demand_steps:
+        return
+    ref = parse_ref(node.args.get("items"))
+    source = by_id.get(ref[0]) if ref else None
+    if not ref or source is None or source.action != "estimate_event_demand" or not _SCENARIO_PATH.match(ref[1]):
+        issues.append(
+            PlanIssue(
+                "unverified_demand",
+                'demand must come from history: set items to "$<estimate_event_demand step>.scenarios.typical.items"',
                 node.id,
             )
         )
@@ -246,6 +274,7 @@ def validate_plan(
         _check_args(node, issues)
         _check_order_quantities(node, by_id, issues)
         _check_shift_evidence(node, known, issues)
+        _check_demand_source(node, by_id, issues)
         if tz is not None:
             _check_offsets(node, tz, issues)
         node_cafe = node.args.get("cafe_id", cafe_id)

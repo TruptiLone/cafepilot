@@ -3,6 +3,7 @@ import AppShell from "./components/AppShell";
 import AgentPage from "./pages/AgentPage";
 import DashboardPage from "./pages/DashboardPage";
 import InventoryPage from "./pages/InventoryPage";
+import ReceivingPage from "./pages/ReceivingPage";
 import SalesPage from "./pages/SalesPage";
 import StaffingPage from "./pages/StaffingPage";
 
@@ -13,6 +14,7 @@ function App() {
         <Route path="agent" element={<AgentPage />} />
         <Route path="dashboard" element={<DashboardPage />} />
         <Route path="inventory" element={<InventoryPage />} />
+        <Route path="receiving" element={<ReceivingPage />} />
         <Route path="sales" element={<SalesPage />} />
         <Route path="staffing" element={<StaffingPage />} />
         <Route index element={<Navigate replace to="/dashboard" />} />

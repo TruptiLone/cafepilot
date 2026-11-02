@@ -1,7 +1,8 @@
 """Event Surge demo scenario (AF-01): a believable Thursday-to-Sunday picture for CAFE001.
 
 Story: farmers market Sunday Nov 1, 8 AM-2 PM. Thursday Oct 29 at 5 PM the closing shift
-counts milk, beans and pastries; a pitcher of oat milk is spilled at 5:40 PM. Sunday
+counts milk, beans and pastries (milk is low before the next morning's regular delivery); a
+pitcher of oat milk is spilled at 5:40 PM. Sunday
 already has a shift lead, a cashier, and one barista from noon. The café's busy-event
 target is 4 people, so the morning is short by 2 and the early afternoon by 1.
 
@@ -21,7 +22,7 @@ and the shifts, stock counts and movements created by approved agent steps.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
@@ -32,6 +33,7 @@ from backend.db.session import SessionLocal
 from backend.models.cafe import Cafe
 from backend.modules.agent.models import AgentApproval, AgentNodeRun, AgentPlanRun
 from backend.modules.inventory.models import InventoryMovement, StockCount, StockCountLine
+from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, Receipt, ReceiptLine, ShiftOffer
 from backend.modules.staffing.models import Employee, Shift
 from scripts.seed_demo_operations import _seed_record
 
@@ -42,9 +44,9 @@ AS_OF = "2026-10-29T18:00:00-07:00"
 COUNTED_AT = datetime.fromisoformat("2026-10-29T17:00:00-07:00")
 COUNT_ID = f"{PREFIX}COUNT_THU_CLOSE"
 COUNT_QUANTITIES = {
-    "WHOLE_MILK": Decimal("8000.000"),
-    "OAT_MILK": Decimal("4000.000"),
-    "COFFEE_BEANS": Decimal("2500.000"),
+    "WHOLE_MILK": Decimal("3000.000"),
+    "OAT_MILK": Decimal("1500.000"),
+    "COFFEE_BEANS": Decimal("6000.000"),
     "DRIP_COFFEE": Decimal("1500.000"),
     "COLD_BREW_CONCENTRATE": Decimal("4000.000"),
     "BUTTER_CROISSANT": Decimal("30.000"),
@@ -68,9 +70,28 @@ SUNDAY_SHIFTS = (
     # employee, start, end  (all PST, after the Nov 1 daylight-saving change)
     ("DEMO_EMP_002", "07:00", "15:00"),  # Jordan Brooks, shift lead
     ("DEMO_EMP_007", "08:00", "14:00"),  # Ava Thompson, cashier
-    ("DEMO_EMP_005", "12:00", "16:00"),  # Nora Williams, barista (afternoon only)
+    ("DEMO_EMP_005", "12:00", "17:00"),  # Nora Williams, barista (afternoon to close)
+)
+# A normal roster for the days before the market (PDT), so the café panel shows real cover.
+ROSTER_SHIFTS = (
+    ("DEMO_EMP_001", "2026-10-30T07:00", "2026-10-30T15:00"),
+    ("DEMO_EMP_002", "2026-10-30T07:00", "2026-10-30T15:00"),
+    ("DEMO_EMP_004", "2026-10-30T11:00", "2026-10-30T19:00"),
+    ("DEMO_EMP_005", "2026-10-30T12:00", "2026-10-30T19:00"),
+    ("DEMO_EMP_001", "2026-10-31T07:00", "2026-10-31T15:00"),
+    ("DEMO_EMP_007", "2026-10-31T07:00", "2026-10-31T13:00"),
+    ("DEMO_EMP_004", "2026-10-31T12:00", "2026-10-31T17:00"),
+    ("DEMO_EMP_002", "2026-10-31T13:00", "2026-10-31T17:00"),
 )
 SEEDED_AT = datetime.fromisoformat("2026-10-28T12:00:00-07:00")
+
+# The Sunday market milk, confirmed by Willow Ridge (matches demo-assets/receiving/packing-slip-PS-58213).
+DEMO_ORDER_ID = f"{PREFIX}PO_1042"
+DEMO_ORDER_LINES = (
+    # ingredient, item number, description, cases, case price
+    ("WHOLE_MILK", "WR-1001", "Whole Milk, 1 L carton", 2, 2100),
+    ("OAT_MILK", "WR-2240", "Oat Milk Barista Edition, 1 L carton", 1, 2820),
+)
 
 
 class EventSurgeSeedError(RuntimeError):
@@ -83,6 +104,7 @@ class SeedResult:
     count_lines: int
     movements: int
     shifts: int
+    orders: int = 0
 
 
 @dataclass(frozen=True)
@@ -91,10 +113,12 @@ class ResetPlan:
     shifts: list[str]
     counts: list[str]
     movements: list[str]
+    orders: list[str] = field(default_factory=list)
+    receipts: list[str] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
-        return not (self.runs or self.shifts or self.counts or self.movements)
+        return not (self.runs or self.shifts or self.counts or self.movements or self.orders or self.receipts)
 
 
 def _shift_rows() -> list[dict]:
@@ -111,6 +135,18 @@ def _shift_rows() -> list[dict]:
                 "created_at": SEEDED_AT,
             }
         )
+    for employee_id, start, end in ROSTER_SHIFTS:
+        rows.append(
+            {
+                "shift_id": f"{PREFIX}ROSTER_{start[5:10].replace('-', '')}_{employee_id[-3:]}",
+                "cafe_id": CAFE_ID,
+                "employee_id": employee_id,
+                "start_at": datetime.fromisoformat(f"{start}:00-07:00"),
+                "end_at": datetime.fromisoformat(f"{end}:00-07:00"),
+                "status": "scheduled",
+                "created_at": SEEDED_AT,
+            }
+        )
     return rows
 
 
@@ -122,7 +158,8 @@ def _require_prerequisites(session: Session) -> None:
             raise EventSurgeSeedError(f"{employee_id} is missing: run ./scripts/seed_all.sh first")
 
 
-def seed_event_surge(session: Session) -> SeedResult:
+def seed_event_surge(session: Session, *, with_delivery: bool = False) -> SeedResult:
+    """Seed the market scenario; with_delivery also adds PO-1042 for the receiving demo."""
     transaction = session.begin_nested() if session.in_transaction() else session.begin()
     with transaction:
         _require_prerequisites(session)
@@ -158,7 +195,31 @@ def seed_event_surge(session: Session) -> SeedResult:
             _seed_record(session, Shift, "shift_id", row, f"shift {row['shift_id']}") for row in _shift_rows()
         )
         session.flush()
-    return SeedResult(counts, lines, movements, shifts)
+        orders = 0
+        if with_delivery and session.get(PurchaseOrder, DEMO_ORDER_ID) is None:
+            delivery = datetime.fromisoformat("2026-11-01T05:30:00-08:00")
+            session.add(
+                PurchaseOrder(
+                    order_id=DEMO_ORDER_ID, cafe_id=CAFE_ID, po_number="PO-1042", supplier_id="WILLOW_RIDGE",
+                    supplier_name="Willow Ridge Dairy Supply", status="confirmed", requested_delivery_at=delivery,
+                    confirmed_delivery_at=delivery, sent_at=datetime.fromisoformat("2026-10-29T18:20:00-07:00"),
+                    respond_at=datetime.fromisoformat("2026-10-29T18:20:08-07:00"),
+                    responded_at=datetime.fromisoformat("2026-10-29T18:20:08-07:00"), pending_decision="confirmed",
+                    total_cents=sum(cases * price for *_, cases, price in DEMO_ORDER_LINES), simulated=True,
+                    note="Demo order for the Sunday market (synthetic).",
+                    lines=[
+                        PurchaseOrderLine(
+                            line_no=n, ingredient_id=ingredient, supplier_item_number=item, description=description,
+                            quantity=Decimal(6000 * cases), unit="mL", pack_size=Decimal(6000),
+                            pack_name="case of 6 × 1 L", packs=cases, pack_price_cents=price,
+                        )
+                        for n, (ingredient, item, description, cases, price) in enumerate(DEMO_ORDER_LINES, start=1)
+                    ],
+                )
+            )
+            orders = 1
+            session.flush()
+    return SeedResult(counts, lines, movements, shifts, orders)
 
 
 def plan_reset(session: Session) -> ResetPlan:
@@ -190,18 +251,39 @@ def plan_reset(session: Session) -> ResetPlan:
     existing_agent_moves = list(
         session.scalars(select(InventoryMovement.movement_id).where(InventoryMovement.movement_id.in_(agent_movements)))
     )
+    orders = list(session.scalars(
+        select(PurchaseOrder.order_id).where(
+            PurchaseOrder.cafe_id == CAFE_ID,
+            (PurchaseOrder.order_id.startswith(PREFIX)) | (PurchaseOrder.source_run_id.in_(runs or [""])),
+        )
+    ))
+    receipts = list(session.scalars(select(Receipt.receipt_id).where(Receipt.cafe_id == CAFE_ID)))
+    receipt_moves = list(session.scalars(
+        select(InventoryMovement.movement_id).where(
+            InventoryMovement.cafe_id == CAFE_ID, InventoryMovement.source_type == "receipt"
+        )
+    ))
     return ResetPlan(
+        orders=sorted(orders),
+        receipts=sorted(receipts),
         runs=sorted(runs),
         shifts=sorted(set(scenario_shifts) | set(existing_agent_shifts)),
         counts=sorted(set(scenario_counts) | set(existing_agent_counts)),
-        movements=sorted(set(scenario_moves) | set(existing_agent_moves)),
+        movements=sorted(set(scenario_moves) | set(existing_agent_moves) | set(receipt_moves)),
     )
 
 
 def apply_reset(session: Session, plan: ResetPlan) -> None:
     transaction = session.begin_nested() if session.in_transaction() else session.begin()
     with transaction:
+        if plan.receipts:
+            session.execute(delete(ReceiptLine).where(ReceiptLine.receipt_id.in_(plan.receipts)))
+            session.execute(delete(Receipt).where(Receipt.receipt_id.in_(plan.receipts)))
+        if plan.orders:
+            session.execute(delete(PurchaseOrderLine).where(PurchaseOrderLine.order_id.in_(plan.orders)))
+            session.execute(delete(PurchaseOrder).where(PurchaseOrder.order_id.in_(plan.orders)))
         if plan.runs:
+            session.execute(delete(ShiftOffer).where(ShiftOffer.source_run_id.in_(plan.runs)))
             session.execute(delete(AgentApproval).where(AgentApproval.run_id.in_(plan.runs)))
             session.execute(delete(AgentNodeRun).where(AgentNodeRun.run_id.in_(plan.runs)))
             session.execute(delete(AgentPlanRun).where(AgentPlanRun.run_id.in_(plan.runs)))
@@ -218,7 +300,8 @@ def apply_reset(session: Session, plan: ResetPlan) -> None:
 def _describe(plan: ResetPlan) -> str:
     return (
         f"{len(plan.runs)} agent run(s), {len(plan.shifts)} shift(s), "
-        f"{len(plan.counts)} stock count(s), {len(plan.movements)} movement(s)"
+        f"{len(plan.counts)} stock count(s), {len(plan.movements)} movement(s), "
+        f"{len(plan.orders)} purchase order(s), {len(plan.receipts)} delivery check(s)"
     )
 
 
@@ -227,6 +310,8 @@ def main() -> int:
     parser.add_argument("--reset", action="store_true", help="remove the scenario and the agent's changes")
     parser.add_argument("--yes", action="store_true", help="actually delete (otherwise --reset is a dry run)")
     parser.add_argument("--fresh", action="store_true", help="reset (no prompt) and seed again")
+    parser.add_argument("--with-delivery", action="store_true",
+                        help="also add PO-1042 (Willow Ridge, arriving Sun 5:30 AM) for the receiving demo")
     args = parser.parse_args()
 
     with SessionLocal() as session:
@@ -247,12 +332,12 @@ def main() -> int:
                 return 0
             if not args.fresh:
                 return 0
-        result = seed_event_surge(session)
+        result = seed_event_surge(session, with_delivery=args.with_delivery)
         session.commit()
     print(
         "Event Surge scenario ready: "
         f"{result.counts} count, {result.count_lines} count lines, {result.movements} movement, "
-        f"{result.shifts} Sunday shifts created. Ask with knowledge as of {AS_OF}."
+        f"{result.shifts} shifts" + (", demo order PO-1042" if result.orders else "") + f" created. Ask with knowledge as of {AS_OF}."
     )
     return 0
 

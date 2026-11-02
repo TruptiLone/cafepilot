@@ -38,11 +38,13 @@ def quantity(value: Any, unit: str | None) -> str:
     return text if unit in ("", "each") else f"{text} {unit}"
 
 
-def _local(value: Any, tz: ZoneInfo) -> datetime | None:
+def local_time(value: Any, tz: ZoneInfo) -> datetime | None:
+    """An ISO timestamp as the same moment in café time. Accepts a trailing "Z" (step results use it;
+    Python 3.10's fromisoformat does not)."""
     if not isinstance(value, str):
         return None
     try:
-        return datetime.fromisoformat(value).astimezone(tz)
+        return datetime.fromisoformat(value[:-1] + "+00:00" if value.endswith("Z") else value).astimezone(tz)
     except ValueError:
         return None
 
@@ -57,7 +59,7 @@ def day(moment: datetime) -> str:
 
 
 def span(start: Any, end: Any, tz: ZoneInfo, *, with_day: bool = True) -> str:
-    a, b = _local(start, tz), _local(end, tz)
+    a, b = local_time(start, tz), local_time(end, tz)
     if a is None or b is None:
         return ""
     times = f"{clock(a)}–{clock(b)}"
@@ -152,15 +154,48 @@ def _shortfall(result: Row, ctx: RunContext) -> str:
     enough = [l for l in lines if l.get("status") == "enough"]
     unknown = [l for l in lines if l.get("status") == "unknown_stock"]
     parts = []
+    def ordered(l: Row) -> str:
+        text = f"{quantity(l['order_quantity'], l['unit'])} {l['name'].lower()}"
+        if l.get("packs") and l.get("pack_name"):
+            text += f" ({l['packs']} × {l['pack_name']})"
+        return text
+
     if short:
-        parts.append("Order " + _list(f"{quantity(l['order_quantity'], l['unit'])} {l['name'].lower()}" for l in short))
+        parts.append("Order " + _list(ordered(l) for l in short))
     else:
         parts.append("Nothing to order")
-    if enough:
+    if enough and len(enough) <= 2:
         parts.append(f"{_list(l['name'].lower() for l in enough)} enough")
+    elif enough:
+        parts.append("everything else is covered")
     if unknown:
         parts.append(f"count {_list(l['name'].lower() for l in unknown)} first")
-    return "; ".join(parts) + f" (includes {quantity(result.get('buffer_pct'), '')}% buffer)"
+    basis = f"includes {quantity(result.get('buffer_pct'), '')}% buffer"
+    if result.get("include_normal_use"):
+        basis = "after normal use and regular deliveries; " + basis
+    return "; ".join(parts) + f" ({basis})"
+
+
+def _demand(result: Row, ctx: RunContext) -> str:
+    d, food = result.get("drinks", {}), result.get("food", {})
+    n = len(result.get("examples", []))
+    if result.get("confidence") == "none":
+        return f"No past events like this; normal day is {d.get('normal', 0)} drinks"
+    low, typ, high = d.get("extra_low", 0), d.get("extra_typical", 0), d.get("extra_high", 0)
+    sign = lambda v: f"+{v}" if v > 0 else str(v)  # noqa: E731
+    rng = sign(typ) if low == high else f"{sign(low)} to {sign(high)} (typically {sign(typ)})"
+    names = {e.get("name") for e in result.get("examples", [])}
+    if len(names) == 1:
+        name = names.pop()
+        who = f"Last {name}" if n == 1 else f"Last {n} {name}s"
+    else:
+        who = f"{n} past event{'s' if n != 1 else ''}"
+    text = f"{who}: {rng} drinks on a normal {d.get('normal', 0)}"
+    if food.get("extra_typical"):
+        text += f"; pastries {sign(food['extra_typical'])}"
+    if result.get("confidence") == "rough":
+        text += " (rough guide)"
+    return text
 
 
 def _coverage(result: Row, ctx: RunContext) -> str | None:
@@ -173,7 +208,7 @@ def _coverage(result: Row, ctx: RunContext) -> str | None:
     # group consecutive hours with the same headcount
     groups: list[tuple[datetime, datetime, int]] = []
     for hour in hours:
-        start = _local(hour["hour_start"], ctx.tz)
+        start = local_time(hour["hour_start"], ctx.tz)
         if start is None:
             continue
         count = int(hour["scheduled_employees"])
@@ -185,7 +220,7 @@ def _coverage(result: Row, ctx: RunContext) -> str | None:
     parts = [f"{clock(a)}–{clock(b)} has {n} of {required}" for a, b, n in groups if n < (required or 0)]
     if not parts:
         return None
-    first = _local(hours[0]["hour_start"], ctx.tz)
+    first = local_time(hours[0]["hour_start"], ctx.tz)
     prefix = f"{day(first)}: " if first else ""
     return f"Short-staffed {prefix}" + ", ".join(parts) + " people"
 
@@ -223,12 +258,19 @@ def _order(args: Row, result: Row | None, ctx: RunContext, done: bool) -> str:
     if isinstance(lines, str):
         return "Order the shortfall from the simulated supplier"
     items = _list(f"{quantity(l['quantity'], l.get('unit'))} {ctx.ingredient(l['ingredient_id']).lower()}" for l in lines)
-    delivery = _local((result or {}).get("confirmed_delivery_at") or args.get("requested_delivery_at"), ctx.tz)
+    delivery = local_time((result or {}).get("confirmed_delivery_at") or args.get("requested_delivery_at"), ctx.tz)
     when = f" for {day(delivery)} {clock(delivery)}" if delivery else ""
     if done:
         ref = (result or {}).get("order_ref", "")
         return f"Simulated supplier confirmed {items}{when}" + (f" ({ref})" if ref else "")
-    return f"Order {items}{when} (simulated supplier)"
+    supplier_id = args.get("supplier_id")
+    try:
+        from backend.modules.purchasing.service import get_supplier
+
+        name = get_supplier(ctx.cafe_id, supplier_id if isinstance(supplier_id, str) and not supplier_id.startswith("$") else None)["name"]
+    except Exception:  # noqa: BLE001 - the summary must never break the run view
+        name = "simulated supplier"
+    return f"Order {items}{when} from {name} (simulated)"
 
 
 def _sales_summary(result: Row, ctx: RunContext) -> str:
@@ -240,6 +282,18 @@ def _sales_summary(result: Row, ctx: RunContext) -> str:
     if revenue is not None:
         parts.append(f"${quantity(revenue, '')} revenue")
     return ", ".join(parts) or "Sales summarized"
+
+
+def _suppliers(result: Row, ctx: RunContext) -> str:
+    options = [o for o in result.get("suppliers", []) if o.get("carries_all")]
+    if not options:
+        return "No supplier carries everything on this order"
+    names = [f"{o['name']}{' (usual)' if o.get('usual') else ''}" for o in options]
+    picked = next((o for o in options if o["supplier_id"] == result.get("recommended_supplier_id")), None)
+    text = f"{_list(names)} carry it"
+    if picked:
+        text += f"; ordering from {picked['name']} (${picked['total_cents'] / 100:,.2f})"
+    return text
 
 
 def summarize_step(node: Any, ctx: RunContext) -> str | None:
@@ -269,6 +323,8 @@ def summarize_step(node: Any, ctx: RunContext) -> str | None:
         return _projection(result, ctx)
     if action == "calculate_shortfall" and isinstance(result, dict):
         return _shortfall(result, ctx)
+    if action == "estimate_event_demand" and isinstance(result, dict):
+        return _demand(result, ctx)
     if action == "coverage_report" and isinstance(result, dict):
         return _coverage(result, ctx)
     if action == "list_employees" and isinstance(result, list):
@@ -277,6 +333,8 @@ def summarize_step(node: Any, ctx: RunContext) -> str | None:
         return _shifts(result, ctx)
     if action == "sales_summary" and isinstance(result, dict):
         return _sales_summary(result, ctx)
+    if action == "find_suppliers" and isinstance(result, dict):
+        return _suppliers(result, ctx)
     if node.side_effect == "write":
         return _change_line(action, args, result if isinstance(result, dict) else None, ctx, done=True)
     if isinstance(result, list):

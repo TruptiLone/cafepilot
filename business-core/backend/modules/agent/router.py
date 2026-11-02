@@ -16,10 +16,15 @@ from backend.modules.agent.planner import (
     PlannerUnavailableError,
     build_planning_context,
     create_planner_client,
+    read_calls,
 )
 from backend.models.cafe import Cafe
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
+from backend.modules.agent.status import CafeStatus, cafe_status, event_id_for_run, event_plan
 from backend.modules.agent.summaries import summarize_run
+from backend.modules.agent.acknowledgements import Acknowledgement, Stage, change_statuses
+from backend.modules.purchasing.service import settle_due
+from backend.modules.agent.replanning import NothingToReplanError, replan_request, replans_of
 from backend.modules.agent.executor import (
     ApprovalStateError,
     EditValidationError,
@@ -72,13 +77,15 @@ def get_planner_client() -> Any:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(error)) from error
 
 
-def _plan(request: PlanRequest, database_session: Session, client: Any) -> tuple[PlanningOutcome, Any]:
+def _plan(
+    request: PlanRequest, database_session: Session, client: Any, purpose: str = "plan", event_id: str | None = None
+) -> tuple[PlanningOutcome, Any]:
     try:
-        context = build_planning_context(database_session, request.cafe_id, request.as_of)
+        context = build_planning_context(database_session, request.cafe_id, request.as_of, event_id=event_id)
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     try:
-        outcome = plan_and_validate(request.query, context, client)
+        outcome = plan_and_validate(request.query, context, client, purpose=purpose)
     except (PlannerError, ModelCallError) as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
     return outcome, context
@@ -138,6 +145,16 @@ class NodeRunOut(BaseModel):
     summary: str | None = Field(
         default=None, description="One plain line about this step, written by code from its real result."
     )
+    acknowledgement: Acknowledgement | None = Field(
+        default=None, description="For finished changes: what happened, details, and an honest caveat."
+    )
+    lifecycle: list[Stage] | None = Field(
+        default=None, description="Changes only: Proposed → Approved → Sent/Offered → Confirmed/Accepted or Rejected/Declined."
+    )
+    external_status: str | None = Field(
+        default=None, description="sent / confirmed / rejected (orders), offered / accepted / declined (shifts)."
+    )
+    replanned_in: str | None = Field(default=None, description="The run that replanned this failed change.")
 
 
 class RunOut(BaseModel):
@@ -158,15 +175,40 @@ class RunOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     nodes: list[NodeRunOut]
+    closing_message: str | None = Field(
+        default=None, description="Muse's closing line once every change has been decided."
+    )
+    waiting_on: list[str] = Field(
+        default_factory=list, description="Suppliers or staff whose answer is still pending (poll while non-empty)."
+    )
+    parent_run_id: str | None = None
+    parent_node_id: str | None = None
+    event: DetectedEvent | None = Field(default=None, description="The event this plan is for, if any.")
 
 
 def _run_out(database_session: Session, run: Any) -> RunOut:
     """Run with a code-written one-line summary on every step."""
     cafe = database_session.get(Cafe, run.cafe_id)
     summaries = summarize_run(list(run.nodes), run.cafe_id, cafe.timezone if cafe else "UTC")
+    if settle_due(database_session, cafe_id=run.cafe_id):  # reveal simulated supplier / staff answers that are due
+        database_session.commit()
     out = RunOut.model_validate(run)
+    statuses, closing, waiting = change_statuses(database_session, run)
+    replans = replans_of(database_session, run.run_id)
     for node in out.nodes:
+        node.replanned_in = replans.get(node.node_id)
         node.summary = summaries.get(node.node_id)
+        status_ = statuses.get(node.node_id)
+        if status_ is not None:
+            node.acknowledgement = status_.acknowledgement
+            node.lifecycle = status_.lifecycle
+            node.external_status = status_.external_status
+            if status_.acknowledgement and status_.acknowledgement.tone in ("done", "waiting", "problem"):
+                node.summary = status_.acknowledgement.headline
+    out.closing_message = closing
+    out.waiting_on = waiting
+    event_id = event_id_for_run(database_session, run)
+    out.event = get_event(database_session, event_id) if event_id else None
     return out
 
 
@@ -203,7 +245,19 @@ def start_run(
     client: Any = Depends(get_planner_client),
 ) -> CreateRunResponse:
     """Plan, validate and start running: reads execute now, writes wait for approval."""
-    outcome, context = _plan(request, database_session, client)
+    return _start(request, database_session, client)
+
+
+def _start(
+    request: PlanRequest,
+    database_session: Session,
+    client: Any,
+    parent_run_id: str | None = None,
+    parent_node_id: str | None = None,
+    event_id: str | None = None,
+) -> CreateRunResponse:
+    purpose = "replan" if parent_run_id else "plan"
+    outcome, context = _plan(request, database_session, client, purpose, event_id)
     planning = _plan_response(outcome, context)
     if not outcome.validation.valid:
         return CreateRunResponse(planning=planning, run=None)
@@ -216,6 +270,8 @@ def start_run(
         validation=outcome.validation,
         model=outcome.result.model,
         attempts=outcome.attempts,
+        parent_run_id=parent_run_id,
+        parent_node_id=parent_node_id,
     )
     run = execute(database_session, run.run_id)
     return CreateRunResponse(planning=planning, run=_run_out(database_session, run))
@@ -301,20 +357,63 @@ def decide_all_steps(
     return _run_out(database_session, run)
 
 
+class ModelCallOut(BaseModel):
+    """One model call from var/llm_calls.jsonl. The request text and raw answer stay in the file."""
+
+    at: datetime | None = None
+    model: str | None = None
+    purpose: str | None = Field(None, description="plan, replan (after a change fell through), or a vision read")
+    attempt: int | None = Field(None, description="1 for the first try, 2 after the validator sent it back")
+    latency_ms: int | None = None
+    ok: bool
+    error: str | None = None
+
+
+@router.get("/model-calls", response_model=list[ModelCallOut])
+def list_model_calls(limit: int = Query(100, ge=1, le=500)) -> list[ModelCallOut]:
+    """Read-only: the newest model calls, failed ones included, newest first."""
+    return [
+        ModelCallOut(
+            at=record.get("at"),
+            model=record.get("model"),
+            purpose=record.get("purpose"),
+            attempt=record.get("attempt"),
+            latency_ms=record.get("latency_ms"),
+            ok=not record.get("error"),
+            error=record.get("error"),
+        )
+        for record in read_calls(limit)
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Events: the trigger that starts a plan
 # ---------------------------------------------------------------------------
 
 
+@router.get("/status", response_model=CafeStatus)
+def read_cafe_status(cafe_id: str = Query("CAFE001"), database_session: Session = Depends(get_db)) -> CafeStatus:
+    """The read-only café panel: stock for the next busy event, staff cover, approvals, sales, events."""
+    settle_due(database_session, cafe_id=cafe_id)
+    database_session.commit()
+    try:
+        return cafe_status(database_session, cafe_id)
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+
+
 @router.get("/events", response_model=list[DetectedEvent])
-def list_events(cafe_id: str = Query("CAFE001")) -> list[DetectedEvent]:
-    """Events Muse has detected near the café (demo feed, labeled with is_demo)."""
-    return detected_events(cafe_id)
+def list_events(cafe_id: str = Query("CAFE001"), database_session: Session = Depends(get_db)) -> list[DetectedEvent]:
+    """Upcoming events with expected demand computed from sales history (is_demo marks demo data)."""
+    events = detected_events(database_session, cafe_id)
+    for event in events:
+        event.run_id, event.latest_run_id, event.plan_state = event_plan(database_session, event.event_id)
+    return events
 
 
 @router.get("/events/{event_id}", response_model=DetectedEvent)
-def read_event(event_id: str) -> DetectedEvent:
-    event = get_event(event_id)
+def read_event(event_id: str, database_session: Session = Depends(get_db)) -> DetectedEvent:
+    event = get_event(database_session, event_id)
     if event is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     return event
@@ -327,8 +426,28 @@ def start_run_for_event(
     client: Any = Depends(get_planner_client),
 ) -> CreateRunResponse:
     """The owner said "Yes, check": plan and start running for this event."""
-    event = get_event(event_id)
+    event = get_event(database_session, event_id)
     if event is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     request = PlanRequest(query=event.request, cafe_id=event.cafe_id, as_of=event.knowledge_as_of)
-    return start_run(request, database_session, client)
+    return _start(request, database_session, client, event_id=event_id)
+
+
+@router.post("/runs/{run_id}/nodes/{node_id}/replan", response_model=CreateRunResponse)
+def replan_step(
+    run_id: str,
+    node_id: str,
+    database_session: Session = Depends(get_db),
+    client: Any = Depends(get_planner_client),
+) -> CreateRunResponse:
+    """A supplier rejected an order or an employee declined a shift: plan another way."""
+    run = _load(database_session, run_id)
+    try:
+        query = replan_request(database_session, run, node_id)
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found") from error
+    except NothingToReplanError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    request = PlanRequest(query=query, cafe_id=run.cafe_id, as_of=run.as_of)
+    return _start(request, database_session, client, parent_run_id=run_id, parent_node_id=node_id,
+                  event_id=event_id_for_run(database_session, run))

@@ -118,11 +118,15 @@ def create_run(
     validation: ValidationResult,
     model: str,
     attempts: int,
+    parent_run_id: str | None = None,
+    parent_node_id: str | None = None,
 ) -> AgentPlanRun:
     if not validation.valid:
         raise ValueError("only a valid plan can be run")
     now = _now()
     run = AgentPlanRun(
+        parent_run_id=parent_run_id,
+        parent_node_id=parent_node_id,
         run_id=f"RUN-{uuid4().hex[:12].upper()}",
         cafe_id=cafe_id,
         query=query,
@@ -193,6 +197,9 @@ def _prepare(session: Session, run: AgentPlanRun, node: AgentNodeRun, results: d
             _finish(node, "skipped", error=reason)
             return False
         REGISTRY[node.action].input_model.model_validate(resolved)
+        normalize = REGISTRY[node.action].normalize
+        if normalize:
+            resolved = normalize(resolved)
     except (KeyError, IndexError, TypeError) as error:
         _finish(node, "failed", error=f"could not resolve arguments: {error}")
         return False
@@ -264,7 +271,7 @@ def _invoke(session: Session, node: AgentNodeRun) -> None:
     node.started_at = _now()
     session.commit()  # services open their own transaction for writes
     try:
-        result = action.run(session, args, record_id=record_id)
+        result = action.run(session, args, record_id=record_id, run_id=node.run_id, node_id=node.node_id)
     except Exception as error:  # domain errors are reported on the step, not raised
         session.rollback()
         already = action.existing(session, args, record_id) if node.side_effect == "write" else None
@@ -376,6 +383,9 @@ def decide(
             raise EditValidationError(f"Your changes are not valid: {details}") from error
         edited = validated.model_dump(mode="json", exclude_unset=False)
         edited = {k: v for k, v in edited.items() if k in original or k in edited_args}
+    # The approval keeps what the owner entered; the step runs with it in the form the action uses.
+    normalize = REGISTRY[node.action].normalize
+    final = normalize(edited) if edited is not None and normalize else edited
 
     session.add(
         AgentApproval(
@@ -391,9 +401,9 @@ def decide(
             decided_at=_now(),
         )
     )
-    if edited is not None and edited != original:
-        node.resolved_args = edited
-        node.idempotency_key = write_fingerprint(run.cafe_id, node.action, edited)
+    if final is not None and final != original:
+        node.resolved_args = final
+        node.idempotency_key = write_fingerprint(run.cafe_id, node.action, final)
     if decision == "approved":
         node.status = "approved"
     else:

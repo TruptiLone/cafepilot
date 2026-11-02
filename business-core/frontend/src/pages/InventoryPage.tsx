@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   getInventoryData,
   getInventoryMovements,
@@ -55,7 +56,20 @@ function formatCategory(value: string) {
 }
 
 function InventoryPage() {
-  const [activeTab, setActiveTab] = useState<InventoryTab>("ingredients");
+  const [searchParams] = useSearchParams();
+  const linkedTab = searchParams.get("tab");
+  const [activeTab, setActiveTab] = useState<InventoryTab>(
+    tabs.some((tab) => tab.id === linkedTab) ? (linkedTab as InventoryTab) : "ingredients",
+  );
+  // Arriving from a delivery check: highlight what that delivery changed.
+  const highlight = useMemo(
+    () => ({
+      receipt: searchParams.get("receipt"),
+      items: new Set((searchParams.get("items") ?? "").split(",").filter(Boolean)),
+    }),
+    [searchParams],
+  );
+  const slip = searchParams.get("slip");
   const [data, setData] = useState<InventoryData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -66,7 +80,14 @@ function InventoryPage() {
   const [isMovementEntryOpen, setIsMovementEntryOpen] = useState(false);
   const [isCountEntryOpen, setIsCountEntryOpen] = useState(false);
   const [verificationCountId, setVerificationCountId] = useState<string | null>(null);
-  const [notice, setNotice] = useState<PageNotice | null>(null);
+  const [notice, setNotice] = useState<PageNotice | null>(() =>
+    highlight.receipt
+      ? {
+          kind: "success",
+          message: `Delivery ${slip ?? highlight.receipt} was added to stock. The highlighted rows came from it.`,
+        }
+      : null,
+  );
   const countDetailController = useRef<AbortController | null>(null);
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
@@ -348,9 +369,9 @@ function InventoryPage() {
                 />
               )}
               {activeTab === "movements" && (
-                <MovementsTable data={data} itemLookup={itemLookup} />
+                <MovementsTable data={data} itemLookup={itemLookup} receipt={highlight.receipt} />
               )}
-              {activeTab === "stock" && <StockTable data={data} />}
+              {activeTab === "stock" && <StockTable data={data} highlighted={highlight.items} />}
             </>
           )}
         </div>
@@ -526,11 +547,18 @@ function CountsTable({
 function MovementsTable({
   data,
   itemLookup,
+  receipt = null,
 }: {
   data: InventoryData;
   itemLookup: Map<string, InventoryData["items"][number]>;
+  receipt?: string | null;
 }) {
   if (!data.movements.length) return <EmptyState label="stock movements" />;
+  const fromReceipt = (movement: InventoryMovement) =>
+    receipt != null && movement.source_type === "receipt" && movement.source_id.startsWith(`${receipt}:`);
+  const movements = receipt
+    ? [...data.movements.filter(fromReceipt), ...data.movements.filter((m) => !fromReceipt(m))]
+    : data.movements;
   return (
     <DataTable>
       <thead>
@@ -544,10 +572,10 @@ function MovementsTable({
         </tr>
       </thead>
       <tbody>
-        {data.movements.map((movement) => {
+        {movements.map((movement) => {
           const quantity = Number(movement.quantity_delta);
           return (
-            <tr key={movement.movement_id}>
+            <tr key={movement.movement_id} className={fromReceipt(movement) ? "is-highlighted" : undefined}>
               <td className="primary-cell">
                 {itemLookup.get(movement.ingredient_id)?.name ?? movement.ingredient_id}
               </td>
@@ -566,8 +594,11 @@ function MovementsTable({
   );
 }
 
-function StockTable({ data }: { data: InventoryData }) {
+function StockTable({ data, highlighted = new Set<string>() }: { data: InventoryData; highlighted?: Set<string> }) {
   if (!data.stock.length) return <EmptyState label="stock estimates" />;
+  const rows = highlighted.size
+    ? [...data.stock.filter((s) => highlighted.has(s.ingredient_id)), ...data.stock.filter((s) => !highlighted.has(s.ingredient_id))]
+    : data.stock;
   return (
     <DataTable>
       <thead>
@@ -580,9 +611,12 @@ function StockTable({ data }: { data: InventoryData }) {
         </tr>
       </thead>
       <tbody>
-        {data.stock.map((stock) => (
-          <tr key={stock.ingredient_id}>
-            <td className="primary-cell">{stock.name}</td>
+        {rows.map((stock) => (
+          <tr key={stock.ingredient_id} className={highlighted.has(stock.ingredient_id) ? "is-highlighted" : undefined}>
+            <td className="primary-cell">
+              {stock.name}
+              {highlighted.has(stock.ingredient_id) && <span className="row-tag">Includes delivery</span>}
+            </td>
             <td className={stock.stock_status === "unknown" ? "unknown-value" : ""}>
               {stock.estimated_quantity === null
                 ? "Unknown"

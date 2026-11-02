@@ -17,6 +17,8 @@ const ACTION_LABELS: Record<string, string> = {
   list_shifts: "Check existing shifts",
   coverage_report: "Check staff coverage",
   calculate_shortfall: "Work out what to order",
+  estimate_event_demand: "Expected demand from past events",
+  get_purchase_order: "Look up the order",
   schedule_shift: "Add a shift",
   cancel_shift: "Cancel a shift",
   propose_supplier_order: "Order from supplier",
@@ -46,6 +48,9 @@ export const RUN_STATUS_LABELS: Record<RunStatus, string> = {
 
 /** Status for a full run: tells "you said no" apart from "something broke". */
 export function runStatusLabel(run: AgentRun): { label: string; tone: string } {
+  if (run.waiting_on && run.waiting_on.length > 0 && run.status !== "awaiting_approval" && run.status !== "running") {
+    return { label: `Waiting on ${run.waiting_on.join(" and ")}`, tone: "awaiting_approval" };
+  }
   if (run.status !== "completed_with_issues") {
     return { label: RUN_STATUS_LABELS[run.status], tone: run.status };
   }

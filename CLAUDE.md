@@ -8,6 +8,21 @@ OpenAI-compatible Meta Model API.
 validates every step, does all arithmetic, and pauses every change for the owner's OK. Never let the
 model type a quantity, price, time offset or ID that code can compute or look up.
 
+## Meta models checklist (remind Trupti every session)
+
+These must appear in the GitHub README and the 3-minute demo. Only claim a model as used once it is
+actually wired in; mark the rest as planned.
+
+| Model | Use in CaféPilot | Status |
+|---|---|---|
+| [Muse Spark series](https://dev.meta.ai/models/muse-spark) | Inventory use case (slip + delivery photo reading); also today's planner | ✅ in use (`muse-spark-1.3`) |
+| [Muse Wonder](https://dev.meta.ai/models/muse-wonder) | Planning complex queries (the plan DAG) | ⏳ to wire in |
+| [Muse Image](https://dev.meta.ai/models/muse-image) | Instagram post ("Share it?" after approval) | ⏳ to build |
+| [Muse Voice Transcribe](https://dev.meta.ai/models/muse-voice-transcribe) | Voice bot for complex queries and approvals | ⏳ to build |
+| [Muse Code](https://dev.meta.ai/lp/muse-code) | Coding agent: refactors, generating docs | ⏳ to use |
+| [SAM 3.1](https://dev.meta.ai/models/sam-3-1) via [Meta Model API](https://dev.meta.ai/products/meta-model-api) | TBD | TBD |
+| [Muse Glimmer](https://dev.meta.ai/models/muse-glimmer), [Muse Spark Open](https://dev.meta.ai/models/muse-spark-open) (open weights) | TBD | TBD |
+
 ## Working with Trupti
 
 - Plain, short explanations. She runs commands herself on a MacBook (zsh, `.venv`, Cursor).

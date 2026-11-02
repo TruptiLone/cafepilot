@@ -35,18 +35,19 @@ MARKET = "EVT_SC_FARMERS_MARKET_20261101"
 
 
 class Router:
-    """Stands in for Muse Spark: returns the routing it is given and records the call."""
+    """Stands in for Muse Spark: the first call routes, the second writes the reply (fails if none given)."""
 
-    def __init__(self, routing: dict | str | Exception) -> None:
+    def __init__(self, routing: dict | str | Exception, reply: str | None = None) -> None:
         self.calls: list[dict] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-        self._routing = routing
+        self._answers = [routing, reply if reply is not None else RuntimeError("no reply in this test")]
 
     def _create(self, **kwargs):
         self.calls.append(kwargs)
-        if isinstance(self._routing, Exception):
-            raise self._routing
-        content = self._routing if isinstance(self._routing, str) else json.dumps(self._routing)
+        answer = self._answers[min(len(self.calls), 2) - 1]
+        if isinstance(answer, Exception):
+            raise answer
+        content = answer if isinstance(answer, str) else json.dumps(answer)
         return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))], usage=None)
 
 
@@ -227,8 +228,8 @@ def test_deliveries_list_the_open_order_and_regular_delivery(session: Session) -
         (regular["quantity"], regular["unit"], "Fri Oct 30, 6 AM · regular delivery"),
         (num(po_line.quantity), po_line.unit, "Sun Nov 1, 5:30 AM · Willow Ridge Dairy Supply PO-1042, confirmed"),
     ]
-    assert body["lines"] == ["Next: whole milk 12 L Fri Oct 30 6 AM (regular delivery), "
-                             "whole milk 12 L Sun Nov 1 5:30 AM (Willow Ridge Dairy Supply PO-1042, confirmed)."]
+    assert body["lines"] == ["On order: 12 L whole milk Sun Nov 1 5:30 AM from Willow Ridge Dairy Supply PO-1042 (confirmed). "
+                             "Regular delivery: 12 L whole milk Fri Oct 30 6 AM."]
     assert body["lookups"][0]["args"]["start_at"] == AS_OF  # the reference time, filled in by code
 
 
@@ -236,7 +237,17 @@ def test_deliveries_say_plainly_when_no_order_is_open(session: Session) -> None:
     session.delete(session.scalar(select(PurchaseOrder).where(PurchaseOrder.po_number == "PO-1042")))
     session.commit()  # rolled back with the test
     body = ask(session, "when does the milk arrive", answer(("list_deliveries", {"ingredient_id": "WHOLE_MILK"})))
-    assert body["lines"] == ["No supplier orders are open. Next: whole milk 12 L Fri Oct 30 6 AM (regular delivery)."]
+    assert body["lines"] == ["Nothing extra is on order. Regular delivery: 12 L whole milk Fri Oct 30 6 AM."]
+
+
+def test_milk_means_every_milk_and_says_which_have_no_delivery(session: Session) -> None:
+    session.delete(session.scalar(select(PurchaseOrder).where(PurchaseOrder.po_number == "PO-1042")))
+    session.commit()
+    milks = ["WHOLE_MILK", "OAT_MILK", "ALMOND_MILK", "SKIM_MILK"]
+    body = ask(session, "when does the milk arrive", answer(("list_deliveries", {"ingredient_ids": milks})))
+    assert body["lines"] == ["Nothing extra is on order. Regular delivery: 5 L oat milk Fri Oct 30 6 AM, "
+                             "12 L whole milk Fri Oct 30 6 AM. No scheduled delivery for almond milk or skim milk."]
+    assert body["follow_ups"][0] == {"label": "Plan an order for almond milk", "kind": "plan", "text": "Order almond milk for this week"}
 
 
 def test_deliveries_for_an_unknown_item(session: Session) -> None:
@@ -306,11 +317,66 @@ def test_at_most_three_actions(session: Session) -> None:
 
 
 def test_every_call_is_logged_with_model_and_latency(session: Session, log_file) -> None:
-    body = ask(session, "who works here", answer(("list_employees", {})))
-    [record] = [json.loads(line) for line in log_file.read_text().splitlines()]
-    assert (record["purpose"], record["model"], record["attempt"]) == ("chat", body["model"], 1)
-    assert record["latency_ms"] == body["latency_ms"] and isinstance(body["latency_ms"], int)
+    body = ask(session, "who works here", Router(answer(("list_employees", {})), "Here's who's on the team."))
+    route, reply = [json.loads(line) for line in log_file.read_text().splitlines()]
+    assert (route["purpose"], route["model"], route["attempt"]) == ("chat", body["model"], 1)
+    assert (reply["purpose"], reply["response"]) == ("chat_reply", "Here's who's on the team.")
+    assert route["latency_ms"] + reply["latency_ms"] == body["latency_ms"] and isinstance(body["latency_ms"], int)
     assert body["model"] == "muse-spark-1.3"
+
+
+# ---------- Spark's reply, checked by code ------------------------------------------------
+
+
+LOW_MUFFINS = answer(("get_stock_estimates", {"ingredient_id": "BANANA_NUT_MUFFIN"}))
+
+
+def test_sparks_reply_is_used_when_its_numbers_check_out(session: Session) -> None:
+    text = "You're down to 9 banana nut muffins, under your reorder point of 12. Want me to plan an order?"
+    body = ask(session, "do you have banana nut muffins", Router(LOW_MUFFINS, text))
+    assert (body["reply"], body["reply_by"]) == (text, "muse")
+    assert body["lines"] == ["Below reorder point: Banana Nut Muffin (9 left, reorder at 12)."]  # the code answer stays
+
+
+def test_a_made_up_number_is_rejected_and_code_answers(session: Session) -> None:
+    body = ask(session, "do you have banana nut muffins", Router(LOW_MUFFINS, "You have 437 banana nut muffins, plenty for Sunday."))
+    assert body["reply_by"] == "code"
+    assert body["reply"] == "Below reorder point: Banana Nut Muffin (9 left, reorder at 12)."
+
+
+def test_unit_conversions_code_shows_are_allowed(session: Session) -> None:
+    text = "Oat milk is down to 1.25 L, under its 3 L reorder point."
+    body = ask(session, "how's the oat milk", Router(answer(("get_stock_estimates", {"ingredient_id": "OAT_MILK"})), text))
+    assert (body["reply"], body["reply_by"]) == (text, "muse")
+
+
+def test_a_failed_reply_falls_back_to_the_code_answer(session: Session) -> None:
+    body = ask(session, "do you have banana nut muffins", Router(LOW_MUFFINS))  # the reply call raises
+    assert (body["reply_by"], body["reply"]) == ("code", "Below reorder point: Banana Nut Muffin (9 left, reorder at 12).")
+
+
+def test_number_check() -> None:
+    from backend.modules.agent.chat import allowed_numbers, unverified_numbers
+
+    allowed = allowed_numbers("q", [{"estimated_quantity": "1250.000", "reorder_point": "3000"}], [], [], [])
+    assert unverified_numbers("1.25 L left, reorder at 3 L (1250 mL)", allowed) == set()
+    assert unverified_numbers("about 1,300 mL", allowed) == {Decimal("1300")}
+
+
+# ---------- follow-ups (code) -----------------------------------------------------------------
+
+
+def test_low_stock_follow_ups_plan_an_order_and_check_the_event_day(session: Session) -> None:
+    body = ask(session, "are we low on anything", answer(("get_stock_estimates", {})))
+    assert body["follow_ups"] == [
+        {"label": "Plan an order for banana nut muffin", "kind": "plan", "text": "Order more banana nut muffin before we run out"},
+        {"label": "Check Sunday stock", "kind": "ask", "text": "Do we have enough stock for Sunday?"},  # the market, not Halloween
+    ]
+    assert [r["name"] for r in body["rows"][:2]] == ["Banana Nut Muffin", "Oat Milk"]  # low items lead the table
+
+
+def test_no_follow_ups_for_a_change(session: Session) -> None:
+    assert ask(session, "order more oat milk", {"intent": "needs_plan", "actions": []})["follow_ups"] == []
 
 
 def test_a_slow_model_times_out_with_a_clear_error(session: Session, log_file) -> None:

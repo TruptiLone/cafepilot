@@ -13,6 +13,7 @@ import json
 import re
 import time
 from datetime import datetime, time as clock_time, timedelta, timezone
+from decimal import Decimal
 from functools import lru_cache
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -102,11 +103,24 @@ Return ONLY one JSON object, no prose, no code fences:
 - Sales ("how many did we sell", "how was today"): sales_summary over the time window asked.
 - Staff ("who's working"): list_shifts over that window.
 - Deliveries ("when does the milk arrive", "what's coming"): list_deliveries with start_at = REFERENCE
-  now; set ingredient_id for one item (milk on its own means WHOLE_MILK). It covers open orders and
-  regular deliveries, so use it even when REFERENCE open_orders is empty.
+  now; set ingredient_id for one item, or ingredient_ids for several. "Milk" on its own means every
+  milk in REFERENCE ingredients. It covers open orders and regular deliveries, so use it even when
+  REFERENCE open_orders is empty.
 - needs_plan: the owner wants something changed, ordered, scheduled, cancelled or recorded. No actions.
 - out_of_scope: not about running this café. No actions.
 """
+
+
+REPLY_PROMPT = """You are Muse, the assistant at an independent café. Code has already looked up the
+answer to the owner's question; the results are below.
+
+Reply like a helpful café manager talking to the owner. Start with one or two plain sentences that
+answer the question directly. Don't repeat the table in the sentence, and no labels like
+'Below reorder point:'. If there is one useful next step, say it in one short sentence. Use only
+numbers that appear in the tool results. Cover everything the code answer says, including items with
+no scheduled delivery.
+
+Return only the reply: plain text, no markdown, at most three sentences."""
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +256,7 @@ def _stock_rows(
             estimated=bool(r.get("included_movement_count") or r.get("has_estimated_movements")),
             detail="; ".join(detail) or (None if known else f"stock {r.get('stock_status')}"),
         ))
+    rows.sort(key=lambda row: "below reorder point" not in (row.detail or ""))  # low items first, order kept
     lead = ("Below reorder point: " + "; ".join(low) + ".") if low else None
     unsure = [r["name"] for r in result if r.get("stock_status") != "known"]
     if whole_list:  # "are we low on anything": the low items, not a count of everything
@@ -317,6 +332,108 @@ def _ingredient_ids(args: dict[str, Any]) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
+# Spark's reply, checked by code
+# ---------------------------------------------------------------------------
+
+_NUMBER = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?")
+
+
+def _numbers(text: str) -> set[Decimal]:
+    return {Decimal(n.replace(",", "")).normalize() for n in _NUMBER.findall(text)}
+
+
+def allowed_numbers(message: str, results: list[Any], lines: list[str], rows: list[dict], notes: list[str]) -> set[Decimal]:
+    """Every number the reply may use: the results, what code already wrote (which carries its unit
+    conversions, like 1250 mL = 1.25 L), the rows, and the owner's own question."""
+    texts = [message, json.dumps(results, default=str), *lines, *notes]
+    texts += [f"{r.get('quantity') or ''} {r.get('detail') or ''}" for r in rows]
+    found = set().union(*(_numbers(t) for t in texts))
+    return found | {(n / 1000).normalize() for n in found}  # mL -> L, g -> kg, as code shows them
+
+
+def unverified_numbers(reply: str, allowed: set[Decimal]) -> set[Decimal]:
+    return {n for n in _numbers(reply) if n not in allowed}
+
+
+def _reply_row(row: "ChatRow") -> dict[str, Any]:
+    """A row as the owner reads it: the amount in the units code shows (5000 mL -> 5 L)."""
+    out: dict[str, Any] = {"name": row.name}
+    if row.quantity is not None:
+        out["amount"] = quantity(row.quantity, row.unit)
+    if row.detail:
+        out["detail"] = row.detail
+    return out
+
+
+def _reply(client: Any, model: str, message: str, lookups: list["ChatLookup"], notes: list[str]) -> tuple[str | None, int]:
+    """Spark's reply sentences, or None when the call fails (the code answer is used instead)."""
+    payload = {"owner_message": message, "code_answer": [l.summary for l in lookups if l.summary], "notes": notes,
+               # the rows the owner sees (the first five): a bigger payload makes Spark slower, not better
+               "results": [{"lookup": l.action, "rows": [_reply_row(r) for r in l.rows[:5]]} for l in lookups if not l.error]}
+    messages = [{"role": "system", "content": REPLY_PROMPT}, {"role": "user", "content": json.dumps(payload, default=str)}]
+    started = time.monotonic()
+    record: dict[str, Any] = {"at": datetime.now(timezone.utc).isoformat(), "purpose": "chat_reply", "attempt": 1,
+                              "model": model, "query": message}
+    try:
+        # Writing two sentences from checked results needs little reasoning: minimal keeps it near 4 s.
+        response = client.chat.completions.create(model=model, messages=messages, temperature=0, reasoning_effort="minimal")
+        text = (response.choices[0].message.content or "").strip()
+    except Exception as error:  # a reply that fails falls back to code; it never fails the answer
+        record.update(latency_ms=int((time.monotonic() - started) * 1000), error=f"{type(error).__name__}: {error}")
+        _log_call(record)
+        return None, record["latency_ms"]
+    record.update(latency_ms=int((time.monotonic() - started) * 1000), response=text)
+    _log_call(record)
+    return text or None, record["latency_ms"]
+
+
+# ---------------------------------------------------------------------------
+# Follow-ups (code)
+# ---------------------------------------------------------------------------
+
+
+def _ask(label: str, text: str | None = None) -> dict[str, str]:
+    return {"label": label, "kind": "ask", "text": text or label}
+
+
+def _plan(label: str, text: str) -> dict[str, str]:
+    return {"label": label, "kind": "plan", "text": text}
+
+
+def follow_ups(lookups: list["ChatLookup"], results: dict[str, Any], reference: dict[str, Any], tz: ZoneInfo) -> list[dict[str, str]]:
+    """Up to two next steps chosen by code. A "plan" chip hands its text to the plan flow; chat never writes."""
+    events = reference.get("upcoming_events") or []
+    busy = [e for e in events if e.get("event_type") != "holiday"] or events  # holidays are quieter days
+    event_day = local_time(str(busy[0]["starts_at"]), tz).strftime("%A") if busy else None
+    chips: list[dict[str, str]] = []
+    for lookup in lookups:
+        if lookup.error:
+            continue
+        if lookup.action == "get_stock_estimates":
+            low = [r.name for r in lookup.rows if "below reorder point" in (r.detail or "")]
+            if low:
+                chips.append(_plan(f"Plan an order for {low[0].lower()}", f"Order more {low[0].lower()} before we run out"))
+                if event_day:
+                    chips.append(_ask(f"Check {event_day} stock", f"Do we have enough stock for {event_day}?"))
+            else:
+                chips.append(_ask("Are we low on anything?"))
+        elif lookup.action == "list_deliveries":
+            missing = (results.get("list_deliveries") or {}).get("without_delivery") or []
+            if missing:
+                chips.append(_plan(f"Plan an order for {missing[0].lower()}", f"Order {missing[0].lower()} for this week"))
+            chips.append(_ask("Are we low on anything?"))
+        elif lookup.action == "sales_summary":
+            chips.append(_ask("How were sales this week?"))
+        elif lookup.action in ("list_shifts", "coverage_report") and event_day:
+            chips.append(_ask(f"Are we covered for {event_day}?", f"Are we covered for the event on {event_day}?"))
+    unique: list[dict[str, str]] = []
+    for chip in chips:
+        if chip["label"] not in {c["label"] for c in unique}:
+            unique.append(chip)
+    return unique[:2]
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -358,13 +475,14 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
     routing, latency_ms = _route(client, model, message, reference, channel)
     out: dict[str, Any] = {"intent": routing.intent, "message": message, "channel": channel, "model": model,
                            "latency_ms": latency_ms, "as_of": now.isoformat(), "lines": [], "rows": [], "notes": [],
-                           "lookups": [], "plan_request": None}
+                           "lookups": [], "plan_request": None, "reply": None, "reply_by": "code", "follow_ups": []}
     # A write anywhere means the owner wants a change: hand the text to the plan flow, run nothing.
     if routing.intent == "needs_plan" or any(a.action in REGISTRY and a.action not in READ_ACTIONS for a in routing.actions):
         out.update(intent="needs_plan", plan_request=message)
         return out
     if routing.intent == "out_of_scope":
         out["lines"] = ["That's not something I can help with here. Ask about stock, sales, staff, orders or events."]
+        out["reply"] = out["lines"][0]
         return out
 
     known_ids = {i["ingredient_id"] for i in reference["ingredients"]}
@@ -374,6 +492,7 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
     reorder = {iid: point for iid, _, point in items if point is not None}
     lookups: list[ChatLookup] = []
     notes: list[str] = []  # small lines after the rows
+    results: dict[str, Any] = {}
     try:
         for chosen in routing.actions:
             action = READ_ACTIONS.get(chosen.action)
@@ -393,6 +512,7 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
             try:
                 action.input_model.model_validate(args)
                 result = action.run(session, args)
+                results[chosen.action] = result
             except ValidationError as error:
                 lookups.append(ChatLookup(action=chosen.action, args=args,
                                           error="; ".join(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in error.errors()[:3])))
@@ -427,4 +547,14 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
         else ["I couldn't find a lookup for that. Ask about stock, sales, staff, orders or events."]
     )
     out["rows"] = [r.model_dump() for l in lookups for r in l.rows][:MAX_ROWS * MAX_ACTIONS]
+    out["follow_ups"] = follow_ups(lookups, results, reference, tz)
+
+    # Spark writes the reply; code keeps it only if every number in it is in the results.
+    out["reply"] = " ".join(out["lines"])
+    if results:
+        text, reply_ms = _reply(client, model, message, lookups, notes)
+        out["latency_ms"] += reply_ms
+        allowed = allowed_numbers(message, list(results.values()), out["lines"], out["rows"], notes)
+        if text and not unverified_numbers(text, allowed):
+            out.update(reply=text, reply_by="muse")
     return out

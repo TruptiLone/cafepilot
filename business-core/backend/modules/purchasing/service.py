@@ -339,7 +339,7 @@ OPEN_ORDER_STATUSES = ("sent", "confirmed", "partially_received")
 
 
 def upcoming_deliveries(
-    session: Session, cafe_id: str, start: datetime, end: datetime, ingredient_id: str | None = None
+    session: Session, cafe_id: str, start: datetime, end: datetime, ingredient_ids: list[str] | None = None
 ) -> list[dict[str, Any]]:
     """Open supplier orders and the café's regular deliveries arriving in [start, end), café time,
     earliest first. Sent orders are listed with their status: the supplier hasn't confirmed yet."""
@@ -356,13 +356,13 @@ def upcoming_deliveries(
         if not start <= arrives < end:
             continue
         for line in order.lines:
-            if ingredient_id and line.ingredient_id != ingredient_id:
+            if ingredient_ids and line.ingredient_id not in ingredient_ids:
                 continue
             out.append({"kind": "order", "arrives_at": arrives, "ingredient_id": line.ingredient_id,
                         "name": names.get(line.ingredient_id, line.ingredient_id), "quantity": line.quantity, "unit": line.unit,
                         "supplier": order.supplier_name, "po_number": order.po_number, "status": order.status})
     for rule in policies_for(cafe_id).get("standing_deliveries", []):
-        if ingredient_id and rule["ingredient_id"] != ingredient_id:
+        if ingredient_ids and rule["ingredient_id"] not in ingredient_ids:
             continue
         hour, minute = (int(x) for x in rule.get("at", "06:00").split(":"))
         day = start.astimezone(tz).date()

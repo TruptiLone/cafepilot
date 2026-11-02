@@ -1,4 +1,5 @@
 export const ACTIVE_CAFE_ID = "CAFE001";
+export const ACTIVE_CAFE_NAME = "CafePilot Demo Cafe";
 
 export type StepStatus =
   | "pending"

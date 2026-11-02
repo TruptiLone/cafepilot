@@ -61,9 +61,13 @@ type ChatPanelProps = {
   /** Reference time for "today" (the demo event's knowledge time); the server uses now without it. */
   asOf?: string;
   onPlan: (request: string) => void;
+  /** Kept mounted while another tab shows, so the conversation survives switching tabs. */
+  hidden?: boolean;
+  /** A question asked from elsewhere (the Plan tab's quick questions); a new id asks it. */
+  question?: { id: number; text: string } | null;
 };
 
-function ChatPanel({ asOf, onPlan }: ChatPanelProps) {
+function ChatPanel({ asOf, onPlan, hidden = false, question = null }: ChatPanelProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [text, setText] = useState("");
   const [speakOn, setSpeakOn] = useState(readPref);
@@ -76,6 +80,14 @@ function ChatPanel({ asOf, onPlan }: ChatPanelProps) {
   useEffect(() => {
     end.current?.scrollIntoView?.({ block: "end" });
   }, [turns]);
+
+  const asked = useRef<number | null>(null);
+  useEffect(() => {
+    if (question && asked.current !== question.id) {
+      asked.current = question.id;
+      void ask(question.text, "text");
+    }
+  });
 
   async function ask(question: string, channel: "text" | "voice") {
     const q = question.trim();
@@ -135,7 +147,7 @@ function ChatPanel({ asOf, onPlan }: ChatPanelProps) {
 
   return (
     <>
-      <div className="mz-scroll mz-chat" aria-label="Chat with Muse">
+      <div className="mz-scroll mz-chat" aria-label="Chat with Muse" hidden={hidden}>
         <div className="mz-chat__col">
           <div className="mz-chat__intro">
             <p className="mz-label">Ask Muse</p>
@@ -171,7 +183,7 @@ function ChatPanel({ asOf, onPlan }: ChatPanelProps) {
         </div>
       </div>
 
-      <form className="mz-cmd" onSubmit={onSubmit}>
+      <form className="mz-cmd" onSubmit={onSubmit} hidden={hidden}>
         <div className="mz-chat__col">
           <div className="mz-cmd__bar">
             <input

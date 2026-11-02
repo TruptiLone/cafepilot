@@ -3800,7 +3800,7 @@ body { background: var(--g-bg); }
 /* events */
 .mz-events { display: flex; flex-direction: column; gap: 8px; }
 .mz-ev { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 14px; padding: 12px 12px 12px 14px; background: #fff; border: 1px solid var(--g-line); border-radius: 12px; box-shadow: var(--g-shadow); transition: border-color 0.2s, box-shadow 0.2s; }
-.mz-ev.is-sel { border-color: #c9cce2; box-shadow: 0 0 0 3px rgba(42, 47, 107, 0.08); }
+.mz-ev.is-sel { border-color: #c9cce2; }
 .mz .mz-ev__open { display: flex; align-items: center; gap: 14px; min-width: 0; text-align: left; }
 .mz-ev__chip { flex: none; display: inline-flex; align-items: center; height: 26px; padding: 0 9px; border-radius: 7px; background: var(--g-indigo-tint); color: var(--g-indigo); font-size: 12px; font-weight: 600; letter-spacing: 0.06em; }
 .mz-ev__main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -4033,7 +4033,7 @@ body { background: var(--g-bg); }
 .sg-box[data-s="pending"] .sg-ico, .sg-box[data-s="skipped"] .sg-ico { box-shadow: inset 0 0 0 1.5px #c4c1bb; }
 .sg-box[data-s="running"] { border-color: var(--g-indigo); background: var(--g-indigo-tint); }
 .sg-box[data-s="running"] .sg-ico { border: 1.75px solid rgba(42,47,107,.2); border-top-color: var(--g-indigo); animation: mz-spin .9s linear infinite; }
-.sg-box[data-s="wait"] { border-color: var(--g-saffron); background: #fffcf6; box-shadow: 0 0 0 3px rgba(201,138,27,.12), 0 8px 22px rgba(201,138,27,.14); }
+.sg-box[data-s="wait"] { border-color: var(--g-saffron); background: #fffcf6; }
 .sg-box[data-s="wait"] .sg-ico { box-shadow: inset 0 0 0 1.5px var(--g-saffron); }
 .sg-box[data-s="wait"] .sg-ico::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--g-saffron); }
 .sg-box[data-s="declined"], .sg-box[data-s="failed"] { border-color: var(--g-red-line); background: var(--g-red-tint); }
@@ -4100,7 +4100,7 @@ body { background: var(--g-bg); }
 /* ---------- Ask Muse chat ---------- */
 .mz [hidden] { display: none !important; }
 /* One centered column (about 760 px) for the conversation and the input bar. */
-.mz-chat__col { width: 100%; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
+.mz-chat__col { width: 100%; max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 18px; }
 .mz-cmd .mz-chat__col { gap: 0; }
 .mz-chat__intro { display: flex; flex-direction: column; gap: 10px; }
 .mz-chat .mz-purpose { font-size: 15px; }
@@ -4145,4 +4145,45 @@ body { background: var(--g-bg); }
   .mz-a__rows tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; border-top: 1px solid var(--g-line); padding: 6px 0; }
   .mz-a__rows th, .mz-a__rows td { border-top: 0; padding: 0; }
   .mz-a__rows td:nth-child(3) { grid-column: 1 / -1; }
+}
+
+/* ---------- Ask CaféPilot polish: one 900 px column, larger type, event cards ---------- */
+.mz { --g-warm: #e98a6c; --g-warm-tint: #fdf0eb; --g-warm-ink: #a9472c; }
+.page--muse { font-size: 15px; }
+.mz-scroll > * { width: 100%; max-width: 900px; align-self: center; }
+.mz .mz-scroll > .mz-back { align-self: center; text-align: left; font-size: 14.5px; }
+.mz-cmd__bar, .mz-cmd > .mz-audit { width: 100%; max-width: 900px; margin-left: auto; margin-right: auto; }
+.mz-label { font-size: 12px; }
+.mz-greet { display: flex; align-items: center; gap: 14px; padding: 6px 0 4px; }
+.mz-greet__mark { width: 44px; height: 44px; flex: none; border-radius: 13px; background: var(--g-warm-tint); color: var(--g-warm-ink); display: grid; place-items: center; }
+.mz-greet__mark svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mz-greet__hi { font-family: var(--g-serif); font-size: 30px; font-weight: 400; line-height: 1.15; letter-spacing: -0.01em; }
+.mz-greet__sub { font-size: 16px; color: var(--g-ink-2); margin-top: 4px !important; }
+.mz-events { gap: 12px; }
+.mz-ev { grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; padding: 18px 20px; border-radius: 16px; align-items: center; }
+.mz-ev__chip { flex-direction: column; justify-content: center; width: 64px; height: 64px; padding: 0; border-radius: 14px;
+  background: var(--g-warm-tint); color: var(--g-warm-ink); font-size: 12px; letter-spacing: 0.05em; line-height: 1.2; }
+.mz-ev__chip b { font-size: 13px; font-weight: 700; }
+.mz-ev__main { display: flex; flex-direction: column; gap: 4px; }
+.mz-ev__title { font-size: 18px; font-weight: 600; line-height: 1.3; white-space: normal; }
+.mz-ev__pitch { font-size: 15.5px; line-height: 1.45; color: var(--g-ink); }
+.mz-ev__meta { font-size: 13.5px; white-space: normal; }
+.mz-ev__act { display: flex; align-items: center; gap: 10px; }
+.mz .mz-btn--lg { height: 42px; padding: 0 20px; font-size: 15px; border-radius: 10px; }
+.mz-plan__goal { font-size: 26px; }
+.mz-quick { display: flex; flex-direction: column; gap: 10px; margin-top: 18px; }
+.sg-box { max-width: min(290px, calc(100% - 16px)); }  /* keep a gap between boxes in the 900 px column */
+.mz-muse-line { font-size: 15.5px; }
+.mz-short ul { font-size: 15px; }
+.mz-foot { font-size: 13px; }
+.mz-cmd__bar input { font-size: 15px; }
+@media (max-width: 860px) {
+  .mz-greet__hi { font-size: 26px; }
+  .mz-ev { grid-template-columns: auto minmax(0, 1fr); gap: 14px; padding: 16px; }
+  .mz-ev__chip { width: 56px; height: 56px; }
+  .mz-ev__act { grid-column: 1 / -1; flex-direction: column; align-items: stretch; }
+  .mz-ev__act .mz-pill { align-self: flex-start; }
+  .mz-ev .mz-btn--lg { width: 100%; justify-content: center; }
+  .mz-plan__goal { font-size: 22px; }
+  .sg-box { max-width: none; }  /* stacked on phones: full width */
 }

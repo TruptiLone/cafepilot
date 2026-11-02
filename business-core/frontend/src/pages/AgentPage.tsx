@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
+  ACTIVE_CAFE_NAME,
   type AgentRun,
   type DetectedEvent,
   type PlanState,
@@ -16,7 +17,7 @@ import {
   startRun,
 } from "../api/agent";
 import StepDetail from "../components/agent/StepDetail";
-import ChatPanel from "../components/muse/ChatPanel";
+import ChatPanel, { EXAMPLES } from "../components/muse/ChatPanel";
 import PlanMap from "../components/muse/PlanMap";
 import { type SpeechRecognitionLike, speechRecognition } from "../components/muse/speech";
 import StoryGraph from "../components/muse/StoryGraph";
@@ -65,20 +66,28 @@ function eventChip(event: DetectedEvent) {
   return fmt(event.starts_at, { month: "short", day: "numeric" }).toUpperCase();
 }
 
-function eventLine(event: DetectedEvent) {
+/** "Good morning / afternoon / evening" by the café's clock. */
+function greeting(now = new Date()): string {
+  const hour = Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "America/Los_Angeles" }).format(now));
+  return hour < 12 ? "Good morning." : hour < 17 ? "Good afternoon." : "Good evening.";
+}
+
+/** The owner-voice line for an event card, from its history ([what to expect, the question]). */
+function eventPitch(event: DetectedEvent): [string, string] {
+  const day = fmt(event.starts_at, { weekday: "long" });
+  const subject = event.category === "farmers_market" ? `${day}'s market` : `${event.title} on ${day}`;
   const extra = event.expected.extra_drinks_typical;
-  const feel =
-    event.expected.confidence === "none"
-      ? "no past events like this"
-      : extra > 15
-        ? "usually much busier"
-        : extra > 0
-          ? "usually a little busier"
-          : extra < 0
-            ? "usually a little quieter"
-            : "usually a normal day";
+  if (event.expected.confidence === "none") return [`${subject} is new to us, with no history yet.`, "Want me to check we're ready?"];
+  if (extra > 15) return [`${subject} usually brings a crowd.`, "Want me to get ready?"];
+  if (extra > 0) return [`${subject} is usually a little busier.`, "Want me to check we're ready?"];
+  if (extra < 0) return [`${subject} is usually quieter.`, "Want me to check anyway?"];
+  return [`${subject} is usually a normal day.`, "Want me to check we're ready?"];
+}
+
+/** When and where: "Sun, Nov 1 · 8 AM–2 PM · 0.2 miles away" (how busy it gets is in eventPitch). */
+function eventLine(event: DetectedEvent) {
   const miles = event.distance_m ? ` · ${(event.distance_m / 1609).toFixed(1)} miles away` : "";
-  return `${fmt(event.starts_at, { weekday: "short", month: "short", day: "numeric" })} · ${fmt(event.starts_at, { hour: "numeric" })}–${fmt(event.ends_at, { hour: "numeric" })}${miles} · ${feel}`;
+  return `${fmt(event.starts_at, { weekday: "short", month: "short", day: "numeric" })} · ${fmt(event.starts_at, { hour: "numeric" })}–${fmt(event.ends_at, { hour: "numeric" })}${miles}`;
 }
 
 /** Everything that can change an event's plan state or what a box says. */
@@ -107,6 +116,7 @@ function AgentPage() {
   const [planTimes, setPlanTimes] = useState<Record<string, number>>({});
   const [request, setRequest] = useState("");
   const [tab, setTab] = useState<"events" | "chat">("events");
+  const [chatQuestion, setChatQuestion] = useState<{ id: number; text: string } | null>(null);
   const [view, setView] = useState<View>(() => (readPref(VIEW_KEY) === "technical" ? "technical" : "owner"));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -412,7 +422,7 @@ function AgentPage() {
               backToEvents();
             }}
           >
-            Events <span className="mz-tab__n">{events.length}</span>
+            Plan <span className="mz-tab__n">{events.length}</span>
           </button>
           <button
             type="button"
@@ -420,53 +430,87 @@ function AgentPage() {
             aria-current={tab === "chat" ? "page" : undefined}
             onClick={() => setTab("chat")}
           >
-            Chat
+            Ask
           </button>
-          <Link className="mz-tab" to="/receiving">
-            Deliveries
-          </Link>
         </nav>
 
-        {tab === "chat" && <ChatPanel asOf={chatAsOf} onPlan={planFromChat} />}
+        <ChatPanel hidden={tab !== "chat"} asOf={chatAsOf} onPlan={planFromChat} question={chatQuestion} />
 
         <div className="mz-scroll" hidden={tab === "chat"}>
           {!showPlan && (
             <section className="mz-events" aria-label="Events Muse found">
+              <header className="mz-greet">
+                <span className="mz-greet__mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M5 11h11v3.5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z" />
+                    <path d="M16 12h1.5a2.25 2.25 0 0 1 0 4.5H16" />
+                    <path d="M10.5 3v4.5M8.25 5.25h4.5" />
+                  </svg>
+                </span>
+                <div>
+                  <h2 className="mz-greet__hi">{greeting()}</h2>
+                  <p className="mz-greet__sub">Here's what's coming up for {ACTIVE_CAFE_NAME}. Nothing changes without your OK.</p>
+                </div>
+              </header>
               <p className="mz-label">
-                Muse found {events.length} {events.length === 1 ? "event" : "events"} coming up
-              </p>
-              <p className="mz-purpose">
-                Muse watches what's happening near the café and tells you before a day gets busier (or quieter) than usual, so
-                you can get stock and staff ready in time.
+                {events.length} {events.length === 1 ? "event" : "events"} coming up
               </p>
               {events.map((event) => {
                 const state = event.plan_state ?? "new";
+                const [expect, question] = eventPitch(event);
                 return (
                   <article key={event.event_id} className={`mz-ev${selectedEvent?.event_id === event.event_id ? " is-sel" : ""}`}>
-                    <span className="mz-ev__chip">{eventChip(event)}</span>
-                    <span className="mz-ev__main">
-                      <span className="mz-ev__title">{event.title}</span>
-                      <span className="mz-ev__meta">{eventLine(event)}</span>
+                    <span className="mz-ev__chip" aria-hidden="true">
+                      <b>{fmt(event.starts_at, { weekday: "short" }).toUpperCase()}</b>
+                      {eventChip(event)}
                     </span>
-                    {state !== "new" && <span className={`mz-pill is-${PLAN_STATE[state][0]}`}>{PLAN_STATE[state][1]}</span>}
-                    {state === "new" ? (
-                      <button
-                        type="button"
-                        className="mz-btn mz-btn--primary"
-                        disabled={planningFor !== null}
-                        onClick={() => plan(() => startEventRun(event.event_id), event.event_id)}
-                      >
-                        Let's plan ✨
-                      </button>
-                    ) : (
-                      <button type="button" className="mz-btn mz-btn--ghost" onClick={() => openEvent(event.event_id)}>
-                        Open plan
-                      </button>
-                    )}
+                    <div className="mz-ev__main">
+                      <h3 className="mz-ev__title">{event.title}</h3>
+                      <p className="mz-ev__pitch">
+                        {expect}
+                        {state === "new" ? ` ${question}` : ""}
+                      </p>
+                      <p className="mz-ev__meta">{eventLine(event)}</p>
+                    </div>
+                    <div className="mz-ev__act">
+                      {state !== "new" && <span className={`mz-pill is-${PLAN_STATE[state][0]}`}>{PLAN_STATE[state][1]}</span>}
+                      {state === "new" ? (
+                        <button
+                          type="button"
+                          className="mz-btn mz-btn--primary mz-btn--lg"
+                          disabled={planningFor !== null}
+                          onClick={() => plan(() => startEventRun(event.event_id), event.event_id)}
+                        >
+                          Let's plan ✨
+                        </button>
+                      ) : (
+                        <button type="button" className="mz-btn mz-btn--ghost mz-btn--lg" onClick={() => openEvent(event.event_id)}>
+                          Open plan
+                        </button>
+                      )}
+                    </div>
                   </article>
                 );
               })}
               {events.length === 0 && <p className="mz-empty">No events coming up. Ask Muse anything below.</p>}
+              <div className="mz-quick">
+                <p className="mz-label">Or ask Muse</p>
+                <div className="mz-chat__ex">
+                  {EXAMPLES.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      className="mz-chip-btn"
+                      onClick={() => {
+                        setChatQuestion({ id: Date.now(), text: q });
+                        setTab("chat");
+                      }}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </section>
           )}
 

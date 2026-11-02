@@ -1,4 +1,5 @@
 import json
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
@@ -136,6 +137,17 @@ def test_seed_preserves_matching_records_and_rejects_conflicts(
         seed_inventory(database_session, conflicting_catalog)
 
     assert database_session.get(InventoryItem, "TEST_SEED_COFFEE").name == original_name
+
+
+@pytest.mark.database
+def test_reseed_keeps_a_reorder_point_the_cafe_set(database_session: Session) -> None:
+    catalog = _catalog()
+    seed_inventory(database_session, catalog)
+    database_session.get(InventoryItem, "TEST_SEED_COFFEE").reorder_point = Decimal("3000")
+    database_session.commit()
+
+    assert seed_inventory(database_session, catalog).items_created == 0
+    assert database_session.get(InventoryItem, "TEST_SEED_COFFEE").reorder_point == Decimal("3000")
 
 
 @pytest.mark.database

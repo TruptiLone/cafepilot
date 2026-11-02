@@ -104,13 +104,13 @@ def _matches_cafe(cafe: Cafe) -> bool:
 
 
 def _matches_item(item: InventoryItem, catalog_item: InventorySeedItem, cafe_id: str) -> bool:
+    # Reorder point and par level are the café's settings (the demo scenario sets some); they are not
+    # part of what makes an item the same item, so a re-seed keeps them instead of calling it a conflict.
     return (
         item.cafe_id == cafe_id
         and item.name == catalog_item.name
         and item.category == catalog_item.category
         and item.base_unit == catalog_item.base_unit
-        and item.reorder_point is None
-        and item.par_level is None
         and item.is_perishable is False
         and item.active is True
     )

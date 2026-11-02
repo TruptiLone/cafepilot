@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+from decimal import Decimal
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
@@ -49,9 +51,24 @@ def _january_counts(db: Session) -> tuple[int, int]:
 
 def test_seed_is_idempotent(session: Session) -> None:
     first = seed_event_surge(session)
-    assert (first.counts, first.count_lines, first.movements, first.shifts) == (1, 7, 1, 11)  # 3 Sunday + 8 roster
+    assert (first.counts, first.count_lines, first.movements, first.shifts) == (1, 9, 1, 11)  # 3 Sunday + 8 roster
     again = seed_event_surge(session)
-    assert (again.counts, again.count_lines, again.movements, again.shifts) == (0, 0, 0, 0)
+    assert (again.counts, again.count_lines, again.movements, again.shifts, again.reorder_points) == (0, 0, 0, 0, 0)
+
+
+def test_reorder_points_put_oat_milk_and_banana_nut_muffins_below(session: Session) -> None:
+    from backend.modules.inventory.models import InventoryItem
+
+    seed_event_surge(session)
+    stock = {r["ingredient_id"]: r for r in REGISTRY["get_stock_estimates"].run(session, {"cafe_id": "CAFE001", "as_of": AS_OF})}
+    points = {i.ingredient_id: i.reorder_point for i in session.scalars(
+        select(InventoryItem).where(InventoryItem.cafe_id == "CAFE001", InventoryItem.reorder_point.is_not(None)))}
+    assert set(points) == {"OAT_MILK", "WHOLE_MILK", "COFFEE_BEANS", "BLUEBERRY_MUFFIN", "BANANA_NUT_MUFFIN",
+                           "CHOCOLATE_CHIP_MUFFIN", "BUTTER_CROISSANT"}
+    below = {i for i, p in points.items() if Decimal(stock[i]["estimated_quantity"]) < p}
+    assert below == {"OAT_MILK", "BANANA_NUT_MUFFIN"}
+    for muffin in ("BANANA_NUT_MUFFIN", "CHOCOLATE_CHIP_MUFFIN"):  # Thursday's close count, not January's
+        assert stock[muffin]["latest_verified_count_id"] == "AF_EVENT_SURGE_20261101_COUNT_THU_CLOSE"
 
 
 def test_scenario_tells_the_event_story(session: Session) -> None:

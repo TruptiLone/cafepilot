@@ -32,7 +32,7 @@ from sqlalchemy.orm import Session
 from backend.db.session import SessionLocal
 from backend.models.cafe import Cafe
 from backend.modules.agent.models import AgentApproval, AgentNodeRun, AgentPlanRun
-from backend.modules.inventory.models import InventoryMovement, StockCount, StockCountLine
+from backend.modules.inventory.models import InventoryItem, InventoryMovement, StockCount, StockCountLine
 from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, Receipt, ReceiptLine, ShiftOffer
 from backend.modules.staffing.models import Employee, Shift
 from scripts.seed_demo_operations import _seed_record
@@ -51,6 +51,19 @@ COUNT_QUANTITIES = {
     "COLD_BREW_CONCENTRATE": Decimal("4000.000"),
     "BUTTER_CROISSANT": Decimal("30.000"),
     "BLUEBERRY_MUFFIN": Decimal("24.000"),
+    "BANANA_NUT_MUFFIN": Decimal("9.000"),
+    "CHOCOLATE_CHIP_MUFFIN": Decimal("16.000"),
+}
+# Reorder points for the main items ("are we low on anything"). Oat milk (1.25 L after the spill) and
+# banana nut muffins (9) are deliberately below theirs on Thursday evening; the rest are above.
+REORDER_POINTS = {
+    "OAT_MILK": Decimal("3000.000"),
+    "WHOLE_MILK": Decimal("2000.000"),
+    "COFFEE_BEANS": Decimal("3000.000"),
+    "BLUEBERRY_MUFFIN": Decimal("12.000"),
+    "BANANA_NUT_MUFFIN": Decimal("12.000"),
+    "CHOCOLATE_CHIP_MUFFIN": Decimal("12.000"),
+    "BUTTER_CROISSANT": Decimal("15.000"),
 }
 SPILL = {
     "movement_id": f"{PREFIX}MOVE_OAT_SPILL",
@@ -105,6 +118,7 @@ class SeedResult:
     movements: int
     shifts: int
     orders: int = 0
+    reorder_points: int = 0
 
 
 @dataclass(frozen=True)
@@ -191,6 +205,14 @@ def seed_event_surge(session: Session, *, with_delivery: bool = False) -> SeedRe
             for ingredient_id, quantity in COUNT_QUANTITIES.items()
         )
         movements = int(_seed_record(session, InventoryMovement, "movement_id", SPILL, "oat spill"))
+        reorder_points = 0
+        for ingredient_id, point in REORDER_POINTS.items():
+            item = session.get(InventoryItem, ingredient_id)
+            if item is None or item.cafe_id != CAFE_ID:
+                raise EventSurgeSeedError(f"{ingredient_id} is missing; run scripts/seed_all.sh first")
+            if item.reorder_point != point:
+                item.reorder_point = point
+                reorder_points += 1
         shifts = sum(
             _seed_record(session, Shift, "shift_id", row, f"shift {row['shift_id']}") for row in _shift_rows()
         )
@@ -219,7 +241,7 @@ def seed_event_surge(session: Session, *, with_delivery: bool = False) -> SeedRe
             )
             orders = 1
             session.flush()
-    return SeedResult(counts, lines, movements, shifts, orders)
+    return SeedResult(counts, lines, movements, shifts, orders, reorder_points)
 
 
 def plan_reset(session: Session) -> ResetPlan:

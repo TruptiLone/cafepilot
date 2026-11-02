@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.db.config import get_settings
 from backend.models.cafe import Cafe
 from backend.modules.agent.demand import EventDemandInput, EventDemandResult, estimate_event_demand
 from backend.modules.agent.summaries import clock, day
@@ -49,6 +50,10 @@ class DetectedEvent(BaseModel):
     run_id: str | None = Field(default=None, description="Muse's plan for this event, if one was started.")
     latest_run_id: str | None = Field(default=None, description="The newest plan in that family (after replans).")
     plan_state: str = Field(default="new", description="new, checking, needs_ok, waiting, planned or issues.")
+    planner_model: str = Field(
+        description="The model that will plan this event (configured, e.g. muse-wonder-1.0), so the UI can "
+        "show it while the plan is on its way. A finished plan records the model that actually ran."
+    )
 
 
 def _signed(n: int) -> str:
@@ -126,6 +131,7 @@ def _to_detected(session: Session, event: CafeEvent, tz: ZoneInfo, as_of: dateti
         expected=expected,
         muse_message=message,
         request=request,
+        planner_model=get_settings().planner_model,
     )
 
 

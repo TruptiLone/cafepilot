@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
+from backend.db.config import get_settings
 from backend.db.session import engine, get_db
 from backend.main import app
 from backend.models.cafe import Cafe
@@ -116,6 +117,21 @@ def test_demo_event_comes_from_the_calendar_with_history_numbers(session: Sessio
     assert MARKET in market.request and "estimate_event_demand" in market.request
     assert events["EVT_HALLOWEEN_20261031"].expected.confidence == "rough"
     assert detected_events(session, "ANOTHER_CAFE") == []
+
+
+def test_events_name_the_configured_planner_model(session: Session, monkeypatch) -> None:
+    """So the UI can say "Planning · <model>" before the plan comes back."""
+    monkeypatch.setattr(get_settings(), "planner_model", "muse-test-9.9")
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        api = TestClient(app)
+        listed = {e["event_id"]: e for e in api.get("/api/v1/agent/events").json()}
+        one = api.get(f"/api/v1/agent/events/{MARKET}").json()
+    finally:
+        app.dependency_overrides.clear()
+    assert listed[MARKET]["planner_model"] == "muse-test-9.9"
+    assert one["planner_model"] == "muse-test-9.9"
+    assert {e["planner_model"] for e in listed.values()} == {"muse-test-9.9"}
 
 
 def test_saying_yes_to_an_event_starts_a_run(session: Session, tmp_path, monkeypatch) -> None:

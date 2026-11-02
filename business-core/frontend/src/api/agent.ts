@@ -147,6 +147,7 @@ export type ChatRow = {
   as_of: string | null;
   estimated: boolean;
   detail: string | null;
+  below_reorder_point?: boolean;
 };
 
 export type ChatAnswer = {

@@ -188,6 +188,7 @@ describe("ChatPanel", () => {
     await screen.findByText(SPARK_REPLY);
     expect(speakSpy).toHaveBeenCalledTimes(1);
     expect(speakSpy.mock.calls[0][0].text).toBe(SPARK_REPLY);
+    expect(speakSpy.mock.calls[0][0]).toMatchObject({ volume: 0.6, rate: 0.9 });  // a softer voice
   });
 
   it("asks by voice: what was heard is sent with channel voice", async () => {

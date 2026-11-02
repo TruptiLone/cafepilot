@@ -18,11 +18,16 @@ export function canSpeak(): boolean {
   return typeof window !== "undefined" && "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
 }
 
+/** Soft and unhurried: quieter and a little slower than the browser's default (1 and 1). */
+export const VOICE = { volume: 0.6, rate: 0.9 };
+
 /** Read text aloud with the browser's voice (nothing leaves the device). */
 export function speak(text: string) {
   if (!canSpeak() || !text) return;
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "en-US";
+  utterance.volume = VOICE.volume;
+  utterance.rate = VOICE.rate;
   window.speechSynthesis.speak(utterance);
 }

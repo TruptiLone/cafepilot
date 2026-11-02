@@ -111,7 +111,7 @@ def test_stock_for_one_item_comes_from_the_estimate(session: Session) -> None:
     [row] = body["rows"]
     assert (row["name"], row["quantity"], row["unit"]) == ("Blueberry Muffin", num(truth.estimated_quantity), "each")
     assert row["as_of"] == AS_OF
-    assert body["lines"][0] == f"Blueberry Muffin {num(truth.estimated_quantity)} on hand. Nothing here is below its reorder point."
+    assert body["lines"][0] == f"Blueberry Muffin {num(truth.estimated_quantity)} on hand."
     assert body["lookups"][0]["args"]["as_of"] == AS_OF  # the reference time, filled in by code
 
 
@@ -141,9 +141,12 @@ def test_low_means_below_the_reorder_point_in_the_database(session: Session) -> 
     assert body["notes"] == [f"Not sure about {', '.join(unsure)}."]
 
 
-def test_one_low_item_is_answered_by_its_reorder_line(session: Session) -> None:
+def test_do_you_have_is_answered_with_whats_on_hand_not_reorder_points(session: Session) -> None:
     body = ask(session, "do you have banana nut muffins", answer(("get_stock_estimates", {"ingredient_id": "BANANA_NUT_MUFFIN"})))
-    assert body["lines"] == ["Below reorder point: Banana Nut Muffin (9 left, reorder at 12)."]
+    assert body["lines"] == ["Banana Nut Muffin 9 on hand."]
+    assert "reorder" not in (body["rows"][0]["detail"] or "")
+    assert body["rows"][0]["below_reorder_point"] is True  # still known to code: the Plan an order chip
+    assert body["follow_ups"][0]["kind"] == "plan"
     assert [(r["name"], r["quantity"]) for r in body["rows"]] == [("Banana Nut Muffin", num(estimates(session)["BANANA_NUT_MUFFIN"].estimated_quantity))]
 
 
@@ -332,27 +335,27 @@ LOW_MUFFINS = answer(("get_stock_estimates", {"ingredient_id": "BANANA_NUT_MUFFI
 
 
 def test_sparks_reply_is_used_when_its_numbers_check_out(session: Session) -> None:
-    text = "You're down to 9 banana nut muffins, under your reorder point of 12. Want me to plan an order?"
+    text = "Yes, we have 9 banana nut muffins."
     body = ask(session, "do you have banana nut muffins", Router(LOW_MUFFINS, text))
     assert (body["reply"], body["reply_by"]) == (text, "muse")
-    assert body["lines"] == ["Below reorder point: Banana Nut Muffin (9 left, reorder at 12)."]  # the code answer stays
+    assert body["lines"] == ["Banana Nut Muffin 9 on hand."]  # the code answer stays
 
 
 def test_a_made_up_number_is_rejected_and_code_answers(session: Session) -> None:
     body = ask(session, "do you have banana nut muffins", Router(LOW_MUFFINS, "You have 437 banana nut muffins, plenty for Sunday."))
     assert body["reply_by"] == "code"
-    assert body["reply"] == "Below reorder point: Banana Nut Muffin (9 left, reorder at 12)."
+    assert body["reply"] == "Banana Nut Muffin 9 on hand."
 
 
 def test_unit_conversions_code_shows_are_allowed(session: Session) -> None:
     text = "Oat milk is down to 1.25 L, under its 3 L reorder point."
-    body = ask(session, "how's the oat milk", Router(answer(("get_stock_estimates", {"ingredient_id": "OAT_MILK"})), text))
+    body = ask(session, "are we low on anything", Router(answer(("get_stock_estimates", {})), text))
     assert (body["reply"], body["reply_by"]) == (text, "muse")
 
 
 def test_a_failed_reply_falls_back_to_the_code_answer(session: Session) -> None:
     body = ask(session, "do you have banana nut muffins", Router(LOW_MUFFINS))  # the reply call raises
-    assert (body["reply_by"], body["reply"]) == ("code", "Below reorder point: Banana Nut Muffin (9 left, reorder at 12).")
+    assert (body["reply_by"], body["reply"]) == ("code", "Banana Nut Muffin 9 on hand.")
 
 
 def test_number_check() -> None:

@@ -116,7 +116,8 @@ answer to the owner's question; the results are below.
 
 Reply like a helpful café manager talking to the owner. Start with one or two plain sentences that
 answer the question directly. Don't repeat the table in the sentence, and no labels like
-'Below reorder point:'. Don't offer to do anything and don't ask the owner a question: the buttons
+'Below reorder point:'. Answer only what was asked: for "do we have X", say how many; don't bring up
+reorder points unless the owner asked whether something is low. Don't offer to do anything and don't ask the owner a question: the buttons
 under your reply handle next steps, like planning an order. Use only numbers that appear in the tool
 results. Cover everything the code answer says, including items with no scheduled delivery.
 
@@ -208,6 +209,7 @@ class ChatRow(BaseModel):
     as_of: str | None = None
     estimated: bool = False
     detail: str | None = None
+    below_reorder_point: bool = False
 
 
 class ChatLookup(BaseModel):
@@ -233,7 +235,8 @@ def _when(value: Any, tz: ZoneInfo) -> str | None:
 def _stock_rows(
     result: list[dict], reorder: dict[str, Any], tz: ZoneInfo, now: datetime, whole_list: bool, summary: str | None
 ) -> tuple[list[ChatRow], list[str], list[str]]:
-    """Rows, the answer (items below their reorder point first) and notes for the end."""
+    """Rows, the answer and notes for the end. Reorder points only come up when the owner asked about the
+    whole list ("are we low on anything"); "do you have X" is answered with what's on hand."""
     rows, low, checked = [], [], 0
     for r in result:
         known = r.get("stock_status") == "known"
@@ -242,12 +245,15 @@ def _stock_rows(
         counted = local_time(str(r.get("latest_verified_counted_at") or ""), tz)
         if counted:
             detail.append(f"last counted {day(counted)}, {counted.year}")
+        is_low = False
         if known and point is not None:
             checked += 1
             if float(r["estimated_quantity"]) < float(point):
+                is_low = True
                 low.append(f"{r['name']} ({quantity(r['estimated_quantity'], r.get('base_unit'))} left, reorder at "
                            f"{quantity(point, r.get('base_unit'))})")
-                detail.append(f"below reorder point {quantity(point, r.get('base_unit'))}")
+                if whole_list:
+                    detail.append(f"below reorder point {quantity(point, r.get('base_unit'))}")
         rows.append(ChatRow(
             name=r["name"],
             quantity=_num(r["estimated_quantity"]) if known else None,
@@ -255,8 +261,9 @@ def _stock_rows(
             as_of=(local_time(str(r.get("as_of") or ""), tz) or now).isoformat(),
             estimated=bool(r.get("included_movement_count") or r.get("has_estimated_movements")),
             detail="; ".join(detail) or (None if known else f"stock {r.get('stock_status')}"),
+            below_reorder_point=is_low,
         ))
-    rows.sort(key=lambda row: "below reorder point" not in (row.detail or ""))  # low items first, order kept
+    rows.sort(key=lambda row: not row.below_reorder_point)  # low items first, order kept
     lead = ("Below reorder point: " + "; ".join(low) + ".") if low else None
     unsure = [r["name"] for r in result if r.get("stock_status") != "known"]
     if whole_list:  # "are we low on anything": the low items, not a count of everything
@@ -268,14 +275,7 @@ def _stock_rows(
             lines = ["No reorder points are set in the stock list, so I can't tell what's low."]
         notes = [f"Not sure about {', '.join(unsure)}."] if unsure else []
         return rows, lines, notes
-    if lead and len(low) == len(result):  # every item asked about is low: that line says it all
-        return rows, [lead], []
-    lines = [lead] if lead else []
-    if summary:
-        lines.append(summary)
-    if checked and not lead:
-        lines.append("Nothing here is below its reorder point.")
-    return rows, lines, []
+    return rows, [summary] if summary else [], []
 
 
 def _rows(action: str, result: Any, args: dict[str, Any], names: dict[str, str], tz: ZoneInfo) -> list[ChatRow]:
@@ -410,7 +410,7 @@ def follow_ups(lookups: list["ChatLookup"], results: dict[str, Any], reference: 
         if lookup.error:
             continue
         if lookup.action == "get_stock_estimates":
-            low = [r.name for r in lookup.rows if "below reorder point" in (r.detail or "")]
+            low = [r.name for r in lookup.rows if r.below_reorder_point]
             if low:
                 chips.append(_plan(f"Plan an order for {low[0].lower()}", f"Order more {low[0].lower()} before we run out"))
                 if event_day:

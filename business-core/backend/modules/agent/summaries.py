@@ -296,6 +296,25 @@ def _suppliers(result: Row, ctx: RunContext) -> str:
     return text
 
 
+def _deliveries(result: Row, ctx: RunContext) -> str:
+    rows = result.get("deliveries") or []
+    window = span(result.get("start_at"), result.get("end_at"), ctx.tz)
+    if not rows:
+        return f"No deliveries are scheduled for {window}" if window else "No deliveries are scheduled"
+    orders = [d for d in rows if d.get("kind") == "order"]
+    text = "" if orders else "No supplier orders are open. "
+    first: dict[tuple[str, str], Row] = {}
+    for d in rows:  # earliest first: the next delivery of each item, orders listed apart from regular ones
+        first.setdefault((str(d.get("kind")), str(d.get("ingredient_id"))), d)
+    parts = []
+    for d in list(first.values())[:4]:
+        when = local_time(str(d.get("arrives_at")), ctx.tz)
+        source = f"{d['supplier']} {d.get('po_number') or ''}, {d.get('status')}".replace(" ,", ",") if d.get("kind") == "order" else "regular delivery"
+        parts.append(f"{str(d['name']).lower()} {quantity(d['quantity'], d.get('unit'))} {day(when)} {clock(when)} ({source})"
+                     if when else f"{str(d['name']).lower()} {quantity(d['quantity'], d.get('unit'))} ({source})")
+    return text + "Next: " + _list(parts, 4)
+
+
 def summarize_step(node: Any, ctx: RunContext) -> str | None:
     """A short line for the tile. Uses the result when done, the arguments when waiting."""
     action, status = node.action, node.status
@@ -335,6 +354,8 @@ def summarize_step(node: Any, ctx: RunContext) -> str | None:
         return _sales_summary(result, ctx)
     if action == "find_suppliers" and isinstance(result, dict):
         return _suppliers(result, ctx)
+    if action == "list_deliveries" and isinstance(result, dict):
+        return _deliveries(result, ctx)
     if node.side_effect == "write":
         return _change_line(action, args, result if isinstance(result, dict) else None, ctx, done=True)
     if isinstance(result, list):

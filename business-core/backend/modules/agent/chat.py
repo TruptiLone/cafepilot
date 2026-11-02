@@ -100,8 +100,10 @@ Return ONLY one JSON object, no prose, no code fences:
   item is not in REFERENCE ingredients, still call get_stock_estimates with ingredient_id set to the
   item in UPPER_SNAKE_CASE.
 - Sales ("how many did we sell", "how was today"): sales_summary over the time window asked.
-- Staff ("who's working"): list_shifts over that window. Deliveries and orders: get_purchase_order
-  for an order in REFERENCE open_orders.
+- Staff ("who's working"): list_shifts over that window.
+- Deliveries ("when does the milk arrive", "what's coming"): list_deliveries with start_at = REFERENCE
+  now; set ingredient_id for one item (milk on its own means WHOLE_MILK). It covers open orders and
+  regular deliveries, so use it even when REFERENCE open_orders is empty.
 - needs_plan: the owner wants something changed, ordered, scheduled, cancelled or recorded. No actions.
 - out_of_scope: not about running this café. No actions.
 """
@@ -260,6 +262,18 @@ def _rows(action: str, result: Any, args: dict[str, Any], names: dict[str, str],
     if action == "coverage_report" and isinstance(result, dict):
         return [ChatRow(name=_when(h["hour_start"], tz), quantity=_num(h["scheduled_employees"]),
                         unit=f"of {h['required_staff']} staff") for h in result.get("hours", [])]
+    if action == "list_deliveries" and isinstance(result, dict):
+        seen: set[tuple[str, str]] = set()
+        rows = []
+        for d in result.get("deliveries", []):  # every order line, and the next regular delivery of each item
+            key = (d["kind"], d["ingredient_id"])
+            if d["kind"] == "regular" and key in seen:
+                continue
+            seen.add(key)
+            source = f"{d['supplier']} {d.get('po_number') or ''}, {d['status']}".replace(" ,", ",") if d["kind"] == "order" else "regular delivery"
+            rows.append(ChatRow(name=d["name"], quantity=_num(d["quantity"]), unit=d["unit"],
+                                detail=f"{_when(d['arrives_at'], tz)} · {source}"))
+        return rows
     if action == "get_purchase_order" and isinstance(result, dict):
         delivery = result.get("confirmed_delivery_at") or result.get("requested_delivery_at")
         when = _when(delivery, tz) if delivery else None
@@ -352,12 +366,15 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
             if action is None:
                 lookups.append(ChatLookup(action=chosen.action, args=chosen.args, error="not a read-only lookup"))
                 continue
-            if chosen.action == "get_stock_estimates":
+            if chosen.action in ("get_stock_estimates", "list_deliveries"):
                 unknown = [i for i in _ingredient_ids(args) if i not in known_ids]
                 if unknown:
                     lookups.append(ChatLookup(action=chosen.action, args=args, summary=NOT_ON_LIST))
                     continue
+            if chosen.action == "get_stock_estimates":
                 args.setdefault("as_of", now.isoformat())
+            if chosen.action == "list_deliveries":  # the reference time, never the wall clock
+                args.setdefault("start_at", now.isoformat())
             try:
                 action.input_model.model_validate(args)
                 result = action.run(session, args)

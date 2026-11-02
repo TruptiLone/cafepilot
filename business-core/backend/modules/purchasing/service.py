@@ -333,3 +333,44 @@ def order_for(session: Session, run_id: str, node_id: str) -> PurchaseOrder | No
 
 def offer_for(session: Session, shift_id: str) -> ShiftOffer | None:
     return session.get(ShiftOffer, shift_id)
+
+
+OPEN_ORDER_STATUSES = ("sent", "confirmed", "partially_received")
+
+
+def upcoming_deliveries(
+    session: Session, cafe_id: str, start: datetime, end: datetime, ingredient_id: str | None = None
+) -> list[dict[str, Any]]:
+    """Open supplier orders and the café's regular deliveries arriving in [start, end), café time,
+    earliest first. Sent orders are listed with their status: the supplier hasn't confirmed yet."""
+    from backend.modules.inventory.models import InventoryItem
+
+    tz = _tz(session, cafe_id)
+    names = dict(session.execute(select(InventoryItem.ingredient_id, InventoryItem.name).where(InventoryItem.cafe_id == cafe_id)).all())
+    out: list[dict[str, Any]] = []
+    orders = session.scalars(
+        select(PurchaseOrder).where(PurchaseOrder.cafe_id == cafe_id, PurchaseOrder.status.in_(OPEN_ORDER_STATUSES))
+    )
+    for order in orders:
+        arrives = (order.confirmed_delivery_at or order.requested_delivery_at).astimezone(tz)
+        if not start <= arrives < end:
+            continue
+        for line in order.lines:
+            if ingredient_id and line.ingredient_id != ingredient_id:
+                continue
+            out.append({"kind": "order", "arrives_at": arrives, "ingredient_id": line.ingredient_id,
+                        "name": names.get(line.ingredient_id, line.ingredient_id), "quantity": line.quantity, "unit": line.unit,
+                        "supplier": order.supplier_name, "po_number": order.po_number, "status": order.status})
+    for rule in policies_for(cafe_id).get("standing_deliveries", []):
+        if ingredient_id and rule["ingredient_id"] != ingredient_id:
+            continue
+        hour, minute = (int(x) for x in rule.get("at", "06:00").split(":"))
+        day = start.astimezone(tz).date()
+        while day <= end.astimezone(tz).date():
+            arrives = datetime.combine(day, time(hour, minute), tz)
+            if start <= arrives < end and day.weekday() in rule["weekdays"]:
+                out.append({"kind": "regular", "arrives_at": arrives, "ingredient_id": rule["ingredient_id"],
+                            "name": names.get(rule["ingredient_id"], rule["ingredient_id"]), "quantity": Decimal(rule["quantity"]),
+                            "unit": rule["unit"], "supplier": None, "po_number": None, "status": "regular"})
+            day += timedelta(days=1)
+    return sorted(out, key=lambda d: (d["arrives_at"], d["kind"] != "order", d["name"]))

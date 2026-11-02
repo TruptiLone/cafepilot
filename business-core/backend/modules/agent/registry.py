@@ -14,14 +14,14 @@ import hashlib
 import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
 from sqlalchemy.orm import Session
 
-from backend.modules.purchasing.service import OrderLineIn, offer_shift, send_order, whole_packs
+from backend.modules.purchasing.service import OrderLineIn, offer_shift, send_order, upcoming_deliveries, whole_packs
 from backend.modules.agent.demand import EventDemandInput, EventDemandResult, estimate_event_demand
 from backend.modules.agent.calculations import (
     ShortfallInput,
@@ -206,6 +206,33 @@ class GetPurchaseOrderInput(CafeScopedInput):
     order_id: str = Field(min_length=1, description="A purchase order id, e.g. from a rejected order.")
 
 
+class DeliveriesInput(CafeScopedInput):
+    ingredient_id: str | None = Field(default=None, description="One item; omit for every delivery.")
+    start_at: datetime | None = Field(default=None, description="Window start, with UTC offset; default now.")
+    end_at: datetime | None = Field(default=None, description="Window end; default 7 days after start_at.")
+
+    _aware = field_validator("start_at", "end_at")(_require_aware)
+
+
+class DeliveryOut(BaseModel):
+    kind: Literal["order", "regular"]
+    arrives_at: datetime
+    ingredient_id: str
+    name: str
+    quantity: Decimal
+    unit: str
+    supplier: str | None
+    po_number: str | None
+    status: str
+
+
+class DeliveriesOut(BaseModel):
+    start_at: datetime
+    end_at: datetime
+    open_orders: int = Field(description="Open supplier orders arriving in the window.")
+    deliveries: list[DeliveryOut]
+
+
 class PurchaseOrderOut(BaseModel):
     order_id: str
     supplier_id: str
@@ -382,6 +409,14 @@ def _find_suppliers(session: Session, p: FindSuppliersInput) -> SupplierOptions:
 
     lines = [OrderLineIn(ingredient_id=l.ingredient_id, quantity=l.quantity, unit=l.unit) for l in p.lines]
     return SupplierOptions.model_validate(supplier_options(session, p.cafe_id, lines, p.deliver_by))
+
+
+def _list_deliveries(session: Session, p: DeliveriesInput) -> DeliveriesOut:
+    start = p.start_at or datetime.now(timezone.utc)
+    end = p.end_at or start + timedelta(days=7)
+    rows = upcoming_deliveries(session, p.cafe_id, start, end, p.ingredient_id)
+    orders = {(d["po_number"], d["supplier"]) for d in rows if d["kind"] == "order"}
+    return DeliveriesOut(start_at=start, end_at=end, open_orders=len(orders), deliveries=[DeliveryOut(**d) for d in rows])
 
 
 def _get_purchase_order(session: Session, p: GetPurchaseOrderInput) -> PurchaseOrderOut:
@@ -736,6 +771,20 @@ _ACTIONS: list[Action] = [
         handler=_get_purchase_order,
         consumes=(),
         produces=("order_suggestion", "purchase_order"),
+    ),
+    Action(
+        name="list_deliveries",
+        description=(
+            "What is arriving and when: open supplier orders (sent or confirmed) and the café's regular "
+            "deliveries, in a time window (default the next 7 days). Optional ingredient_id for one item."
+        ),
+        domain="purchasing",
+        side_effect="read",
+        input_model=DeliveriesInput,
+        output_type=DeliveriesOut,
+        handler=_list_deliveries,
+        consumes=(),
+        produces=("deliveries",),
     ),
     # ---- Purchasing (simulated)
     Action(

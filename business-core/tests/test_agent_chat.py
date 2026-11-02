@@ -110,7 +110,7 @@ def test_stock_for_one_item_comes_from_the_estimate(session: Session) -> None:
     [row] = body["rows"]
     assert (row["name"], row["quantity"], row["unit"]) == ("Blueberry Muffin", num(truth.estimated_quantity), "each")
     assert row["as_of"] == AS_OF
-    assert body["lines"][0] == f"Blueberry Muffin {num(truth.estimated_quantity)} on hand."
+    assert body["lines"][0] == f"Blueberry Muffin {num(truth.estimated_quantity)} on hand. Nothing here is below its reorder point."
     assert body["lookups"][0]["args"]["as_of"] == AS_OF  # the reference time, filled in by code
 
 
@@ -125,23 +125,23 @@ def test_stock_for_several_items_and_estimated_flag(session: Session) -> None:
 
 
 def test_low_means_below_the_reorder_point_in_the_database(session: Session) -> None:
-    # The demo stock list has no reorder points; set two here (rolled back with the test).
-    session.get(InventoryItem, "OAT_MILK").reorder_point = Decimal("2000")
-    session.get(InventoryItem, "BLUEBERRY_MUFFIN").reorder_point = Decimal("10")
-    session.commit()
     body = ask(session, "are we low on anything", answer(("get_stock_estimates", {})))
     points = dict(session.execute(select(InventoryItem.ingredient_id, InventoryItem.reorder_point)
                                   .where(InventoryItem.cafe_id == C, InventoryItem.reorder_point.is_not(None))).all())
     truth = estimates(session)
     low = sorted(e.name for i, e in truth.items()
                  if i in points and e.stock_status == "known" and e.estimated_quantity < points[i])
-    assert low == ["Oat Milk"]  # 1250 mL estimated vs 2000; blueberry muffins 24 vs 10
+    assert low == ["Banana Nut Muffin", "Oat Milk"]  # the demo seed puts these two below
     flagged = sorted(r["name"] for r in body["rows"] if "below reorder point" in (r["detail"] or ""))
     assert flagged == low
-    assert "Below reorder point: Oat Milk (1.25 L left, reorder at 2 L)." in body["lines"][0]
+    assert body["lines"][0].endswith(
+        "Below reorder point: Banana Nut Muffin (9 left, reorder at 12); Oat Milk (1.25 L left, reorder at 3 L).")
 
 
 def test_without_reorder_points_low_is_not_guessed(session: Session) -> None:
+    for item in session.scalars(select(InventoryItem).where(InventoryItem.cafe_id == C)):
+        item.reorder_point = None  # rolled back with the test
+    session.commit()
     body = ask(session, "are we low on anything", answer(("get_stock_estimates", {})))
     assert "No reorder points are set in the stock list, so I can't tell what's low." in body["lines"][0]
     assert not any("below reorder point" in (r["detail"] or "") for r in body["rows"])
@@ -205,6 +205,35 @@ def test_when_does_the_milk_arrive(session: Session) -> None:
     body = ask(session, "when does the milk arrive", answer(("get_purchase_order", {"order_id": order.order_id})))
     assert sorted((r["quantity"], r["unit"]) for r in body["rows"]) == sorted((num(l.quantity), l.unit) for l in order.lines)
     assert all("delivery Sun Nov 1, 5:30 AM" in r["detail"] for r in body["rows"])
+
+
+def test_deliveries_list_the_open_order_and_regular_delivery(session: Session) -> None:
+    from backend.modules.agent.cafe_policies import policies_for
+
+    body = ask(session, "when does the milk arrive", answer(("list_deliveries", {"ingredient_id": "WHOLE_MILK"})))
+    order = session.scalar(select(PurchaseOrder).where(PurchaseOrder.cafe_id == C, PurchaseOrder.po_number == "PO-1042"))
+    po_line = next(l for l in order.lines if l.ingredient_id == "WHOLE_MILK")
+    regular = next(r for r in policies_for(C)["standing_deliveries"] if r["ingredient_id"] == "WHOLE_MILK")
+    rows = [(r["quantity"], r["unit"], r["detail"]) for r in body["rows"]]
+    assert rows == [
+        (regular["quantity"], regular["unit"], "Fri Oct 30, 6 AM · regular delivery"),
+        (num(po_line.quantity), po_line.unit, "Sun Nov 1, 5:30 AM · Willow Ridge Dairy Supply PO-1042, confirmed"),
+    ]
+    assert body["lines"] == ["Next: whole milk 12 L Fri Oct 30 6 AM (regular delivery), "
+                             "whole milk 12 L Sun Nov 1 5:30 AM (Willow Ridge Dairy Supply PO-1042, confirmed)."]
+    assert body["lookups"][0]["args"]["start_at"] == AS_OF  # the reference time, filled in by code
+
+
+def test_deliveries_say_plainly_when_no_order_is_open(session: Session) -> None:
+    session.delete(session.scalar(select(PurchaseOrder).where(PurchaseOrder.po_number == "PO-1042")))
+    session.commit()  # rolled back with the test
+    body = ask(session, "when does the milk arrive", answer(("list_deliveries", {"ingredient_id": "WHOLE_MILK"})))
+    assert body["lines"] == ["No supplier orders are open. Next: whole milk 12 L Fri Oct 30 6 AM (regular delivery)."]
+
+
+def test_deliveries_for_an_unknown_item(session: Session) -> None:
+    body = ask(session, "when do the unicorns arrive", answer(("list_deliveries", {"ingredient_id": "UNICORN"})))
+    assert body["lines"] == ["That's not on our stock list."]
 
 
 def test_open_orders_are_in_the_reference_for_the_router(session: Session) -> None:
@@ -307,4 +336,4 @@ def test_the_router_only_sees_read_actions(session: Session) -> None:
     ask(session, "anything", router)
     offered = {a["name"] for a in json.loads(router.calls[0]["messages"][-1]["content"])["read_actions"]}
     assert "propose_supplier_order" not in offered and "schedule_shift" not in offered
-    assert {"get_stock_estimates", "sales_summary", "list_shifts", "get_purchase_order"} <= offered
+    assert {"get_stock_estimates", "sales_summary", "list_shifts", "get_purchase_order", "list_deliveries"} <= offered

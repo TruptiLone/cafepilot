@@ -213,6 +213,8 @@ STAFFING
    Before schedule_shift include coverage_report, list_employees and list_shifts.
 9. Only schedule people whose role fits the work, one shift per person per day, and prefer people
    with no shift that day. Propose the fewest shifts that reach the target, one node per shift.
+9b. Staff only the time windows the coverage report shows as short; do not schedule a person for
+   hours that are already covered.
 
 WRITES
 10. Read first, then write. Add a write only when the owner asked for that kind of change.

@@ -3,7 +3,7 @@ import type { AgentRun, RunStep } from "../../api/agent";
 import ChangeForm, { canChange } from "../agent/ChangeForm";
 import { evidenceFor } from "../agent/changes";
 import { conditionText } from "../agent/labels";
-import type { Box, Story } from "./story";
+import { type Box, type Story, modelName } from "./story";
 
 type Decide = (runId: string, step: RunStep, decision: "approved" | "rejected", edited?: Record<string, unknown>) => Promise<void>;
 
@@ -260,6 +260,8 @@ function StoryGraph({ story, runs, busy, reveal, onDecide, onOpenRun }: StoryGra
               <span className="sg-title">{box.title}</span>
             </button>
             <div className="sg-sub">{box.subtitle}</div>
+            {box.model && <div className="sg-meta">{box.kind === "event" ? "Planning" : "Replan"} · {modelName(box.model)}</div>}
+            {box.byCode && <div className="sg-meta">worked out in code</div>}
             {box.kind === "decision" && run && <DecisionBody box={box} run={run} busy={busy} onDecide={onDecide} />}
             {replanned && runs[replanned] === undefined && (
               <button type="button" className="mz-link sg-open" onClick={() => onOpenRun(replanned)}>

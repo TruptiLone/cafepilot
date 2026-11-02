@@ -9,8 +9,8 @@ import { policyRoles } from "./roles";
 
 type Row = Record<string, unknown>;
 
-export type BoxKind = "event" | "demand" | "ingredients" | "suppliers" | "staff" | "sales" | "other" | "decision" | "share";
-export type BoxState = "pending" | "running" | "done" | "wait" | "declined" | "failed" | "skipped" | "after";
+export type BoxKind = "event" | "demand" | "ingredients" | "suppliers" | "staff" | "sales" | "other" | "decision";
+export type BoxState = "pending" | "running" | "done" | "wait" | "declined" | "failed" | "skipped";
 
 export type DetailRow = { label: string; value: string; tone?: "bad" | "good" | "muted" };
 export type Detail = { title: string; intro?: string; rows: DetailRow[]; steps: string[] };
@@ -28,10 +28,24 @@ export type Box = {
   /** Left edge in half-box columns (a box spans two), so a parent can sit between two children. */
   col: number;
   runId: string;
+  /** The model that planned this box's run (the event box and replanned changes). */
+  model?: string;
+  /** A check that code ran (no model involved). */
+  byCode?: boolean;
 };
 
 export type Edge = { from: string; to: string; dashed?: boolean; label?: string };
-export type Story = { boxes: Box[]; edges: Edge[]; lanes: number; cols: number; levels: number; summary: string[] };
+export type Story = {
+  boxes: Box[];
+  edges: Edge[];
+  lanes: number;
+  cols: number;
+  levels: number;
+  summary: string[];
+  /** "In short", or "All set for Sunday" once every change is done and confirmed. */
+  summaryTitle: string;
+  allSet: boolean;
+};
 
 const GROUP_OF: Record<string, BoxKind> = {
   estimate_event_demand: "demand",
@@ -52,7 +66,15 @@ const GROUP_OF: Record<string, BoxKind> = {
   list_products: "sales",
 };
 
-const KIND_ORDER: BoxKind[] = ["event", "demand", "ingredients", "suppliers", "sales", "other", "staff", "decision", "share"];
+const KIND_ORDER: BoxKind[] = ["event", "demand", "ingredients", "suppliers", "sales", "other", "staff", "decision"];
+
+/** "muse-wonder-1.0" -> "Muse Wonder 1.0": a model id recorded on a run, made readable. */
+export function modelName(model: string): string {
+  return model
+    .split("-")
+    .map((part) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
+    .join(" ");
+}
 
 const resultOf = (steps: RunStep[], action: string): unknown =>
   steps.find((s) => s.action === action && s.status === "done")?.result;
@@ -127,7 +149,7 @@ function demandBox(steps: RunStep[], run: AgentRun): Pick<Box, "title" | "subtit
   const extra = Number(drinks.extra_typical ?? 0);
   const title = extra > 0 ? `Busier ${day}` : extra < 0 ? `Quieter ${day}` : `Normal ${day}`;
   const subtitle = r
-    ? `${extra >= 0 ? "~" : ""}${Math.abs(extra)} ${extra >= 0 ? "extra" : "fewer"} drinks${Number(food.extra_typical) > 0 ? `, ${food.extra_typical} pastries` : ""} (last ${examples} ${examples === 1 ? "event" : "events"})`
+    ? `${extra >= 0 ? "~" : ""}${Math.abs(extra)} ${extra >= 0 ? "extra" : "fewer"} drinks${Number(food.extra_typical) > 0 ? `, ${food.extra_typical} pastries` : ""} · estimate from the last ${examples} ${examples === 1 ? "event" : "events"}`
     : "Learning from past events…";
   return {
     title,
@@ -166,16 +188,18 @@ function ingredientsBox(steps: RunStep[]): Pick<Box, "title" | "subtitle" | "det
   const rows: DetailRow[] = [...lines]
     .sort((a, b) => Number(b.status === "short") - Number(a.status === "short"))
     .slice(0, 6)
-    .map((l) => ({
-      label: String(l.name),
-      value:
-        l.status === "short"
-          ? `need ${litres(Number(l.needed_with_buffer) + Number(l.normal_use ?? 0), l.unit)} · short ${litres(l.shortfall, l.unit)}`
-          : l.status === "unknown_stock"
-            ? "no recent count"
-            : `need ${litres(Number(l.needed_with_buffer) + Number(l.normal_use ?? 0), l.unit)} · ok`,
-      tone: l.status === "short" ? "bad" : l.status === "unknown_stock" ? "muted" : "good",
-    }));
+    .map((l) => {
+      // Each figure as the shortfall step returned it: event need (with buffer), normal use until then,
+      // on hand and arriving. Nothing is added up here.
+      const need = `need ${litres(l.needed_with_buffer, l.unit)}${l.normal_use != null && Number(l.normal_use) > 0 ? ` + ${litres(l.normal_use, l.unit)} normal use` : ""}`;
+      const stock = l.status === "unknown_stock" ? "no recent count" : `on hand ${litres(l.on_hand, l.unit)} · arriving ${litres(l.deliveries ?? 0, l.unit)}`;
+      const verdict = l.status === "short" ? `short ${litres(l.shortfall, l.unit)}` : l.status === "unknown_stock" ? "" : "ok";
+      return {
+        label: String(l.name),
+        value: [need, stock, verdict].filter(Boolean).join(" · "),
+        tone: l.status === "short" ? "bad" : l.status === "unknown_stock" ? "muted" : "good",
+      };
+    });
   return {
     title: "Ingredients",
     subtitle,
@@ -270,19 +294,55 @@ function changeLine(step: RunStep, run: AgentRun): string {
   return describeChange(step, run);
 }
 
+type Change = { step: RunStep; run: AgentRun };
+
+/** The plan's changes as they stand now: a change that fell through is replaced by its replan's changes. */
+export function currentChanges(run: AgentRun, children: Record<string, AgentRun>): Change[] {
+  const replacedBy = (n: RunStep) => (n.replanned_in ? children[n.replanned_in] : undefined);
+  return run.nodes
+    .filter((n) => n.side_effect === "write")
+    .flatMap((n) => {
+      const child = replacedBy(n);
+      return child ? child.nodes.filter((c) => c.side_effect === "write").map((step) => ({ step, run: child })) : [{ step: n, run }];
+    });
+}
+
 /** Muse's line once the owner has decided, counting any replan that took over. */
 export function storyClosing(run: AgentRun, children: Record<string, AgentRun>): string | null {
-  const replaced = run.nodes.filter((n) => n.replanned_in && children[n.replanned_in]);
-  if (!replaced.length) return run.closing_message ?? null;
-  const leaves: RunStep[] = [
-    ...run.nodes.filter((n) => n.side_effect === "write" && !(n.replanned_in && children[n.replanned_in])),
-    ...replaced.flatMap((n) => children[n.replanned_in as string].nodes.filter((c) => c.side_effect === "write")),
-  ];
+  if (!run.nodes.some((n) => n.replanned_in && children[n.replanned_in])) return run.closing_message ?? null;
+  const leaves = currentChanges(run, children).map((c) => c.step);
   if (leaves.some((n) => n.status === "awaiting_approval")) return null;
   const lines = leaves.map((n) => n.acknowledgement?.headline).filter(Boolean);
   if (!lines.length) return null;
   const waiting = leaves.some((n) => n.acknowledgement?.tone === "waiting");
   return `Here's where things stand: ${lines.join("; ")}.${waiting ? " Waiting on replies." : ""}`;
+}
+
+/** One "In short" line for a decided change, from its result and the backend's acknowledgement. */
+function changeSummary({ step, run }: Change, names: Map<string, string>): string | null {
+  const ack = step.acknowledgement;
+  if (step.status === "rejected") return `You declined: ${decisionTitle(step, run)}.`;
+  if (step.status === "skipped") return null;
+  if (step.action === "propose_supplier_order") {
+    const result = step.result as Row | null;
+    if (!result || ack?.tone === "problem") return ack ? `${ack.headline}: ${ack.details[0] ?? ""}`.replace(/:\s*$/, ".") : null;
+    const items = list(
+      asRows(result.lines).map((l) => {
+        const name = names.get(String(l.ingredient_id)) ?? String(l.ingredient_id).replaceAll("_", " ");
+        return l.packs ? packLine({ ...l, name }) : `${litres(l.quantity, l.unit)} ${name.toLowerCase()}`;
+      }),
+      "and",
+    );
+    const supplier = String(result.supplier_name);
+    if (ack?.tone === "done") {
+      const arriving = ack.details.find((d) => d.startsWith("Arriving"));
+      return `${items} from ${supplier}: confirmed${arriving ? `, ${arriving.charAt(0).toLowerCase()}${arriving.slice(1)}` : ""}.`;
+    }
+    return `${items} sent to ${supplier}; waiting for them to confirm.`;
+  }
+  if (!ack) return step.status === "done" ? describeChange(step, run) : null;
+  const when = step.action === "schedule_shift" && ack.details[0] ? ` (${ack.details[0]})` : "";
+  return `${ack.headline}${when}${ack.tone === "waiting" ? "; waiting for a reply" : ""}.`;
 }
 
 function decisionTitle(step: RunStep, run: AgentRun): string {
@@ -328,6 +388,7 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
     lane: 0,
     col: 0,
     runId: run.run_id,
+    model: run.model,
   };
   boxes.push(root);
 
@@ -348,7 +409,7 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
                   subtitle: steps.map((s) => s.summary).filter(Boolean)[0] ?? "",
                   detail: null,
                 };
-    const box: Box = { id: kind, kind, state: groupState(steps), steps, level: 0, lane: 0, col: 0, runId: run.run_id, ...content };
+    const box: Box = { id: kind, kind, state: groupState(steps), steps, level: 0, lane: 0, col: 0, runId: run.run_id, byCode: true, ...content };
     if (!box.detail && steps.some((s) => s.summary))
       box.detail = { title: box.title, rows: steps.map((s) => ({ label: s.action.replaceAll("_", " "), value: s.summary ?? "" })), steps: steps.map((s) => s.action) };
     boxes.push(box);
@@ -422,7 +483,6 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
   for (const b of boxes) b.level = b.kind === "decision" ? decisionLevel : (level.get(b.id) ?? 0);
 
   // Replans grow under the change that fell through.
-  let bottom = decisionLevel;
   for (const step of decisions) {
     const parentId = `d:${step.node_id}`;
     const child = step.replanned_in ? children[step.replanned_in] : undefined;
@@ -432,9 +492,9 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
         boxes.push({
           id, kind: "decision", title: decisionTitle(write, child), subtitle: changeLine(write, child),
           state: decisionState(write), steps: [write], detail: null, level: decisionLevel + 1, lane: 0, col: 0, runId: child.run_id,
+          model: child.model,
         });
         edges.push({ from: parentId, to: id, label: "Muse found another way" });
-        bottom = decisionLevel + 1;
       }
     } else if (replanning === step.node_id || (step.replanned_in && !child)) {
       const id = `r:${step.node_id}`;
@@ -443,27 +503,7 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
         subtitle: "Muse is planning…", state: "running", steps: [], detail: null, level: decisionLevel + 1, lane: 0, col: 0, runId: run.run_id,
       });
       edges.push({ from: parentId, to: id });
-      bottom = decisionLevel + 1;
     }
-  }
-
-  // "Share it?" comes after the decisions (owner approves it like any change; not built yet).
-  if (decisions.length && run.event) {
-    boxes.push({
-      id: "share",
-      kind: "share",
-      title: "Share it?",
-      subtitle: "Instagram post, after you approve",
-      state: "after",
-      steps: [],
-      detail: { title: "Coming next", intro: "Muse drafts a post about the event for your OK. Not connected yet.", rows: [], steps: [] },
-      level: bottom + 1,
-      lane: 0,
-      col: 0,
-      runId: run.run_id,
-    });
-    const leaves = boxes.filter((b) => b.kind === "decision" && !edges.some((e) => e.from === b.id));
-    for (const d of leaves) edges.push({ from: d.id, to: "share", dashed: true });
   }
 
   // Lanes: children sit under their leftmost parent; free lanes are taken left to right.
@@ -478,7 +518,6 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
     );
     const taken = new Set<number>();
     for (const b of row) {
-      if (b.kind === "share") continue;
       const parents = edges.filter((e) => e.to === b.id && e.from !== "event").map((e) => laneOf.get(e.from)).filter((x): x is number => x !== undefined);
       let lane = parents.length ? Math.min(...parents) : 0;
       while (taken.has(lane)) lane += 1;
@@ -496,10 +535,10 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
   }
 
   // Columns: each box sits over the middle of the boxes it feeds (bottom row first), so the event is
-  // centred over the forecast and neither side is left empty. Replans and "Share it?" then sit under
-  // the boxes that lead to them. Positions move in half-box steps; boxes in a row never overlap.
+  // centred over the forecast and neither side is left empty. Replans then sit under the change
+  // that fell through. Positions move in half-box steps; boxes in a row never overlap.
   const byId = new Map(boxes.map((b) => [b.id, b]));
-  const trailing = (b: Box) => b.kind === "share" || b.id.startsWith("c:") || b.id.startsWith("r:");
+  const trailing = (b: Box) => b.id.startsWith("c:") || b.id.startsWith("r:");
   const x = new Map<string, number>();
   const mean = (values: number[]) => values.reduce((s, v) => s + v, 0) / values.length;
   const place = (row: Box[], want: (b: Box) => number) => {
@@ -531,11 +570,26 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
     for (const e of edges) if (e.from === "staff" && e.to.startsWith("d:")) e.label = `event needs ${coverage.required_staff} people`;
   }
 
-  // "In short": three plain lines.
+  // "In short": what the checks found, until the changes they led to are decided; then each change
+  // as it stands now, replans included. Every figure comes from a step result or the backend's
+  // acknowledgement of the change.
+  const changes = currentChanges(run, children);
+  const decided = (action: string) => {
+    const of = changes.filter((c) => c.step.action === action);
+    return of.length > 0 && of.every((c) => c.step.status !== "awaiting_approval");
+  };
+  const ordersDecided = decided("propose_supplier_order");
+  const shiftsDecided = decided("schedule_shift");
+  const shortfallLines = asRows((resultOf(groups.get("ingredients") ?? [], "calculate_shortfall") as Row | undefined)?.lines);
+  const names = new Map(shortfallLines.map((l) => [String(l.ingredient_id), String(l.name)]));
+  const lineFor = (action: string) =>
+    changes.filter((c) => c.step.action === action).map((c) => changeSummary(c, names)).filter((l): l is string => !!l);
+
   const summary: string[] = [];
   const ing = boxes.find((b) => b.kind === "ingredients");
-  if (ing && ing.state === "done") {
-    const lines = asRows((resultOf(ing.steps, "calculate_shortfall") as Row | undefined)?.lines).filter((l) => l.status === "short");
+  if (ordersDecided) summary.push(...lineFor("propose_supplier_order"));
+  else if (ing && ing.state === "done") {
+    const lines = shortfallLines.filter((l) => l.status === "short");
     if (lines.length)
       summary.push(
         `Short ${list(lines.map((l) => `${litres(l.shortfall, l.unit)} ${String(l.name).toLowerCase()}`))}. ${list(
@@ -546,10 +600,29 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
     else summary.push("Ingredients are covered.");
   }
   const staff = boxes.find((b) => b.kind === "staff");
-  if (staff && staff.state === "done") summary.push(`${staff.subtitle.replace(" · ", ". ")}.`);
+  if (shiftsDecided) {
+    summary.push(...lineFor("schedule_shift"));
+    const latest = [...changes].reverse().find((c) => c.step.action === "schedule_shift" && c.step.acknowledgement);
+    summary.push(...(latest?.step.acknowledgement?.details.filter((d) => d.includes(" staffing ")).map((d) => `${d}.`) ?? []));
+  } else if (staff && staff.state === "done") summary.push(`${staff.subtitle.replace(" · ", ". ")}.`);
   const sup = boxes.find((b) => b.kind === "suppliers");
-  if (sup && sup.state === "done" && sup.title === "Suppliers")
+  if (!ordersDecided && sup && sup.state === "done" && sup.title === "Suppliers")
     summary.push(`${sup.subtitle.replaceAll(" · ", " and ")} carry it; suppliers confirm stock when we order.`);
+  for (const c of changes) {
+    if (c.step.action === "propose_supplier_order" || c.step.action === "schedule_shift") continue;
+    if (c.step.status === "awaiting_approval") continue;
+    const line = changeSummary(c, names);
+    if (line) summary.push(line);
+  }
 
-  return { boxes, edges, lanes, cols, levels, summary };
+  const allSet =
+    changes.length > 0 &&
+    changes.some((c) => c.step.status === "done") &&
+    changes.every((c) => c.step.status === "skipped" || (c.step.status === "done" && (c.step.acknowledgement?.tone ?? "done") === "done"));
+  const day = run.event
+    ? new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "America/Los_Angeles" }).format(new Date(run.event.starts_at))
+    : null;
+  const summaryTitle = allSet ? (day ? `All set for ${day}` : "All set") : "In short";
+
+  return { boxes, edges, lanes, cols, levels, summary, summaryTitle, allSet };
 }

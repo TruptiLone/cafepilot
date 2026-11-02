@@ -19,7 +19,7 @@ import StepDetail from "../components/agent/StepDetail";
 import PlanMap from "../components/muse/PlanMap";
 import StoryGraph from "../components/muse/StoryGraph";
 import { planCounts } from "../components/muse/stages";
-import { buildStory, storyClosing } from "../components/muse/story";
+import { buildStory, modelName, storyClosing } from "../components/muse/story";
 
 const POLL_MS = 2000;
 const VIEW_KEY = "cafepilot-plan-view";
@@ -58,14 +58,6 @@ function writePref(key: string, value: string) {
 
 const fmt = (value: string, options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat("en-US", { ...options, timeZone: "America/Los_Angeles" }).format(new Date(value));
-
-/** "muse-wonder-1.0" -> "Muse Wonder 1.0": the model id recorded on the run, made readable. */
-function modelName(model: string): string {
-  return model
-    .split("-")
-    .map((part) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
-    .join(" ");
-}
 
 function eventChip(event: DetectedEvent) {
   return fmt(event.starts_at, { month: "short", day: "numeric" }).toUpperCase();
@@ -123,6 +115,8 @@ function AgentPage() {
   const [planningFor, setPlanningFor] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [rejectedPlanning, setRejectedPlanning] = useState<Planning | null>(null);
+  // How long the model took, per run: the API reports it only when the plan comes back.
+  const [planTimes, setPlanTimes] = useState<Record<string, number>>({});
   const [request, setRequest] = useState("");
   const [view, setView] = useState<View>(() => (readPref(VIEW_KEY) === "technical" ? "technical" : "owner"));
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -245,8 +239,10 @@ function AgentPage() {
     setReplanning(next.node_id);
     replanStep(run.run_id, next.node_id)
       .then(async (response) => {
-        if (response.run) setChildren((c) => ({ ...c, [response.run!.run_id]: response.run! }));
-        else setRejectedPlanning(response.planning);
+        if (response.run) {
+          setChildren((c) => ({ ...c, [response.run!.run_id]: response.run! }));
+          setPlanTimes((t) => ({ ...t, [response.run!.run_id]: response.planning.latency_ms }));
+        } else setRejectedPlanning(response.planning);
         const refreshed = await getRun(run.run_id);
         if (refreshed.run_id === runRef.current?.run_id) setRun(refreshed);
       })
@@ -271,6 +267,7 @@ function AgentPage() {
       if (response.run) {
         setReveal(true);
         setRun(response.run);
+        setPlanTimes((t) => ({ ...t, [response.run!.run_id]: response.planning.latency_ms }));
         setSearchParams(forEvent ? { event: forEvent, run: response.run.run_id } : { run: response.run.run_id });
       } else {
         setRejectedPlanning(response.planning);
@@ -373,12 +370,14 @@ function AgentPage() {
   const selectedEvent = events.find((e) => e.event_id === eventId) ?? null;
 
   const anyWaiting = run?.status === "awaiting_approval" || waitingChild;
+  // Suppliers and staff we're waiting on, in the plan and in any replan that took over.
+  const waitingOn = [...new Set([run, ...childIds.map((id) => children[id])].flatMap((r) => r?.waiting_on ?? []))];
   const live: [string, string] = planningFor || run?.status === "running" || replanning
     ? ["working", replanning ? "Finding another way" : "Working"]
     : anyWaiting
       ? ["waiting", "Waiting for you"]
-      : run?.waiting_on && run.waiting_on.length > 0
-        ? ["waiting", `Waiting on ${run.waiting_on.join(" and ")}`]
+      : waitingOn.length > 0
+        ? ["waiting", `Waiting on ${waitingOn.join(" and ")}`]
         : ["watching", "Watching for events"];
   const showPlan = !!run || !!planningFor || !!rejectedPlanning;
 
@@ -524,7 +523,6 @@ function AgentPage() {
                     <span><i className="d" />Done</span>
                     <span><i className="w" />Needs your OK</span>
                     <span><i className="x" />Fell through</span>
-                    <span><i className="a" />After you approve</span>
                   </div>
                 )}
               </div>
@@ -537,8 +535,8 @@ function AgentPage() {
               {closing && <p className="mz-muse-line">{closing}</p>}
 
               {story.summary.length > 0 && (
-                <div className="mz-card mz-short">
-                  <p className="mz-label">In short</p>
+                <div className={`mz-card mz-short${story.allSet ? " is-done" : ""}`}>
+                  <p className="mz-label">{story.summaryTitle}</p>
                   <ul>
                     {story.summary.map((line) => (
                       <li key={line}>{line}</li>
@@ -549,7 +547,7 @@ function AgentPage() {
 
               <p className="mz-foot">
                 Planned by {run.model}
-                {run.attempts > 1 ? ` after ${run.attempts} attempts` : ""}. Every number comes from the café's data, worked out
+                {planTiming(run.attempts, planTimes[run.run_id])}. Every number comes from the café's data, worked out
                 in code; nothing changes until you approve.
               </p>
             </section>
@@ -606,6 +604,13 @@ function AgentPage() {
       </div>
     </section>
   );
+}
+
+/** "in 27 s", or "after 2 attempts; the last took 27 s": latency_ms covers the final model call only. */
+function planTiming(attempts: number, latencyMs: number | undefined): string {
+  const took = latencyMs !== undefined ? Math.round(latencyMs / 1000) : null;
+  if (attempts > 1) return ` after ${attempts} attempts${took !== null ? `; the last took ${took} s` : ""}`;
+  return took !== null ? ` in ${took} s` : "";
 }
 
 function PlanningSkeleton({ title }: { title: string }) {

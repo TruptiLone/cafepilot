@@ -383,6 +383,59 @@ describe("AgentPage", () => {
     expect(screen.getByText(/Planned by muse-wonder-1\.0/)).toBeTruthy();
   });
 
+  it("says how long planning took when the plan comes back", async () => {
+    mockApi({ planning: { ...planning(), latency_ms: 27_400 }, run });
+    renderPage();
+    await userEvent.type(screen.getByLabelText("Ask Muse"), "Farmers market Sunday");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText(/Planned by muse-spark-1\.3 in 27 s\./)).toBeTruthy();
+  });
+
+  it("does not claim the total time when planning took two attempts", async () => {
+    mockApi({ planning: { ...planning(), attempts: 2, latency_ms: 27_400 }, run: { ...run, attempts: 2 } });
+    renderPage();
+    await userEvent.type(screen.getByLabelText("Ask Muse"), "Farmers market Sunday");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText(/Planned by muse-spark-1\.3 after 2 attempts; the last took 27 s\./)).toBeTruthy();
+  });
+
+  it("names the model on the plan and marks the checks worked out in code", async () => {
+    mockApi();
+    renderPage("/agent?run=RUN-1");
+    await decisionBox("Add Ethan");
+    expect(screen.getByText("Planning · Muse Spark 1.3")).toBeTruthy();
+    expect(screen.getAllByText("worked out in code").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Share it?")).toBeNull();
+  });
+
+  it("reports the replanned order's supplier at the top right, with the replan's model", async () => {
+    const parent: AgentRun = {
+      ...run,
+      status: "completed",
+      waiting_on: [],
+      nodes: [...run.nodes.slice(0, 3), {
+        ...run.nodes[3], action: "propose_supplier_order", status: "done", replanned_in: "RUN-2",
+        resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }] },
+        result: { supplier_name: "Bay Dairy Co.", lines: [] },
+        acknowledgement: { headline: "Bay Dairy Co. can't take this order", details: ["Out of oat milk."], caveat: null,
+          tone: "problem", next_step: "find_alternative" },
+      }],
+    };
+    const child: AgentRun = {
+      ...run, run_id: "RUN-2", status: "completed", model: "muse-wonder-1.0", parent_run_id: "RUN-1", waiting_on: ["Willow Ridge Dairy Supply"],
+      nodes: [{
+        ...run.nodes[3], node_id: "resend", action: "propose_supplier_order", status: "done",
+        resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }] },
+        result: { supplier_name: "Willow Ridge Dairy Supply", lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL", packs: 1, pack_name: "case of 6 × 1 L" }] },
+        acknowledgement: { headline: "Order sent to Willow Ridge Dairy Supply (simulated)", details: ["Order PO-1042"], caveat: null, tone: "waiting" },
+      }],
+    };
+    stubFetch((url) => jsonResponse(url.startsWith("/api/v1/agent/runs/RUN-2") ? child : parent));
+    renderPage("/agent?run=RUN-1");
+    expect(await screen.findByText("Waiting on Willow Ridge Dairy Supply")).toBeTruthy();
+    expect(screen.getByText("Replan · Muse Wonder 1.0")).toBeTruthy();
+  });
+
   it("shows only the tabs that work: Events and Deliveries", async () => {
     mockApi();
     renderPage();

@@ -4002,6 +4002,8 @@ body { background: var(--g-bg); }
 .mz-plan__tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .mz-graph-card { padding: 20px 14px 14px; overflow-x: auto; }
 .mz-short { padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }
+.mz-short.is-done { border-color: #cfe3d3; background: #f6faf6; }
+.mz-short.is-done .mz-label { color: #3f6a4b; }
 .mz-short ul { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.55; display: flex; flex-direction: column; gap: 3px; }
 .mz-legend2 { display: flex; gap: 14px; justify-content: center; font-size: 11.5px; color: var(--g-ink-3); margin-top: 14px; flex-wrap: wrap; }
 .mz-legend2 span { display: inline-flex; gap: 6px; align-items: center; }
@@ -4009,7 +4011,6 @@ body { background: var(--g-bg); }
 .mz-legend2 i.d { background: var(--g-sage-tint); border-color: #cfe0cf; }
 .mz-legend2 i.w { border-color: var(--g-saffron); background: #fffcf6; }
 .mz-legend2 i.x { border-color: var(--g-red-line); background: var(--g-red-tint); }
-.mz-legend2 i.a { border-style: dashed; }
 
 /* Half-box columns (a box spans two); the 290px max box width inside a 346px slot leaves the gap between boxes. */
 .sg { position: relative; display: grid; justify-content: center; column-gap: 0; row-gap: 34px; padding: 4px 4px 6px; min-width: min-content; }
@@ -4027,7 +4028,7 @@ body { background: var(--g-bg); }
 .sg-ico svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
 .sg-box[data-s="done"] .sg-ico { background: var(--g-sage-tint); color: var(--g-sage); }
 .sg-box[data-s="pending"] { border-style: dashed; }
-.sg-box[data-s="pending"] .sg-ico, .sg-box[data-s="after"] .sg-ico, .sg-box[data-s="skipped"] .sg-ico { box-shadow: inset 0 0 0 1.5px #c4c1bb; }
+.sg-box[data-s="pending"] .sg-ico, .sg-box[data-s="skipped"] .sg-ico { box-shadow: inset 0 0 0 1.5px #c4c1bb; }
 .sg-box[data-s="running"] { border-color: var(--g-indigo); background: var(--g-indigo-tint); }
 .sg-box[data-s="running"] .sg-ico { border: 1.75px solid rgba(42,47,107,.2); border-top-color: var(--g-indigo); animation: mz-spin .9s linear infinite; }
 .sg-box[data-s="wait"] { border-color: var(--g-saffron); background: #fffcf6; box-shadow: 0 0 0 3px rgba(201,138,27,.12), 0 8px 22px rgba(201,138,27,.14); }
@@ -4035,12 +4036,12 @@ body { background: var(--g-bg); }
 .sg-box[data-s="wait"] .sg-ico::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--g-saffron); }
 .sg-box[data-s="declined"], .sg-box[data-s="failed"] { border-color: var(--g-red-line); background: var(--g-red-tint); }
 .sg-box[data-s="declined"] .sg-ico, .sg-box[data-s="failed"] .sg-ico { background: #f3dedb; color: var(--g-red); }
-.sg-box[data-s="after"], .sg-box[data-s="skipped"] { border-style: dashed; background: rgba(255,255,255,.7); box-shadow: none; }
-.sg-box[data-s="after"] .sg-title { color: var(--g-ink-3); }
+.sg-box[data-s="skipped"] { border-style: dashed; background: rgba(255,255,255,.7); box-shadow: none; }
 .sg-box--event { max-width: 360px; text-align: center; border-color: #c9cce2; background: var(--g-indigo-tint); }
 .sg-box--event .sg-head { justify-content: center; }
 .sg-box--event .sg-title { font-family: var(--g-serif); font-weight: 400; font-size: 18px; }
-.sg-box--share { max-width: 290px; }
+.sg-meta { margin-top: 4px; font-size: 11px; color: var(--g-ink-3); }
+.sg-box--event .sg-meta { text-align: center; }
 .sg-acts { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
 .sg-acts .mz-btn { height: 28px; padding: 0 11px; font-size: 12.5px; }
 .sg-edit { margin-top: 8px; }

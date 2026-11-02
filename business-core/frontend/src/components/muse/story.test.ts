@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRun, DetectedEvent } from "../../api/agent";
-import { buildStory } from "./story";
+import { buildStory, modelName } from "./story";
 
 function step(overrides: Partial<AgentRun["nodes"][number]>): AgentRun["nodes"][number] {
   return {
@@ -53,13 +53,19 @@ const marketRun: AgentRun = {
   updated_at: "2026-10-29T18:37:00Z",
   event: marketEvent,
   nodes: [
-    step({ node_id: "demand", action: "estimate_event_demand" }),
+    step({ node_id: "demand", action: "estimate_event_demand", result: {
+      drinks: { normal: 96, extra_typical: 35, extra_low: 19, extra_high: 53 }, food: { extra_typical: 7 },
+      examples: [{}, {}, {}, {}, {}, {}], confidence: "good",
+    } }),
     step({ node_id: "stock", action: "get_stock_estimates" }),
     step({ node_id: "shortfall", action: "calculate_shortfall", depends_on: ["demand", "stock"], result: {
       lines: [
-        { name: "Oat Milk", unit: "mL", status: "short", shortfall: "4100", packs: 1, pack_name: "case of 6 × 1 L", needed_with_buffer: "9000" },
-        { name: "Whole Milk", unit: "mL", status: "short", shortfall: "1200", packs: 1, pack_name: "case of 6 × 1 L", needed_with_buffer: "40000" },
-        { name: "Almond Milk", unit: "mL", status: "enough", shortfall: null, packs: null, pack_name: "case of 6 × 1 L", needed_with_buffer: "350" },
+        { ingredient_id: "OAT_MILK", name: "Oat Milk", unit: "mL", status: "short", shortfall: "4100", packs: 1, pack_name: "case of 6 × 1 L",
+          needed_with_buffer: "9000", normal_use: "1000", on_hand: "5900", deliveries: "0" },
+        { ingredient_id: "WHOLE_MILK", name: "Whole Milk", unit: "mL", status: "short", shortfall: "1200", packs: 1, pack_name: "case of 6 × 1 L",
+          needed_with_buffer: "40000", normal_use: "4800", on_hand: "7600", deliveries: "36000" },
+        { ingredient_id: "ALMOND_MILK", name: "Almond Milk", unit: "mL", status: "enough", shortfall: null, packs: null, pack_name: "case of 6 × 1 L",
+          needed_with_buffer: "350", normal_use: null, on_hand: "5200", deliveries: "0" },
       ],
     } }),
     step({ node_id: "suppliers", action: "find_suppliers", depends_on: ["shortfall"] }),
@@ -168,5 +174,119 @@ describe("buildStory", () => {
     expect(story.boxes.some((b) => b.kind === "demand")).toBe(false);
     expect(edge(story, "event", "staff")).toEqual(expect.objectContaining({ dashed: false }));
     expect(edge(story, "event", "staff")?.label).toBeUndefined();
+  });
+});
+
+// ---------- models, code steps, ingredients detail, no "Share it?" ----------------
+
+describe("buildStory labels", () => {
+  it("has no 'Share it?' box", () => {
+    const story = buildStory(marketRun);
+    expect(story.boxes.some((b) => b.title === "Share it?" || (b.kind as string) === "share")).toBe(false);
+  });
+
+  it("names the planning model on the event box and marks checks as worked out in code", () => {
+    const story = buildStory(marketRun);
+    const box = (id: string) => story.boxes.find((b) => b.id === id)!;
+    expect(box("event").model).toBe("muse-wonder-1.0");
+    for (const id of ["demand", "ingredients", "suppliers", "staff"]) expect(box(id).byCode).toBe(true);
+    expect(story.boxes.filter((b) => b.kind === "decision").every((b) => !b.byCode && !b.model)).toBe(true);
+    expect(modelName("muse-wonder-1.0")).toBe("Muse Wonder 1.0");
+    expect(modelName("muse-spark-1.3")).toBe("Muse Spark 1.3");
+  });
+
+  it("labels the forecast as an estimate from the last N events", () => {
+    const demand = buildStory(marketRun).boxes.find((b) => b.id === "demand")!;
+    expect(demand.subtitle).toBe("~35 extra drinks, 7 pastries · estimate from the last 6 events");
+  });
+
+  it("shows need, normal use, on hand and arriving for each ingredient, as the shortfall step returned them", () => {
+    const rows = buildStory(marketRun).boxes.find((b) => b.id === "ingredients")!.detail!.rows;
+    expect(rows.find((r) => r.label === "Oat Milk")!.value).toBe("need 9 L + 1 L normal use · on hand 5.9 L · arriving 0 L · short 4.1 L");
+    expect(rows.find((r) => r.label === "Whole Milk")!.value).toBe("need 40 L + 4.8 L normal use · on hand 7.6 L · arriving 36 L · short 1.2 L");
+    expect(rows.find((r) => r.label === "Almond Milk")!.value).toBe("need 0.4 L · on hand 5.2 L · arriving 0 L · ok");
+  });
+});
+
+// ---------- "In short" from the plan and its replans ---------------------------------
+
+const ack = (headline: string, details: string[], tone: "done" | "waiting" | "problem", next_step: "find_alternative" | null = null) =>
+  ({ headline, details, caveat: null, tone, next_step });
+
+const order = marketRun.nodes.find((n) => n.node_id === "order")!;
+const barista = marketRun.nodes.find((n) => n.node_id === "add_barista")!;
+
+/** Bay Dairy refused; Willow Ridge took the order in a replan; the barista shift was added. */
+function afterReplan(willow: "confirmed" | "sent"): [AgentRun, Record<string, AgentRun>] {
+  const parent: AgentRun = {
+    ...marketRun,
+    status: "completed",
+    nodes: marketRun.nodes.map((n) =>
+      n === order
+        ? { ...n, status: "done", replanned_in: "RUN-2", result: { supplier_name: "Bay Dairy Co.", lines: [] },
+            acknowledgement: ack("Bay Dairy Co. can't take this order", ["Bay Dairy Co. is out of oat milk until Mon, Nov 2."], "problem", "find_alternative") }
+        : n === barista
+          ? { ...n, status: "done", result: { shift_id: "S9" },
+              acknowledgement: ack("Ethan Patel is on the schedule", ["Sun, Nov 1, 8 AM–10 AM", "Sun, Nov 1 staffing now: 8 AM–2 PM: 4 of 4"], "done") }
+          : n,
+    ),
+  };
+  const confirmed = willow === "confirmed";
+  const child: AgentRun = {
+    ...marketRun,
+    run_id: "RUN-2",
+    model: "muse-wonder-1.0",
+    parent_run_id: "RUN-1",
+    nodes: [{
+      ...order, node_id: "resend", status: "done",
+      result: { supplier_name: "Willow Ridge Dairy Supply", status: "sent", lines: [
+        { ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL", packs: 1, pack_name: "case of 6 × 1 L" },
+        { ingredient_id: "WHOLE_MILK", quantity: "12000", unit: "mL", packs: 2, pack_name: "case of 6 × 1 L" },
+      ] },
+      acknowledgement: confirmed
+        ? ack("Willow Ridge Dairy Supply confirmed the order", ["Order PO-1042", "Total $77.40", "Arriving Sun, Nov 1 by 6 AM"], "done")
+        : ack("Order sent to Willow Ridge Dairy Supply (simulated)", ["Order PO-1042"], "waiting"),
+    }],
+  };
+  return [parent, { "RUN-2": child }];
+}
+
+describe("In short", () => {
+  it("reads from the checks while the changes wait for the owner", () => {
+    const story = buildStory(marketRun);
+    expect(story.summaryTitle).toBe("In short");
+    expect(story.allSet).toBe(false);
+  });
+
+  it("follows the replan: the new supplier's order and the approved shift, then 'All set for Sunday'", () => {
+    const [parent, children] = afterReplan("confirmed");
+    const story = buildStory(parent, children);
+    expect(story.summary).toEqual([
+      "1 case oat milk (6 × 1 L) and 2 cases whole milk (6 × 1 L) from Willow Ridge Dairy Supply: confirmed, arriving Sun, Nov 1 by 6 AM.",
+      "Ethan Patel is on the schedule (Sun, Nov 1, 8 AM–10 AM).",
+      "Sun, Nov 1 staffing now: 8 AM–2 PM: 4 of 4.",
+    ]);
+    expect(story.summary.join(" ")).not.toContain("Bay Dairy");
+    expect(story.allSet).toBe(true);
+    expect(story.summaryTitle).toBe("All set for Sunday");
+    expect(story.boxes.find((b) => b.id === "c:RUN-2:resend")!.model).toBe("muse-wonder-1.0");
+  });
+
+  it("is not all set while the new supplier hasn't confirmed", () => {
+    const [parent, children] = afterReplan("sent");
+    const story = buildStory(parent, children);
+    expect(story.summary[0]).toBe(
+      "1 case oat milk (6 × 1 L) and 2 cases whole milk (6 × 1 L) sent to Willow Ridge Dairy Supply; waiting for them to confirm.",
+    );
+    expect(story.allSet).toBe(false);
+    expect(story.summaryTitle).toBe("In short");
+  });
+
+  it("keeps the staffing check line until the shift is decided", () => {
+    const [parent, children] = afterReplan("confirmed");
+    const waiting = { ...parent, nodes: parent.nodes.map((n) => (n.node_id === "add_barista" ? barista : n)) };
+    const story = buildStory(waiting, children);
+    expect(story.summary.some((l) => l.startsWith("Ethan Patel"))).toBe(false);
+    expect(story.allSet).toBe(false);
   });
 });

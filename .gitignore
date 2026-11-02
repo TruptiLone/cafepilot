@@ -18,5 +18,5 @@ node_modules/
 
 # Mac files
 .DS_Store
-# Local agent run logs
-business-core/var/
+# Local run data: agent run logs, model-call log, benchmarks (never commit; this repo is public)
+var/

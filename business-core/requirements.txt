@@ -8,3 +8,4 @@ pydantic-settings>=2,<3
 psycopg[binary]>=3.2,<4.0
 SQLAlchemy>=2,<3
 openai>=1.40,<4
+Pillow>=10,<13

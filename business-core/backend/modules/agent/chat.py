@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from datetime import datetime, time as clock_time, timedelta, timezone
 from decimal import Decimal
 from functools import lru_cache
@@ -25,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.db.config import ENV_FILE, get_settings
+from backend.modules.agent.ai_calls import call_model, is_timeout, record as record_ai_call
 from backend.modules.agent.planner import (
     ModelCallError,
     PlannerUnavailableError,
@@ -365,26 +365,31 @@ def _reply_row(row: "ChatRow") -> dict[str, Any]:
     return out
 
 
-def _reply(client: Any, model: str, message: str, lookups: list["ChatLookup"], notes: list[str]) -> tuple[str | None, int]:
+def _reply(
+    client: Any, model: str, message: str, lookups: list["ChatLookup"], notes: list[str], cafe_id: str
+) -> tuple[str | None, int]:
     """Spark's reply sentences, or None when the call fails (the code answer is used instead)."""
     payload = {"owner_message": message, "code_answer": [l.summary for l in lookups if l.summary], "notes": notes,
                # the rows the owner sees (the first five): a bigger payload makes Spark slower, not better
                "results": [{"lookup": l.action, "rows": [_reply_row(r) for r in l.rows[:5]]} for l in lookups if not l.error]}
     messages = [{"role": "system", "content": REPLY_PROMPT}, {"role": "user", "content": json.dumps(payload, default=str)}]
-    started = time.monotonic()
     record: dict[str, Any] = {"at": datetime.now(timezone.utc).isoformat(), "purpose": "chat_reply", "attempt": 1,
                               "model": model, "query": message}
     try:
         # Writing two sentences from checked results needs little reasoning: minimal keeps it near 4 s.
-        response = client.chat.completions.create(model=model, messages=messages, temperature=0, reasoning_effort="minimal")
+        response, latency_ms = call_model(client, model=model, messages=messages, temperature=0, reasoning_effort="minimal")
         text = (response.choices[0].message.content or "").strip()
     except Exception as error:  # a reply that fails falls back to code; it never fails the answer
-        record.update(latency_ms=int((time.monotonic() - started) * 1000), error=f"{type(error).__name__}: {error}")
+        record.update(latency_ms=getattr(error, "latency_ms", 0), error=f"{type(error).__name__}: {error}")
         _log_call(record)
+        record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=record["latency_ms"],
+                       request=f"reply: {message}", outcome="timeout" if is_timeout(error) else "failed",
+                       error=record["error"])
         return None, record["latency_ms"]
-    record.update(latency_ms=int((time.monotonic() - started) * 1000), response=text)
+    record.update(latency_ms=latency_ms, response=text)
     _log_call(record)
-    return text or None, record["latency_ms"]
+    record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=f"reply: {message}", outcome="ok")
+    return text or None, latency_ms
 
 
 # ---------------------------------------------------------------------------
@@ -441,21 +446,25 @@ def follow_ups(lookups: list["ChatLookup"], results: dict[str, Any], reference: 
 _FENCE = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
 
 
-def _route(client: Any, model: str, message: str, reference: dict[str, Any], channel: str) -> tuple[ChatRouting, int]:
+def _route(
+    client: Any, model: str, message: str, reference: dict[str, Any], channel: str, cafe_id: str
+) -> tuple[ChatRouting, int]:
     payload = {"read_actions": _read_actions(), "reference": reference, "channel": channel, "owner_message": message}
     messages = [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": json.dumps(payload, default=str)}]
-    started = time.monotonic()
     record: dict[str, Any] = {"at": datetime.now(timezone.utc).isoformat(), "purpose": "chat", "attempt": 1,
                               "model": model, "query": message}
     try:
-        response = client.chat.completions.create(model=model, messages=messages, temperature=0, reasoning_effort="low")
+        response, latency_ms = call_model(client, model=model, messages=messages, temperature=0, reasoning_effort="low")
     except Exception as error:  # timeouts, API errors, connection failures
-        record.update(latency_ms=int((time.monotonic() - started) * 1000), error=f"{type(error).__name__}: {error}")
+        latency_ms = getattr(error, "latency_ms", 0)
+        record.update(latency_ms=latency_ms, error=f"{type(error).__name__}: {error}")
         _log_call(record)
-        if "Timeout" in type(error).__name__:
+        timeout = is_timeout(error)
+        record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=message,
+                       outcome="timeout" if timeout else "failed", error=record["error"])
+        if timeout:
             raise ChatTimeoutError(f"Muse didn't answer within {TIMEOUT_SECONDS} seconds. Try again.") from error
         raise ModelCallError(_describe_model_error(error)) from error
-    latency_ms = int((time.monotonic() - started) * 1000)
     content = response.choices[0].message.content or ""
     record.update(latency_ms=latency_ms, response=content)
     match = _FENCE.match(content)
@@ -464,15 +473,18 @@ def _route(client: Any, model: str, message: str, reference: dict[str, Any], cha
     except (json.JSONDecodeError, ValidationError) as error:
         record["error"] = f"unreadable routing: {str(error).splitlines()[0][:200]}"
         _log_call(record)
+        record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=message,
+                       outcome="failed", error="unreadable routing")
         raise ModelCallError("Muse's answer wasn't readable. Try asking again.") from error
     _log_call(record)
+    record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=message, outcome="ok")
     return routing, latency_ms
 
 
 def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel: str, as_of: datetime | None) -> dict[str, Any]:
     model = chat_settings().chat_model
     reference, now, tz = build_reference(session, cafe_id, as_of)
-    routing, latency_ms = _route(client, model, message, reference, channel)
+    routing, latency_ms = _route(client, model, message, reference, channel, cafe_id)
     out: dict[str, Any] = {"intent": routing.intent, "message": message, "channel": channel, "model": model,
                            "latency_ms": latency_ms, "as_of": now.isoformat(), "lines": [], "rows": [], "notes": [],
                            "lookups": [], "plan_request": None, "reply": None, "reply_by": "code", "follow_ups": []}
@@ -552,7 +564,7 @@ def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel
     # Spark writes the reply; code keeps it only if every number in it is in the results.
     out["reply"] = " ".join(out["lines"])
     if results:
-        text, reply_ms = _reply(client, model, message, lookups, notes)
+        text, reply_ms = _reply(client, model, message, lookups, notes, cafe_id)
         out["latency_ms"] += reply_ms
         allowed = allowed_numbers(message, list(results.values()), out["lines"], out["rows"], notes)
         if text and not unverified_numbers(text, allowed):

@@ -19,6 +19,7 @@ from backend.modules.agent.planner import (
     read_calls,
 )
 from backend.models.cafe import Cafe
+from backend.modules.agent.ai_calls import link_run, recent as recent_ai_calls
 from backend.modules.agent.chat import ChatTimeoutError, answer as chat_answer, create_chat_client
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
 from backend.modules.agent.status import CafeStatus, cafe_status, event_id_for_run, event_plan
@@ -274,6 +275,7 @@ def _start(
         parent_run_id=parent_run_id,
         parent_node_id=parent_node_id,
     )
+    link_run(outcome.ai_call_id, run.run_id)
     run = execute(database_session, run.run_id)
     return CreateRunResponse(planning=planning, run=_run_out(database_session, run))
 
@@ -394,6 +396,34 @@ def chat(request: ChatRequest, database_session: Session = Depends(get_db), clie
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(error)) from error
     except ModelCallError as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+
+
+class AICallOut(BaseModel):
+    """One model request: short summary only, never a prompt or a key."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    cafe_id: str | None
+    created_at: datetime
+    purpose: str
+    model: str
+    latency_ms: int
+    attempts: int
+    outcome: str
+    run_id: str | None
+    request_summary: str
+    error: str | None
+
+
+@router.get("/ai-calls", response_model=list[AICallOut])
+def list_ai_calls(
+    cafe_id: str = Query("CAFE001"),
+    limit: int = Query(50, ge=1, le=500),
+    database_session: Session = Depends(get_db),
+) -> list[AICallOut]:
+    """Read-only: model requests (plans, replans, chat), newest first."""
+    return [AICallOut.model_validate(row) for row in recent_ai_calls(database_session, cafe_id, limit)]
 
 
 class ModelCallOut(BaseModel):

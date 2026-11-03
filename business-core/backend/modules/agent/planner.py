@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import re
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -23,6 +22,7 @@ from sqlalchemy.orm import Session
 from backend.db.config import get_settings
 from backend.models.cafe import Cafe
 from backend.modules.agent.cafe_policies import policies_for
+from backend.modules.agent.ai_calls import call_model, is_timeout
 from backend.modules.agent.events import event_staffing, upcoming_for_planner
 from backend.modules.agent.registry import describe_for_planner
 from backend.modules.inventory.models import InventoryItem
@@ -291,9 +291,10 @@ class ChatClient(Protocol):
 class PlannerError(RuntimeError):
     """The model did not return a usable plan."""
 
-    def __init__(self, message: str, raw_content: str | None = None) -> None:
+    def __init__(self, message: str, raw_content: str | None = None, latency_ms: int = 0) -> None:
         super().__init__(message)
         self.raw_content = raw_content
+        self.latency_ms = latency_ms
 
 
 class PlannerUnavailableError(RuntimeError):
@@ -302,6 +303,11 @@ class PlannerUnavailableError(RuntimeError):
 
 class ModelCallError(RuntimeError):
     """The model API could not be reached or returned an error (not retried)."""
+
+    def __init__(self, message: str, *, timeout: bool = False, latency_ms: int = 0) -> None:
+        super().__init__(message)
+        self.timeout = timeout
+        self.latency_ms = latency_ms
 
 
 @dataclass(frozen=True)
@@ -414,9 +420,9 @@ def plan_query(
                 f"{problems}\nReturn the complete corrected plan as JSON only.",
             },
         ]
-    started = time.monotonic()
     try:
-        response = client.chat.completions.create(
+        response, latency_ms = call_model(
+            client,
             model=model,
             messages=messages,
             temperature=0,
@@ -425,19 +431,19 @@ def plan_query(
             max_tokens=16384,
         )
     except Exception as error:  # openai.APIError, timeouts, connection failures
+        latency_ms = getattr(error, "latency_ms", 0)
         _log_call(
             {
                 "at": datetime.now(timezone.utc).isoformat(),
                 "purpose": purpose,
                 "attempt": attempt,
                 "model": model,
-                "latency_ms": int((time.monotonic() - started) * 1000),
+                "latency_ms": latency_ms,
                 "query": query,
                 "error": f"{type(error).__name__}: {error}",
             }
         )
-        raise ModelCallError(_describe_model_error(error)) from error
-    latency_ms = int((time.monotonic() - started) * 1000)
+        raise ModelCallError(_describe_model_error(error), timeout=is_timeout(error), latency_ms=latency_ms) from error
 
     content = response.choices[0].message.content
     usage = getattr(response, "usage", None)
@@ -459,6 +465,6 @@ def plan_query(
     except PlannerError as error:
         record["error"] = str(error)
         _log_call(record)
-        raise PlannerError(str(error), content if isinstance(content, str) else None) from error
+        raise PlannerError(str(error), content if isinstance(content, str) else None, latency_ms) from error
     _log_call(record)
     return PlannerResult(plan, model, latency_ms, usage_dict, content)

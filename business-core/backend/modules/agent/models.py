@@ -125,3 +125,32 @@ class AgentApproval(Base):
     original_args: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     edited_args: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     decided_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+AI_CALL_PURPOSES = ("plan", "replan", "chat", "other")
+AI_CALL_OUTCOMES = ("ok", "retried", "failed", "timeout")
+
+
+class AICall(Base):
+    """One model request as the owner would count it (a plan that needed a second try is one row with
+    attempts 2). Only a short request summary is kept: no prompts, no keys."""
+
+    __tablename__ = "ai_calls"
+    __table_args__ = (
+        CheckConstraint(_in("purpose", AI_CALL_PURPOSES), name="ck_ai_calls_purpose"),
+        CheckConstraint(_in("outcome", AI_CALL_OUTCOMES), name="ck_ai_calls_outcome"),
+        CheckConstraint("attempts >= 1", name="ck_ai_calls_attempts"),
+        Index("ix_ai_calls_cafe_created", "cafe_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    cafe_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    purpose: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    outcome: Mapped[str] = mapped_column(Text, nullable=False)
+    run_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    request_summary: Mapped[str] = mapped_column(Text, nullable=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)

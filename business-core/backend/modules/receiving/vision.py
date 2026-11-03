@@ -9,12 +9,12 @@ from __future__ import annotations
 import base64
 import json
 import re
-import time
 from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
 
+from backend.modules.agent.ai_calls import call_model, is_timeout, record as record_ai_call
 from backend.modules.agent.planner import _log_call  # shared model-call log
 
 SLIP_PROMPT = """Read this packing slip. Return ONLY a JSON object, no prose:
@@ -80,19 +80,21 @@ def _image_part(image: bytes, mime: str) -> dict[str, Any]:
 
 
 def _ask(client: Any, model: str, purpose: str, prompt: str, image: bytes, mime: str) -> tuple[dict, int]:
-    started = time.monotonic()
     try:
-        response = client.chat.completions.create(
+        response, latency = call_model(
+            client,
             model=model,
             messages=[{"role": "user", "content": [{"type": "text", "text": prompt}, _image_part(image, mime)]}],
             temperature=0,
         )
     except Exception as error:
+        latency = getattr(error, "latency_ms", 0)
         _log_call({"at": datetime.now(timezone.utc).isoformat(), "purpose": purpose, "model": model,
-                   "latency_ms": round((time.monotonic() - started) * 1000),
-                   "error": f"{type(error).__name__}: {error}"})
+                   "latency_ms": latency, "error": f"{type(error).__name__}: {error}"})
+        record_ai_call(cafe_id=None, purpose="other", model=model, latency_ms=latency, request=purpose,
+                       outcome="timeout" if is_timeout(error) else "failed", error=f"{type(error).__name__}: {error}")
         raise VisionError(f"Muse couldn't read the image: {str(error).splitlines()[0][:200]}") from error
-    latency = round((time.monotonic() - started) * 1000)
+    record_ai_call(cafe_id=None, purpose="other", model=model, latency_ms=latency, request=purpose, outcome="ok")
     text = response.choices[0].message.content or ""
     _log_call({"at": datetime.now(timezone.utc).isoformat(), "purpose": purpose, "model": model,
                "latency_ms": latency, "response": text})

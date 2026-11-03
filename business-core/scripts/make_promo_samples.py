@@ -2,6 +2,7 @@
 
 Run from business-core/ (needs MODEL_API_KEY in .env):
     PYTHONPATH=. python scripts/make_promo_samples.py
+    PYTHONPATH=. python scripts/make_promo_samples.py --only SAMPLE-THANKSGIVING   # remake one, keep the rest
 
 Each sample goes through the same pipeline as POST /api/v1/agent/promo-posts (Muse caption checked by
 code, Muse Image background or the code-drawn fallback, every word set by code) and is saved as a JPEG
@@ -11,6 +12,7 @@ labelled "AI-generated draft (demo)", and were never posted anywhere.
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
 from concurrent.futures import ThreadPoolExecutor
@@ -33,15 +35,21 @@ LIMIT_KB = 300
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--only", action="append", choices=sorted(EVENTS), help="remake just this sample (repeatable)")
+    only = set(parser.parse_args().only or EVENTS)
     settings = get_settings()
     client = create_planner_client()
     with SessionLocal() as session:
-        facts = {sid: promo.facts_for(session, eid, promo.DEFAULT_OFFER, allow_past=True) for sid, eid in EVENTS.items()}
+        facts = {sid: promo.facts_for(session, eid, promo.DEFAULT_OFFER, allow_past=True)
+                 for sid, eid in EVENTS.items() if sid in only}
     with ThreadPoolExecutor(max_workers=len(facts)) as pool:
         made = dict(zip(facts, pool.map(
             lambda f: promo.make_variant(client, f, 0, caption_model=settings.vision_model,
                                          image_model=settings.image_model), facts.values())))
     promo.SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
+    manifest = promo.SAMPLE_DIR / "samples.json"
+    kept = {s["id"]: s for s in (json.loads(manifest.read_text()) if manifest.exists() else []) if s["id"] not in only}
     samples = []
     for sample_id, item in made.items():
         jpeg = item.pop("_jpeg")
@@ -56,7 +64,9 @@ def main() -> None:
         })
         print(f"{sample_id}: {len(small) // 1024} KB · caption {item['caption_source']} · image {item['image_source']}"
               f" · {item['latency_ms']}")
-    (promo.SAMPLE_DIR / "samples.json").write_text(json.dumps(samples, indent=2, ensure_ascii=False) + "\n")
+    made_by_id = {s["id"]: s for s in samples}
+    ordered = [made_by_id.get(sid) or kept.get(sid) for sid in EVENTS]  # same order as EVENTS
+    manifest.write_text(json.dumps([s for s in ordered if s], indent=2, ensure_ascii=False) + "\n")
 
 
 if __name__ == "__main__":

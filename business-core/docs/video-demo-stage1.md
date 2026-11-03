@@ -80,7 +80,7 @@ Upload it with the curl helper (the helper keeps the secret out of command-line
 arguments and logs):
 
 ```bash
-PYTHONPATH=. /tmp/cafepilot-benchmark-venv/bin/python scripts/try_video_upload.py \
+PYTHONPATH=. .venv/bin/python scripts/try_video_upload.py \
   /tmp/cafepilot-video-stage1-sample.mp4 --base-url http://127.0.0.1:8003
 ```
 

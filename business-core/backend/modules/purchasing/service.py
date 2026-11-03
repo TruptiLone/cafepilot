@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from backend.db.config import ENV_FILE
 from backend.models.cafe import Cafe
 from backend.modules.agent.cafe_policies import policies_for
-from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, ShiftOffer
+from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, Receipt, ShiftOffer
 
 
 class SupplierNotFoundError(LookupError):
@@ -331,6 +331,16 @@ def order_for(session: Session, run_id: str, node_id: str) -> PurchaseOrder | No
     )
 
 
+def delivery_for(session: Session, order_id: str) -> Receipt | None:
+    """The latest checked-in delivery against an order (None until a delivery is confirmed)."""
+    return session.scalar(
+        select(Receipt)
+        .where(Receipt.order_id == order_id, Receipt.status == "confirmed")
+        .order_by(Receipt.confirmed_at.desc())
+        .limit(1)
+    )
+
+
 def offer_for(session: Session, shift_id: str) -> ShiftOffer | None:
     return session.get(ShiftOffer, shift_id)
 
@@ -339,7 +349,7 @@ OPEN_ORDER_STATUSES = ("sent", "confirmed", "partially_received")
 
 
 def upcoming_deliveries(
-    session: Session, cafe_id: str, start: datetime, end: datetime, ingredient_id: str | None = None
+    session: Session, cafe_id: str, start: datetime, end: datetime, ingredient_ids: list[str] | None = None
 ) -> list[dict[str, Any]]:
     """Open supplier orders and the café's regular deliveries arriving in [start, end), café time,
     earliest first. Sent orders are listed with their status: the supplier hasn't confirmed yet."""
@@ -356,13 +366,13 @@ def upcoming_deliveries(
         if not start <= arrives < end:
             continue
         for line in order.lines:
-            if ingredient_id and line.ingredient_id != ingredient_id:
+            if ingredient_ids and line.ingredient_id not in ingredient_ids:
                 continue
             out.append({"kind": "order", "arrives_at": arrives, "ingredient_id": line.ingredient_id,
                         "name": names.get(line.ingredient_id, line.ingredient_id), "quantity": line.quantity, "unit": line.unit,
                         "supplier": order.supplier_name, "po_number": order.po_number, "status": order.status})
     for rule in policies_for(cafe_id).get("standing_deliveries", []):
-        if ingredient_id and rule["ingredient_id"] != ingredient_id:
+        if ingredient_ids and rule["ingredient_id"] not in ingredient_ids:
             continue
         hour, minute = (int(x) for x in rule.get("at", "06:00").split(":"))
         day = start.astimezone(tz).date()

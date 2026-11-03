@@ -21,8 +21,8 @@ function step(overrides: Partial<AgentRun["nodes"][number]>): AgentRun["nodes"][
     result: [{ ingredient_id: "OAT_MILK", estimated_quantity: "4650.000" }],
     error: null,
     replay_of: null,
-    started_at: "2026-10-29T18:00:00Z",
-    finished_at: "2026-10-29T18:00:01Z",
+    started_at: "2026-11-05T18:00:00Z",
+    finished_at: "2026-11-05T18:00:01Z",
     ...overrides,
   };
 }
@@ -34,14 +34,14 @@ const run: AgentRun = {
   goal: "Prep milk and staffing for Sunday",
   assumptions: ["40 whole-milk and 20 oat-milk lattes"],
   status: "awaiting_approval",
-  as_of: "2026-10-30T01:00:00Z",
+  as_of: "2026-11-06T02:00:00Z",
   model: "muse-spark-1.3",
   attempts: 1,
   edges: [{ source: "coverage", target: "add_barista", kind: "safety" }],
   levels: [["coverage", "staff", "stock"], ["add_barista"]],
   warnings: [],
-  created_at: "2026-10-29T18:37:00Z",
-  updated_at: "2026-10-29T18:37:00Z",
+  created_at: "2026-11-05T18:37:00Z",
+  updated_at: "2026-11-05T18:37:00Z",
   nodes: [
     step({
       node_id: "coverage",
@@ -49,7 +49,7 @@ const run: AgentRun = {
       reason: "Check Sunday coverage",
       result: {
         hours: [
-          { hour_start: "2026-11-01T08:00:00-08:00", scheduled_employees: 0, required_staff: 2, coverage_status: "understaffed" },
+          { hour_start: "2026-11-08T08:00:00-08:00", scheduled_employees: 0, required_staff: 2, coverage_status: "understaffed" },
         ],
       },
     }),
@@ -70,8 +70,8 @@ const run: AgentRun = {
       resolved_args: {
         cafe_id: "CAFE001",
         employee_id: "DEMO_EMP_004",
-        start_at: "2026-11-01T07:30:00-08:00",
-        end_at: "2026-11-01T14:30:00-08:00",
+        start_at: "2026-11-08T07:30:00-08:00",
+        end_at: "2026-11-08T14:30:00-08:00",
       },
       depends_on: ["coverage"],
       level: 1,
@@ -99,7 +99,7 @@ function jsonResponse(body: unknown, status = 200) {
 const completedRun: AgentRun = {
   ...run,
   status: "completed",
-  closing_message: "Done. Ethan Patel is on the schedule. Sun Nov 1 staffing now: 8 AM–12 PM: 3 of 4.",
+  closing_message: "Done. Ethan Patel is on the schedule. Sun Nov 8 staffing now: 8 AM–12 PM: 3 of 4.",
   nodes: run.nodes.map((node) =>
     node.node_id === "add_barista"
       ? {
@@ -108,7 +108,7 @@ const completedRun: AgentRun = {
           result: { shift_id: "S9", employee_id: "DEMO_EMP_004" },
           acknowledgement: {
             headline: "Ethan Patel is on the schedule",
-            details: ["Sun Nov 1, 7:30 AM–2:30 PM", "Sun Nov 1 staffing now: 8 AM–12 PM: 3 of 4"],
+            details: ["Sun Nov 8, 7:30 AM–2:30 PM", "Sun Nov 8 staffing now: 8 AM–12 PM: 3 of 4"],
             caveat: "Ethan hasn't been notified yet: staff messaging isn't connected.",
           },
         }
@@ -118,9 +118,9 @@ const completedRun: AgentRun = {
 
 const marketEvent: DetectedEvent = {
   event_id: "EVT_1", title: "Santa Clara Farmers Market", category: "farmers_market",
-  starts_at: "2026-11-01T16:00:00Z", ends_at: "2026-11-01T22:00:00Z",
+  starts_at: "2026-11-08T16:00:00Z", ends_at: "2026-11-08T22:00:00Z",
   location: null, distance_m: 250, source: "Santa Clara community events (demo)", is_demo: true,
-  muse_message: "Santa Clara Farmers Market: Sun Nov 1. The last 6 editions brought +19 to +53 extra drinks.",
+  muse_message: "Santa Clara Farmers Market: Sun Nov 8. The last 6 editions brought +19 to +53 extra drinks.",
   plan_state: "new", run_id: null, latest_run_id: null,
   expected: { confidence: "good", examples: 6, normal_drinks: 96, extra_drinks_low: 19,
     extra_drinks_typical: 35, extra_drinks_high: 53, extra_food_typical: 7, basis: "Compared the last 6 editions." },
@@ -129,10 +129,20 @@ const marketEvent: DetectedEvent = {
 type Route = (url: string, init?: RequestInit) => Promise<Response> | undefined;
 
 /** Fetch stub: events always answer; `route` handles the rest. */
+const GLANCE = {
+  as_of: "2026-11-05T18:00:00-08:00",
+  running_low: [{ name: "Oat Milk", text: "1.25 L left", detail: "reorder at 3 L" }],
+  coming_in: [{ name: "Whole Milk", text: "12 L", detail: "Fri Nov 6, 6 AM · regular delivery" }],
+  working: [{ name: "Jordan Brooks", text: "7 AM–3 PM", detail: null }],
+  working_label: "Working tomorrow",
+  working_day: "Fri Nov 6",
+};
+
 function stubFetch(route: Route, events: DetectedEvent[] = []) {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith("/api/v1/agent/events?")) return jsonResponse(events);
+    if (url.startsWith("/api/v1/agent/glance?")) return jsonResponse(GLANCE);
     return route(url, init) ?? jsonResponse({ detail: "not found" }, 404);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -193,7 +203,7 @@ const decisionBox = async (title: string) => {
 };
 
 describe("AgentPage", () => {
-  it("lists events with what Muse watches for, and plans one", async () => {
+  it("greets the owner and lists events in the owner's voice, and plans one", async () => {
     const fetchMock = stubFetch((url, init) => {
       if (url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST") return jsonResponse({ planning: planning(), run });
       return jsonResponse(run);
@@ -201,12 +211,33 @@ describe("AgentPage", () => {
     renderPage();
 
     const events = await screen.findByRole("region", { name: "Events Muse found" });
-    expect(within(events).getByText(/Muse watches what's happening near the café/)).toBeTruthy();
-    expect(within(events).getByText(/0.2 miles away · usually much busier/)).toBeTruthy();
+    expect(within(events).getByRole("heading", { name: /^Good (morning|afternoon|evening)\.$/ })).toBeTruthy();
+    expect(within(events).getByText("Here's what's coming up for CafePilot Demo Cafe. Nothing changes without your OK.")).toBeTruthy();
+    // +35 typical extra drinks (from the event's history) reads as a crowd
+    expect(within(events).getByText("Sunday's market usually brings a crowd. Want me to get ready?")).toBeTruthy();
+    expect(within(events).getByText("Sun, Nov 8 · 8 AM–2 PM · 0.2 miles away")).toBeTruthy();
     await userEvent.click(within(events).getByRole("button", { name: "Let's plan ✨" }));
 
     expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
     expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")).toBe(true);
+  });
+
+  it("shows At a glance on the Plan home only, from the café's records, at the demo time", async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST") return jsonResponse({ planning: planning(), run });
+      return jsonResponse(run);
+    }, [{ ...marketEvent, knowledge_as_of: "2026-11-05T18:00:00-08:00" }]);
+    renderPage();
+    const glance = await screen.findByRole("complementary", { name: "At a glance" });
+    expect(within(within(glance).getByRole("region", { name: "Running low" })).getByText("1.25 L left")).toBeTruthy();
+    expect(within(glance).getByRole("region", { name: "Coming in" })).toBeTruthy();
+    expect(within(within(glance).getByRole("region", { name: "Working tomorrow, Fri Nov 6" })).getByText("Jordan Brooks")).toBeTruthy();
+    const asked = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.startsWith("/api/v1/agent/glance?"));
+    expect(new URL(asked as string, "http://x").searchParams.get("as_of")).toBe("2026-11-05T18:00:00-08:00");
+
+    await userEvent.click(screen.getByRole("button", { name: "Let's plan ✨" }));
+    expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "At a glance" })).toBeNull();  // not in the open plan view
   });
 
   it("opens the existing plan for an event that was already checked", async () => {
@@ -283,7 +314,7 @@ describe("AgentPage", () => {
           node_id: "order",
           action: "propose_supplier_order",
           only_if: null,
-          resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "2000", unit: "mL" }], requested_delivery_at: "2026-11-01T06:00:00-08:00" },
+          resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "2000", unit: "mL" }], requested_delivery_at: "2026-11-08T06:00:00-08:00" },
         },
       ],
     };
@@ -322,8 +353,8 @@ describe("AgentPage", () => {
     const post = fetchMock.mock.calls.find(([url]) => String(url).includes("/nodes/add_barista/decision"));
     expect(JSON.parse(String(post?.[1]?.body)).edited_args).toEqual({
       employee_id: "DEMO_EMP_004",
-      start_at: "2026-11-01T08:00:00-08:00",
-      end_at: "2026-11-01T14:30:00-08:00",
+      start_at: "2026-11-08T08:00:00-08:00",
+      end_at: "2026-11-08T14:30:00-08:00",
     });
   });
 
@@ -443,23 +474,60 @@ describe("AgentPage", () => {
     stubFetch((url) => (url.startsWith("/api/v1/agent/runs/RUN-1") ? jsonResponse(completedRun) : undefined));
     renderPage("/agent?run=RUN-1");
     expect(await screen.findByText("All set")).toBeTruthy();
-    expect(screen.getByText("Ethan Patel is on the schedule (Sun, Nov 1, 7:30 AM–2:30 PM).")).toBeTruthy();
+    expect(screen.getByText("Ethan Patel is on the schedule (Sun, Nov 8, 7:30 AM–2:30 PM).")).toBeTruthy();
     expect(screen.queryByText(/^Done\. Ethan Patel is on the schedule/)).toBeNull();
     expect(screen.queryByText("In short")).toBeNull();
   });
 
-  it("shows only the tabs that work: Events, Chat and Deliveries", async () => {
+  it("a quick question on the Plan tab opens Ask and asks it; the chat survives switching tabs", async () => {
+    const fetchMock = stubFetch((url) => {
+      if (url === "/api/v1/agent/chat")
+        return jsonResponse({ intent: "answer", message: "q", channel: "text", model: "muse-spark-1.3", latency_ms: 2100,
+          as_of: "2026-11-05T18:00:00-08:00", lines: ["Banana Nut Muffin 9 on hand."], rows: [], lookups: [], plan_request: null,
+          reply: "Yes, we have 9 banana nut muffins on hand.", reply_by: "muse", follow_ups: [], notes: [] });
+      return undefined;
+    }, [marketEvent]);
+    renderPage();
+    const quick = within((await screen.findByText("Or ask Muse")).parentElement as HTMLElement);
+    await userEvent.click(quick.getByRole("button", { name: "Do we have banana nut muffins?" }));
+    expect(await screen.findByText("Yes, we have 9 banana nut muffins on hand.")).toBeTruthy();
+    const chatCall = fetchMock.mock.calls.find(([url]) => url === "/api/v1/agent/chat");
+    expect(JSON.parse(String(chatCall?.[1]?.body)).message).toBe("Do we have banana nut muffins?");
+    await userEvent.click(screen.getByRole("button", { name: /^Plan/ }));
+    await userEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(screen.getByText("Yes, we have 9 banana nut muffins on hand.")).toBeTruthy();
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/v1/agent/chat")).toHaveLength(1);  // asked once
+  });
+
+  it("while Muse replans, says who declined and which model is looking", async () => {
+    const rejected: AgentRun = {
+      ...run, status: "completed", waiting_on: [],
+      nodes: [...run.nodes.slice(0, 3), {
+        ...run.nodes[3], action: "propose_supplier_order", status: "done",
+        resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }] },
+        result: { order_id: "po_1", supplier_name: "Bay Dairy Co." },
+        acknowledgement: { headline: "Bay Dairy Co. can't take this order", details: ["Out of oat milk."], caveat: null,
+          tone: "problem", next_step: "find_alternative" },
+      }],
+    };
+    stubFetch((url, init) => {
+      if (url.endsWith("/nodes/add_barista/replan") && init?.method === "POST") return new Promise<Response>(() => undefined);
+      return jsonResponse(rejected);
+    });
+    renderPage("/agent?run=RUN-1");
+    expect(await screen.findByText("Bay Dairy Co. declined. Muse is looking for another supplier… · Muse Spark 1.3")).toBeTruthy();
+  });
+
+  it("has two tabs: Plan and Ask", async () => {
     mockApi();
     renderPage();
     const tabs = within(await screen.findByRole("navigation", { name: "Muse" }));
-    expect(tabs.getByRole("button", { name: /Events/ })).toBeTruthy();
-    expect(tabs.getByRole("button", { name: "Chat" })).toBeTruthy();
-    expect(tabs.getByRole("link", { name: "Deliveries" })).toBeTruthy();
-    for (const soon of ["Chats", "Insta post", "Fix-it"]) expect(tabs.queryByText(soon)).toBeNull();
+    expect(tabs.getAllByRole("button").map((b) => b.textContent?.replace(/\d+$/, "").trim())).toEqual(["Plan", "Ask"]);
+    expect(tabs.queryByRole("link")).toBeNull();  // Deliveries is gone; Receive delivery stays in the sidebar
   });
 
   it("chat asks with the demo event's reference time, and Plan it starts a plan", async () => {
-    const demoEvent = { ...marketEvent, knowledge_as_of: "2026-10-29T18:00:00-07:00" };
+    const demoEvent = { ...marketEvent, knowledge_as_of: "2026-11-05T18:00:00-08:00" };
     const fetchMock = stubFetch((url, init) => {
       if (url === "/api/v1/agent/chat")
         return jsonResponse({ intent: "needs_plan", message: "order more oat milk", channel: "text", model: "muse-spark-1.3",
@@ -471,8 +539,8 @@ describe("AgentPage", () => {
     renderPage();
     await screen.findByText("Santa Clara Farmers Market");
     expect(screen.getByText(powered("Powered by Meta Muse models"))).toBeTruthy();
-    await userEvent.click(screen.getByRole("button", { name: "Chat" }));
-    expect(screen.getByText(powered("Powered by Muse Spark"))).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Ask" }));
+    expect(screen.getByText(powered("Powered by Meta Muse models"))).toBeTruthy();
     expect(screen.getByLabelText("Ask Muse").closest("form")!.hidden).toBe(true);  // the plan bar steps aside
     await userEvent.type(screen.getByLabelText("Ask Muse a question"), "order more oat milk{enter}");
     const chatCall = fetchMock.mock.calls.find(([url]) => url === "/api/v1/agent/chat");
@@ -497,7 +565,7 @@ describe("AgentPage", () => {
       action: "propose_supplier_order",
       status: "done" as const,
       result: { order_id: "po_1" },
-      resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }], requested_delivery_at: "2026-11-01T06:00:00-08:00" },
+      resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }], requested_delivery_at: "2026-11-08T06:00:00-08:00" },
       replanned_in: replannedIn,
       lifecycle: [
         { stage: "Proposed", state: "done" as const, at: null, note: null },
@@ -506,7 +574,7 @@ describe("AgentPage", () => {
       ],
       acknowledgement: {
         headline: "Bay Dairy Co. can't take this order",
-        details: ["Bay Dairy Co. is out of oat milk until Mon, Nov 2."],
+        details: ["Bay Dairy Co. is out of oat milk until Mon, Nov 9."],
         caveat: null,
         tone: "problem" as const,
         next_step: "find_alternative" as const,
@@ -519,7 +587,7 @@ describe("AgentPage", () => {
       goal: "Get the milk from Willow Ridge",
       parent_run_id: "RUN-1",
       parent_node_id: "add_barista",
-      nodes: [{ ...run.nodes[3], action: "propose_supplier_order", resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }], requested_delivery_at: "2026-11-01T06:00:00-08:00" }, summary: "Order 6 L oat milk for Sun Nov 1 6 AM from Willow Ridge Dairy Supply (simulated)" }],
+      nodes: [{ ...run.nodes[3], action: "propose_supplier_order", resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }], requested_delivery_at: "2026-11-08T06:00:00-08:00" }, summary: "Order 6 L oat milk for Sun Nov 8 6 AM from Willow Ridge Dairy Supply (simulated)" }],
     };
     let replanned = false;
     const fetchMock = stubFetch((url, init) => {

@@ -68,7 +68,7 @@ def test_reorder_points_put_oat_milk_and_banana_nut_muffins_below(session: Sessi
     below = {i for i, p in points.items() if Decimal(stock[i]["estimated_quantity"]) < p}
     assert below == {"OAT_MILK", "BANANA_NUT_MUFFIN"}
     for muffin in ("BANANA_NUT_MUFFIN", "CHOCOLATE_CHIP_MUFFIN"):  # Thursday's close count, not January's
-        assert stock[muffin]["latest_verified_count_id"] == "AF_EVENT_SURGE_20261101_COUNT_THU_CLOSE"
+        assert stock[muffin]["latest_verified_count_id"] == "AF_EVENT_SURGE_20261108_COUNT_THU_CLOSE"
 
 
 def test_scenario_tells_the_event_story(session: Session) -> None:
@@ -83,8 +83,8 @@ def test_scenario_tells_the_event_story(session: Session) -> None:
         session,
         {
             "cafe_id": "CAFE001",
-            "start_at": "2026-11-01T08:00:00-08:00",
-            "end_at": "2026-11-01T14:00:00-08:00",
+            "start_at": "2026-11-08T08:00:00-08:00",
+            "end_at": "2026-11-08T14:00:00-08:00",
             "required_staff": 4,
         },
     )
@@ -99,15 +99,15 @@ def test_reset_removes_agent_changes_and_scenario_but_not_january(session: Sessi
             "status": "plan",
             "goal": "Add a barista",
             "nodes": [
-                {"id": "cov", "action": "coverage_report", "reason": "r", "args": {"start_at": "2026-11-01T08:00:00-08:00", "end_at": "2026-11-01T14:00:00-08:00", "required_staff": 4}},
+                {"id": "cov", "action": "coverage_report", "reason": "r", "args": {"start_at": "2026-11-08T08:00:00-08:00", "end_at": "2026-11-08T14:00:00-08:00", "required_staff": 4}},
                 {"id": "staff", "action": "list_employees", "reason": "r", "args": {}},
-                {"id": "shifts", "action": "list_shifts", "reason": "r", "args": {"start_at": "2026-11-01T07:00:00-08:00", "end_at": "2026-11-01T15:00:00-08:00"}},
-                {"id": "add", "action": "schedule_shift", "reason": "r", "args": {"employee_id": "DEMO_EMP_003", "start_at": "2026-11-01T07:30:00-08:00", "end_at": "2026-11-01T14:30:00-08:00"}},
+                {"id": "shifts", "action": "list_shifts", "reason": "r", "args": {"start_at": "2026-11-08T07:00:00-08:00", "end_at": "2026-11-08T15:00:00-08:00"}},
+                {"id": "add", "action": "schedule_shift", "reason": "r", "args": {"employee_id": "DEMO_EMP_003", "start_at": "2026-11-08T07:30:00-08:00", "end_at": "2026-11-08T14:30:00-08:00"}},
             ],
         }
     )
     run = create_run(
-        session, query="q", cafe_id="CAFE001", as_of=datetime(2026, 10, 30, 1, tzinfo=timezone.utc),
+        session, query="q", cafe_id="CAFE001", as_of=datetime(2026, 11, 6, 2, tzinfo=timezone.utc),
         plan=plan, validation=validate_plan(plan, "CAFE001"), model="m", attempts=1,
     )
     execute(session, run.run_id)
@@ -129,7 +129,7 @@ def test_reset_removes_agent_changes_and_scenario_but_not_january(session: Sessi
 def test_conflicting_existing_row_is_not_overwritten(session: Session) -> None:
     seed_event_surge(session)
     shift = session.get(Shift, f"{PREFIX}SHIFT_007")
-    shift.end_at = datetime.fromisoformat("2026-11-01T13:00:00-08:00")
+    shift.end_at = datetime.fromisoformat("2026-11-08T13:00:00-08:00")
     session.flush()
     with pytest.raises(DemoSeedError, match="Conflicting"):
         seed_event_surge(session)

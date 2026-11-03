@@ -19,6 +19,7 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.modules.purchasing.service import OrderLineIn, offer_shift, send_order, upcoming_deliveries, whole_packs
@@ -208,6 +209,7 @@ class GetPurchaseOrderInput(CafeScopedInput):
 
 class DeliveriesInput(CafeScopedInput):
     ingredient_id: str | None = Field(default=None, description="One item; omit for every delivery.")
+    ingredient_ids: list[str] | None = Field(default=None, description="Several items, e.g. every milk.")
     start_at: datetime | None = Field(default=None, description="Window start, with UTC offset; default now.")
     end_at: datetime | None = Field(default=None, description="Window end; default 7 days after start_at.")
 
@@ -231,6 +233,7 @@ class DeliveriesOut(BaseModel):
     end_at: datetime
     open_orders: int = Field(description="Open supplier orders arriving in the window.")
     deliveries: list[DeliveryOut]
+    without_delivery: list[str] = Field(default_factory=list, description="Items asked about with nothing arriving.")
 
 
 class PurchaseOrderOut(BaseModel):
@@ -412,11 +415,18 @@ def _find_suppliers(session: Session, p: FindSuppliersInput) -> SupplierOptions:
 
 
 def _list_deliveries(session: Session, p: DeliveriesInput) -> DeliveriesOut:
+    from backend.modules.inventory.models import InventoryItem
+
     start = p.start_at or datetime.now(timezone.utc)
     end = p.end_at or start + timedelta(days=7)
-    rows = upcoming_deliveries(session, p.cafe_id, start, end, p.ingredient_id)
+    asked = ([p.ingredient_id] if p.ingredient_id else []) + list(p.ingredient_ids or [])
+    rows = upcoming_deliveries(session, p.cafe_id, start, end, asked or None)
     orders = {(d["po_number"], d["supplier"]) for d in rows if d["kind"] == "order"}
-    return DeliveriesOut(start_at=start, end_at=end, open_orders=len(orders), deliveries=[DeliveryOut(**d) for d in rows])
+    arriving = {d["ingredient_id"] for d in rows}
+    names = dict(session.execute(select(InventoryItem.ingredient_id, InventoryItem.name)
+                                 .where(InventoryItem.cafe_id == p.cafe_id, InventoryItem.ingredient_id.in_(asked))).all())
+    return DeliveriesOut(start_at=start, end_at=end, open_orders=len(orders), deliveries=[DeliveryOut(**d) for d in rows],
+                         without_delivery=[names.get(i, i) for i in asked if i not in arriving])
 
 
 def _get_purchase_order(session: Session, p: GetPurchaseOrderInput) -> PurchaseOrderOut:

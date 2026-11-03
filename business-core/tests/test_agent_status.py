@@ -31,14 +31,14 @@ def api():
         connection.close()
 
 
-def test_panel_prepares_for_the_market_not_halloween(api: TestClient) -> None:
+def test_panel_prepares_for_the_market_not_thanksgiving(api: TestClient) -> None:
     body = api.get("/api/v1/agent/status", params={"cafe_id": C}).json()
     assert body["focus_event_name"] == "Santa Clara Farmers Market"
-    assert body["date_label"] == "Thursday, October 29"
+    assert body["date_label"] == "Thursday, November 5"
 
     milk = {row["ingredient_id"]: row for row in body["inventory"]}
     assert milk["WHOLE_MILK"]["status"] == "short" and milk["OAT_MILK"]["status"] == "short"
-    assert body["kpis"]["stock"]["value"] == "2"
+    assert body["kpis"]["stock"]["value"] == "2"  # whole milk and oat milk
     assert (body["kpis"]["coverage"]["value"], body["kpis"]["coverage"]["of"]) == ("2", "/ 4")
 
     sunday = body["coverage"][-1]
@@ -46,9 +46,37 @@ def test_panel_prepares_for_the_market_not_halloween(api: TestClient) -> None:
     assert [d["halves"][0]["staffed"] for d in body["coverage"][:2]] == [2, 2]
 
     events = {e["name"]: e for e in body["events"]}
-    assert events["Halloween"]["plan_state"] == "new" and "fewer drinks" in events["Halloween"]["note"]
+    assert events["Thanksgiving"]["plan_state"] == "new" and "fewer drinks" in events["Thanksgiving"]["note"]
+    assert events["Holiday Lights & Craft Fair"]["plan_state"] == "new"
 
 
 def test_events_list_has_no_plan_until_the_owner_asks(api: TestClient) -> None:
     events = api.get("/api/v1/agent/events", params={"cafe_id": C}).json()
     assert {e["plan_state"] for e in events} == {"new"} and all(e["run_id"] is None for e in events)
+
+
+def test_at_a_glance_reads_low_stock_deliveries_and_shifts(api: TestClient) -> None:
+    body = api.get("/api/v1/agent/glance", params={"cafe_id": C, "as_of": "2026-11-05T18:00:00-08:00"}).json()
+    assert body["running_low"] == [
+        {"name": "Banana Nut Muffin", "text": "14 left", "detail": "reorder at 16"},
+        {"name": "Oat Milk", "text": "1.25 L left", "detail": "reorder at 3 L"},
+    ]
+    assert {"name": "Whole Milk", "text": "12 L", "detail": "Fri Nov 6, 6 AM · regular delivery"} in body["coming_in"]
+    assert len(body["coming_in"]) <= 4
+    # Thursday 6 PM is after closing: the next day with shifts, from the roster
+    assert (body["working_label"], body["working_day"]) == ("Working tomorrow", "Fri Nov 6")
+    assert body["working"][0] == {"name": "Jordan Brooks", "text": "7 AM–3 PM", "detail": None}
+    assert api.get("/api/v1/agent/glance", params={"cafe_id": C, "as_of": "2026-11-05T18:00:00"}).status_code == 422
+    assert api.get("/api/v1/agent/glance", params={"cafe_id": "NOPE"}).status_code == 404
+
+
+def test_at_a_glance_puts_open_orders_before_regular_deliveries(api: TestClient) -> None:
+    db = app.dependency_overrides[get_db]()
+    seed_event_surge(db, with_delivery=True)  # PO-1042 from Willow Ridge, arriving Sun Nov 8, 5:30 AM
+    body = api.get("/api/v1/agent/glance", params={"cafe_id": C, "as_of": "2026-11-05T18:00:00-08:00"}).json()
+    order = "Sun Nov 8, 5:30 AM · Willow Ridge Dairy Supply PO-1042, confirmed"
+    assert body["coming_in"][:2] == [
+        {"name": "Oat Milk", "text": "6 L", "detail": order},
+        {"name": "Whole Milk", "text": "12 L", "detail": order},
+    ]
+    assert body["coming_in"][2]["detail"].endswith("regular delivery")

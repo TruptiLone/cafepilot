@@ -1,8 +1,9 @@
 """Synthetic sales history and event calendar for CAFE001 (demo data, clearly labeled).
 
-Generates line-level sales (sizes, milk choices, extras) for May 1 – Oct 29 2026 and for
-Sep 1 – Nov 2 2025 (so last Halloween has comparable normal Fridays), plus a calendar of past
-events whose effect is built into those sales, and the upcoming events Muse will "detect".
+Generates line-level sales (sizes, milk choices, extras) for May 1 – Nov 5 2026 and for
+Sep 1 – Dec 13 2025 (so last year's Halloween, Thanksgiving and holiday fair have comparable
+normal days), plus a calendar of past events whose effect is built into those sales, and the
+upcoming events Muse will "detect". The demo clock is Thu Nov 5 2026, 6 PM (PST).
 
 The method CaféPilot uses to read event effects from history is real; the history itself is
 invented. Never present results from this data as a validated forecast.
@@ -35,8 +36,9 @@ CAFE_ID = "CAFE001"
 SALE_PREFIX = "HIST_"
 EVENT_PREFIX = "EVT_"
 SOURCE = "Santa Clara community events (demo)"
-PERIODS = ((date(2025, 9, 1), date(2025, 11, 2)), (date(2026, 5, 1), date(2026, 10, 29)))
-LAST_SALE = datetime(2026, 10, 29, 17, 0)  # local; the Thursday closing count is at 5 PM
+PERIODS = ((date(2025, 9, 1), date(2025, 12, 13)), (date(2026, 5, 1), date(2026, 11, 5)))
+LAST_SALE = datetime(2026, 11, 5, 17, 0)  # local; the Thursday closing count is at 5 PM
+DETECTED_AT = datetime(2026, 11, 5, 18, 0)  # local: the demo clock, Thu Nov 5, 6 PM
 
 # ---- normal trading pattern (orders per hour) -------------------------------------
 WEEKDAY_HOURS = {7: 14, 8: 18, 9: 14, 10: 9, 11: 8, 12: 9, 13: 8, 14: 7, 15: 6, 16: 5, 17: 4, 18: 3}
@@ -70,10 +72,10 @@ class PastEvent:
 
 
 def _monthly_markets() -> list[PastEvent]:
-    days = [date(2026, 5, 3), date(2026, 6, 7), date(2026, 7, 5), date(2026, 8, 2), date(2026, 9, 6), date(2026, 10, 4)]
+    days = [date(2026, 5, 10), date(2026, 6, 14), date(2026, 7, 12), date(2026, 8, 9), date(2026, 9, 13), date(2026, 10, 11)]
     return [
         PastEvent(f"EVT_FARMERS_MARKET_{d:%Y%m%d}", "Santa Clara Farmers Market", "farmers_market", d, time(8), time(14),
-                  "Franklin Square, Santa Clara", 250, "monthly", "First-Sunday market two blocks away")
+                  "Franklin Square, Santa Clara", 250, "monthly", "Second-Sunday market two blocks away")
         for d in days
     ]
 
@@ -82,6 +84,13 @@ PAST_EVENTS: list[PastEvent] = [
     *_monthly_markets(),
     PastEvent("EVT_HALLOWEEN_20251031", "Halloween", "holiday", date(2025, 10, 31), time(15), time(19),
               "Downtown Santa Clara", None, "yearly", "Trick-or-treat evening; quieter afternoon"),
+    PastEvent("EVT_THANKSGIVING_20251127", "Thanksgiving", "holiday", date(2025, 11, 27), time(7), time(14),
+              "Citywide", None, "yearly", "Public holiday; usually quieter"),
+    PastEvent("EVT_HOLIDAY_FAIR_20251206", "Holiday Lights & Craft Fair", "community_festival", date(2025, 12, 6),
+              time(10), time(16), "Franklin Square, Santa Clara", 250, "yearly",
+              "Holiday-season craft fair and tree lighting; usually busier"),
+    PastEvent("EVT_HALLOWEEN_20261031", "Halloween", "holiday", date(2026, 10, 31), time(14), time(17),
+              "Downtown Santa Clara", None, "yearly", "Trick-or-treat afternoon; usually quieter"),
     PastEvent("EVT_INDEPENDENCE_DAY_20260704", "Independence Day", "holiday", date(2026, 7, 4), time(7), time(17),
               "Citywide", None, "yearly", "Public holiday"),
     PastEvent("EVT_LABOR_DAY_20260907", "Labor Day", "holiday", date(2026, 9, 7), time(7), time(19),
@@ -102,15 +111,19 @@ PAST_EVENTS: list[PastEvent] = [
     ],
 ]
 
-UPCOMING = [
-    dict(event_id="EVT_HALLOWEEN_20261031", name="Halloween", event_type="holiday",
-         starts_at=datetime(2026, 10, 31, 14), ends_at=datetime(2026, 10, 31, 17),
-         location="Downtown Santa Clara", distance_m=None, recurrence="yearly",
-         notes="Trick-or-treat afternoon; usually quieter"),
-    dict(event_id="EVT_SC_FARMERS_MARKET_20261101", name="Santa Clara Farmers Market",
-         event_type="farmers_market", starts_at=datetime(2026, 11, 1, 8), ends_at=datetime(2026, 11, 1, 14),
+UPCOMING = [  # all demo data (is_synthetic), all after daylight saving ended Nov 1 (PST, -08:00)
+    dict(event_id="EVT_SC_FARMERS_MARKET_20261108", name="Santa Clara Farmers Market",
+         event_type="farmers_market", starts_at=datetime(2026, 11, 8, 8), ends_at=datetime(2026, 11, 8, 14),
          location="Franklin Square, Santa Clara", distance_m=250, recurrence="monthly",
-         notes="First-Sunday market two blocks away"),
+         notes="Second-Sunday market two blocks away"),
+    dict(event_id="EVT_THANKSGIVING_20261126", name="Thanksgiving", event_type="holiday",
+         starts_at=datetime(2026, 11, 26, 7), ends_at=datetime(2026, 11, 26, 14),
+         location="Citywide", distance_m=None, recurrence="yearly",
+         notes="Public holiday; usually quieter"),
+    dict(event_id="EVT_HOLIDAY_FAIR_20261205", name="Holiday Lights & Craft Fair", event_type="community_festival",
+         starts_at=datetime(2026, 12, 5, 10), ends_at=datetime(2026, 12, 5, 16),
+         location="Franklin Square, Santa Clara", distance_m=250, recurrence="yearly",
+         notes="Holiday-season craft fair and tree lighting; usually busier"),
 ]
 
 
@@ -119,7 +132,7 @@ def _effect(event_type: str, category: str, hour: int, event: PastEvent) -> floa
     if not (event.start.hour <= hour < event.end.hour):
         return 1.0
     table = {
-        "farmers_market": {"milk_coffee": 1.55, "black_coffee": 1.35, "cold": 1.5, "milk_other": 1.3, "bakery": 1.6},
+        "farmers_market": {"milk_coffee": 1.62, "black_coffee": 1.35, "cold": 1.5, "milk_other": 1.3, "bakery": 1.55},
         "community_festival": {"milk_coffee": 1.35, "black_coffee": 1.2, "cold": 1.7, "bakery": 1.3, "milk_other": 1.2},
         "sports": {"hot_chocolate": 2.5, "milk_coffee": 1.5, "black_coffee": 1.6, "milk_other": 1.3},
         "weather": {"cold": 2.2, "milk_coffee": 0.8, "black_coffee": 0.75, "hot_chocolate": 0.5, "tea": 0.8},
@@ -127,6 +140,8 @@ def _effect(event_type: str, category: str, hour: int, event: PastEvent) -> floa
     if event_type == "holiday":
         if event.name == "Halloween":
             return 1.8 if category == "hot_chocolate" else 0.7
+        if event.name == "Thanksgiving":
+            return 0.55
         return 0.65 if event.name == "Independence Day" else 0.8
     return table.get(event_type, {}).get(category, 1.0)
 
@@ -250,7 +265,7 @@ def seed_events(session: Session, tz: ZoneInfo) -> int:
         dict(**{k: v for k, v in u.items() if k not in ("starts_at", "ends_at")}, cafe_id=CAFE_ID,
              starts_at=u["starts_at"].replace(tzinfo=tz), ends_at=u["ends_at"].replace(tzinfo=tz),
              expected_attendance=None, attendance_source=None, status="upcoming", source=SOURCE,
-             source_url=None, is_synthetic=True, detected_at=datetime(2026, 10, 29, 18, 0, tzinfo=tz))
+             source_url=None, is_synthetic=True, detected_at=DETECTED_AT.replace(tzinfo=tz))
         for u in UPCOMING
     ]
     for row in rows:

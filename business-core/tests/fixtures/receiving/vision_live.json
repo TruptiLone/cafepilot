@@ -1,20 +1,20 @@
 {
+  "captured": "2026-11-02 PT, Trupti's laptop (slip re-read after its dates moved to Nov 5 / Nov 8)",
   "model": "muse-spark-1.3",
-  "captured": "2026-10-29 18:23 PT, Trupti's laptop",
   "slip": {
     "ok": true,
-    "latency_ms": 7412,
+    "latency_ms": 6782,
     "parsed": {
       "supplier": "Willow Ridge Dairy Supply",
       "packing_slip_number": "PS-58213",
       "customer_po_number": "PO-1042",
-      "delivery_date": "Sun Nov 1, 2026",
-      "delivery_window": "5:30 \u2013 6:00 AM",
+      "delivery_date": "Sun Nov 8, 2026",
+      "delivery_window": "5:30 – 6:00 AM",
       "lines": [
         {
           "item_number": "WR-1001",
           "description": "Whole Milk, 1 L carton",
-          "pack": "Case of 6 \u00d7 1 L",
+          "pack": "Case of 6 × 1 L",
           "ordered": 2,
           "shipped": 2,
           "backordered": 0
@@ -22,7 +22,7 @@
         {
           "item_number": "WR-2240",
           "description": "Oat Milk Barista Edition, 1 L carton",
-          "pack": "Case of 6 \u00d7 1 L",
+          "pack": "Case of 6 × 1 L",
           "ordered": 1,
           "shipped": 1,
           "backordered": 0
@@ -34,14 +34,14 @@
   },
   "photo": {
     "ok": true,
-    "latency_ms": 10531,
+    "latency_ms": 12946,
     "parsed": {
       "items": [
         {
           "product": "oat milk",
           "label_text": "OAT MILK BARISTA",
           "visible_units": 6,
-          "container": "cardboard case",
+          "container": "cardboard box",
           "pack_label": "OAT MILK BARISTA 6 x 1 L",
           "possibly_hidden_units": false,
           "confidence": "high"
@@ -50,14 +50,14 @@
           "product": "whole milk",
           "label_text": "WILLOW RIDGE WHOLE MILK",
           "visible_units": 3,
-          "container": "blue plastic milk crate",
+          "container": "blue plastic crate",
           "pack_label": null,
           "possibly_hidden_units": true,
           "confidence": "high"
         }
       ],
       "visible_damage": null,
-      "notes": "Background delivery truck contains additional blue crates and cardboard boxes but labels and unit counts are not legible so not counted."
+      "notes": "Additional blue crates and cardboard boxes visible inside delivery truck in background but labels not legible so not counted."
     }
   }
 }

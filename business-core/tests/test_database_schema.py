@@ -30,8 +30,9 @@ APPLICATION_TABLES = {
     "shift_offers",
     "agent_node_runs",
     "agent_approvals",
+    "ai_calls",
 }
-REVISION = "a33ad7246a33"
+REVISION = "d054261bf4c1"
 
 pytestmark = pytest.mark.database
 

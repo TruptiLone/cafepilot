@@ -134,8 +134,15 @@ def _catalog(session: Session, cafe_id: str) -> dict[str, str]:
     }
 
 
+def _base_units(session: Session, cafe_id: str) -> dict[str, str]:
+    return dict(session.execute(
+        select(InventoryItem.ingredient_id, InventoryItem.base_unit).where(InventoryItem.cafe_id == cafe_id)
+    ).all())
+
+
 def build_drafts(session: Session, receipt: Receipt, order: PurchaseOrder | None) -> list[_Draft]:
     catalog = _catalog(session, receipt.cafe_id)
+    base_units = _base_units(session, receipt.cafe_id)
     drafts: list[_Draft] = []
     by_item: dict[str, _Draft] = {}
     by_ingredient: dict[str, _Draft] = {}
@@ -182,12 +189,16 @@ def build_drafts(session: Session, receipt: Receipt, order: PurchaseOrder | None
     for item in photo.items if photo else []:
         ingredient = match_ingredient(f"{item.product or ''} {item.label_text or ''}", catalog)
         draft = by_ingredient.get(ingredient) if ingredient else None
+        if draft is None and item.product:  # not in the catalog: the slip line with the same product
+            draft = next((d for d in drafts if d.ingredient_id is None and _product(d.description) == item.product.lower()), None)
         if draft is None:
             draft = _Draft(ingredient_id=ingredient, description=item.label_text or item.product or "Unknown item")
             drafts.append(draft)
             if ingredient:
                 by_ingredient[ingredient] = draft
-        unit_size = draft.unit_size or parse_pack(item.pack_label)[1] or Decimal(1000)
+        # Items kept as "each" (muffins) are one per unit; anything else defaults to a 1 L carton.
+        unit = draft.unit or base_units.get(draft.ingredient_id or "")
+        unit_size = draft.unit_size or parse_pack(item.pack_label)[1] or (Decimal(1) if unit == "each" else Decimal(1000))
         draft.unit_size = draft.unit_size or unit_size
         draft.seen = (draft.seen or ZERO) + Decimal(str(item.visible_units)) * unit_size
         draft.may_hide_more = draft.may_hide_more or item.possibly_hidden_units

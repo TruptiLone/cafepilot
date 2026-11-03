@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import Brand from "./Brand";
+import { useDemoDate } from "./demoDate";
+import UpdatesBell from "./updates/UpdatesBell";
+import { UpdatesProvider } from "./updates/UpdatesProvider";
 import {
   AgentIcon,
   CloseIcon,
@@ -29,20 +32,29 @@ function AppShell() {
     setIsMenuOpen(false);
   }, [location.pathname]);
 
+  const onAgent = location.pathname.startsWith("/agent");
+  const demoDate = useDemoDate();
+
   return (
+    <UpdatesProvider>
     <div className="app-frame">
       <header className="app-header">
         <Brand />
-        <button
-          className="icon-button mobile-menu-button"
-          type="button"
-          aria-label="Open navigation"
-          aria-expanded={isMenuOpen}
-          onClick={() => setIsMenuOpen(true)}
-        >
-          <MenuIcon />
-        </button>
+        <div className="app-header__actions">
+          <UpdatesBell className="updates--header" />
+          <button
+            className="icon-button mobile-menu-button"
+            type="button"
+            aria-label="Open navigation"
+            aria-expanded={isMenuOpen}
+            onClick={() => setIsMenuOpen(true)}
+          >
+            <MenuIcon />
+          </button>
+        </div>
       </header>
+      {/* Desktop: Ask CaféPilot shows the bell in its own header, next to "Watching for events". */}
+      {!onAgent && <UpdatesBell className="updates--float" />}
 
       <div className="app-body">
         <button
@@ -86,14 +98,16 @@ function AppShell() {
           <div className="sidebar__footer">
             <strong>CafePilot Demo Cafe</strong>
             <span>Santa Clara, CA</span>
+            {demoDate && <span className="sidebar__demo-date">Demo date: {demoDate}</span>}
           </div>
         </aside>
 
-        <main className={`main-content${location.pathname.startsWith("/agent") ? " main-content--flush" : ""}`}>
+        <main className={`main-content${onAgent ? " main-content--flush" : ""}`}>
           <Outlet />
         </main>
       </div>
     </div>
+    </UpdatesProvider>
   );
 }
 

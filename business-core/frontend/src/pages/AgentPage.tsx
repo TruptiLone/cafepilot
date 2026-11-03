@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import {
+  ACTIVE_CAFE_NAME,
   type AgentRun,
   type DetectedEvent,
   type PlanState,
@@ -16,7 +17,11 @@ import {
   startRun,
 } from "../api/agent";
 import StepDetail from "../components/agent/StepDetail";
-import ChatPanel from "../components/muse/ChatPanel";
+import { employeeName } from "../components/agent/changes";
+import ChatPanel, { EXAMPLES } from "../components/muse/ChatPanel";
+import UpdatesBell from "../components/updates/UpdatesBell";
+import AtAGlance from "../components/muse/AtAGlance";
+import { demoDateLabel } from "../components/demoDate";
 import PlanMap from "../components/muse/PlanMap";
 import { type SpeechRecognitionLike, speechRecognition } from "../components/muse/speech";
 import StoryGraph from "../components/muse/StoryGraph";
@@ -36,7 +41,6 @@ const PLAN_STATE: Record<PlanState, [string, string]> = {
 };
 
 type View = "owner" | "technical";
-type Toast = { id: number; tone: "good" | "bad" | "wait"; who: string; title: string; text: string };
 
 function errorMessage(error: unknown): string {
   return error instanceof AgentApiError ? error.message : "Something went wrong. Try again.";
@@ -65,20 +69,28 @@ function eventChip(event: DetectedEvent) {
   return fmt(event.starts_at, { month: "short", day: "numeric" }).toUpperCase();
 }
 
-function eventLine(event: DetectedEvent) {
+/** "Good morning / afternoon / evening" by the café's clock. */
+function greeting(now = new Date()): string {
+  const hour = Number(new Intl.DateTimeFormat("en-US", { hour: "numeric", hourCycle: "h23", timeZone: "America/Los_Angeles" }).format(now));
+  return hour < 12 ? "Good morning." : hour < 17 ? "Good afternoon." : "Good evening.";
+}
+
+/** The owner-voice line for an event card, from its history ([what to expect, the question]). */
+function eventPitch(event: DetectedEvent): [string, string] {
+  const day = fmt(event.starts_at, { weekday: "long" });
+  const subject = event.category === "farmers_market" ? `${day}'s market` : `${event.title} on ${day}`;
   const extra = event.expected.extra_drinks_typical;
-  const feel =
-    event.expected.confidence === "none"
-      ? "no past events like this"
-      : extra > 15
-        ? "usually much busier"
-        : extra > 0
-          ? "usually a little busier"
-          : extra < 0
-            ? "usually a little quieter"
-            : "usually a normal day";
+  if (event.expected.confidence === "none") return [`${subject} is new to us, with no history yet.`, "Want me to check we're ready?"];
+  if (extra > 15) return [`${subject} usually brings a crowd.`, "Want me to get ready?"];
+  if (extra > 0) return [`${subject} is usually a little busier.`, "Want me to check we're ready?"];
+  if (extra < 0) return [`${subject} is usually quieter.`, "Want me to check anyway?"];
+  return [`${subject} is usually a normal day.`, "Want me to check we're ready?"];
+}
+
+/** When and where: "Sun, Nov 8 · 8 AM–2 PM · 0.2 miles away" (how busy it gets is in eventPitch). */
+function eventLine(event: DetectedEvent) {
   const miles = event.distance_m ? ` · ${(event.distance_m / 1609).toFixed(1)} miles away` : "";
-  return `${fmt(event.starts_at, { weekday: "short", month: "short", day: "numeric" })} · ${fmt(event.starts_at, { hour: "numeric" })}–${fmt(event.ends_at, { hour: "numeric" })}${miles} · ${feel}`;
+  return `${fmt(event.starts_at, { weekday: "short", month: "short", day: "numeric" })} · ${fmt(event.starts_at, { hour: "numeric" })}–${fmt(event.ends_at, { hour: "numeric" })}${miles}`;
 }
 
 /** Everything that can change an event's plan state or what a box says. */
@@ -89,14 +101,13 @@ function signature(runs: (AgentRun | null | undefined)[]) {
     .join("#");
 }
 
-const FINAL_STAGES = /^(Confirmed|Rejected|Accepted|Declined)/;
-
 function AgentPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const runId = searchParams.get("run");
   const eventId = searchParams.get("event");
 
   const [events, setEvents] = useState<DetectedEvent[]>([]);
+  const [eventsLoaded, setEventsLoaded] = useState(false);
   const [run, setRun] = useState<AgentRun | null>(null);
   const [children, setChildren] = useState<Record<string, AgentRun>>({});
   const [runError, setRunError] = useState<string | null>(null);
@@ -107,21 +118,21 @@ function AgentPage() {
   const [planTimes, setPlanTimes] = useState<Record<string, number>>({});
   const [request, setRequest] = useState("");
   const [tab, setTab] = useState<"events" | "chat">("events");
+  const [chatQuestion, setChatQuestion] = useState<{ id: number; text: string } | null>(null);
   const [view, setView] = useState<View>(() => (readPref(VIEW_KEY) === "technical" ? "technical" : "owner"));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [replanning, setReplanning] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [listening, setListening] = useState(false);
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const attempted = useRef(new Set<string>());
-  const stages = useRef(new Map<string, string>());
 
   const refreshEvents = useCallback(() => {
     listEvents()
       .then(setEvents)
-      .catch(() => setEvents([]));
+      .catch(() => setEvents([]))
+      .finally(() => setEventsLoaded(true));
   }, []);
 
   useEffect(refreshEvents, [refreshEvents]);
@@ -163,10 +174,16 @@ function AgentPage() {
     }
   }, [childIds, children]);
 
-  // Keep refreshing while Muse is working or a supplier / employee hasn't answered yet.
+  // Keep refreshing while Muse is working, a supplier / employee hasn't answered yet, or a confirmed
+  // order is awaiting delivery (the glasses' delivery check turns it into "Delivered").
   useEffect(() => {
     const active = [run, ...childIds.map((id) => children[id])].filter(Boolean) as AgentRun[];
-    const live = active.filter((r) => r.status === "running" || (r.waiting_on && r.waiting_on.length > 0));
+    const live = active.filter(
+      (r) =>
+        r.status === "running" ||
+        (r.waiting_on && r.waiting_on.length > 0) ||
+        r.nodes.some((n) => n.acknowledgement?.tone === "awaiting"),
+    );
     if (!live.length) return;
     const timer = window.setTimeout(() => {
       for (const r of live) {
@@ -186,35 +203,6 @@ function AgentPage() {
   useEffect(() => {
     if (sig) refreshEvents();
   }, [sig, refreshEvents]);
-
-  // Supplier and staff replies become notifications.
-  useEffect(() => {
-    const all = [run, ...childIds.map((id) => children[id])].filter(Boolean) as AgentRun[];
-    const fresh: Toast[] = [];
-    for (const r of all) {
-      for (const n of r.nodes) {
-        const last = n.lifecycle?.[n.lifecycle.length - 1];
-        if (!last) continue;
-        const key = `${r.run_id}:${n.node_id}`;
-        const before = stages.current.get(key);
-        stages.current.set(key, last.stage);
-        if (before !== undefined && before !== last.stage && FINAL_STAGES.test(last.stage)) {
-          const bad = /Rejected|Declined/.test(last.stage);
-          fresh.push({
-            id: Date.now() + fresh.length,
-            tone: bad ? "bad" : "good",
-            who: n.action === "schedule_shift" ? "Staff" : "Supplier",
-            title: n.acknowledgement?.headline ?? last.stage,
-            text: n.acknowledgement?.details[0] ?? "",
-          });
-        }
-      }
-    }
-    if (fresh.length) {
-      setToasts((t) => [...t, ...fresh]);
-      for (const toast of fresh) window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== toast.id)), 7000);
-    }
-  }, [run, children, childIds]);
 
   // When a supplier says no (or someone declines), Muse looks for another way right away.
   // It only proposes: the new change still waits for the owner's OK.
@@ -377,6 +365,9 @@ function AgentPage() {
         ? ["waiting", `Waiting on ${waitingOn.join(" and ")}`]
         : ["watching", "Watching for events"];
   const showPlan = !!run || !!planningFor || !!rejectedPlanning;
+  const replanningStep = replanning ? run?.nodes.find((n) => n.node_id === replanning) : undefined;
+  const replanBanner =
+    run && replanningStep ? replanLine(replanningStep, run, modelName(selectedEvent?.planner_model ?? run.model)) : null;
 
   return (
     <section className="page page--muse mz" aria-label="Ask CaféPilot">
@@ -393,13 +384,14 @@ function AgentPage() {
             <h1 className="mz-head-title">Muse</h1>
             <div className="mz-muted mz-powered">
               <span className="mz-powered__by">Powered by </span>
-              {tab === "chat" ? "Muse Spark" : run ? modelName(run.model) : "Meta Muse models"}
+              {tab === "events" && run ? modelName(run.model) : "Meta Muse models"}
             </div>
           </div>
           <div className="mz-live" data-live={live[0]} role="status">
             <i />
             <span>{live[1]}</span>
           </div>
+          <UpdatesBell className="updates--pane" />
         </header>
 
         <nav className="mz-tabs" aria-label="Muse">
@@ -412,7 +404,7 @@ function AgentPage() {
               backToEvents();
             }}
           >
-            Events <span className="mz-tab__n">{events.length}</span>
+            Plan <span className="mz-tab__n">{events.length}</span>
           </button>
           <button
             type="button"
@@ -420,55 +412,90 @@ function AgentPage() {
             aria-current={tab === "chat" ? "page" : undefined}
             onClick={() => setTab("chat")}
           >
-            Chat
+            Ask
           </button>
-          <Link className="mz-tab" to="/receiving">
-            Deliveries
-          </Link>
         </nav>
 
-        {tab === "chat" && <ChatPanel asOf={chatAsOf} onPlan={planFromChat} />}
+        <ChatPanel hidden={tab !== "chat"} asOf={chatAsOf} onPlan={planFromChat} question={chatQuestion} />
 
-        <div className="mz-scroll" hidden={tab === "chat"}>
+        <div className={`mz-scroll${showPlan ? "" : " mz-scroll--home"}`} hidden={tab === "chat"}>
           {!showPlan && (
             <section className="mz-events" aria-label="Events Muse found">
+              <header className="mz-greet">
+                <span className="mz-greet__mark" aria-hidden="true">
+                  <svg viewBox="0 0 24 24">
+                    <path d="M5 11h11v3.5a5 5 0 0 1-5 5h-1a5 5 0 0 1-5-5z" />
+                    <path d="M16 12h1.5a2.25 2.25 0 0 1 0 4.5H16" />
+                    <path d="M10.5 3v4.5M8.25 5.25h4.5" />
+                  </svg>
+                </span>
+                <div>
+                  <h2 className="mz-greet__hi">{greeting()}</h2>
+                  <p className="mz-greet__sub">Here's what's coming up for {ACTIVE_CAFE_NAME}. Nothing changes without your OK.</p>
+                </div>
+              </header>
               <p className="mz-label">
-                Muse found {events.length} {events.length === 1 ? "event" : "events"} coming up
-              </p>
-              <p className="mz-purpose">
-                Muse watches what's happening near the café and tells you before a day gets busier (or quieter) than usual, so
-                you can get stock and staff ready in time.
+                {events.length} {events.length === 1 ? "event" : "events"} coming up
               </p>
               {events.map((event) => {
                 const state = event.plan_state ?? "new";
+                const [expect, question] = eventPitch(event);
                 return (
                   <article key={event.event_id} className={`mz-ev${selectedEvent?.event_id === event.event_id ? " is-sel" : ""}`}>
-                    <span className="mz-ev__chip">{eventChip(event)}</span>
-                    <span className="mz-ev__main">
-                      <span className="mz-ev__title">{event.title}</span>
-                      <span className="mz-ev__meta">{eventLine(event)}</span>
+                    <span className="mz-ev__chip" aria-hidden="true">
+                      <b>{fmt(event.starts_at, { weekday: "short" }).toUpperCase()}</b>
+                      {eventChip(event)}
                     </span>
-                    {state !== "new" && <span className={`mz-pill is-${PLAN_STATE[state][0]}`}>{PLAN_STATE[state][1]}</span>}
-                    {state === "new" ? (
-                      <button
-                        type="button"
-                        className="mz-btn mz-btn--primary"
-                        disabled={planningFor !== null}
-                        onClick={() => plan(() => startEventRun(event.event_id), event.event_id)}
-                      >
-                        Let's plan ✨
-                      </button>
-                    ) : (
-                      <button type="button" className="mz-btn mz-btn--ghost" onClick={() => openEvent(event.event_id)}>
-                        Open plan
-                      </button>
-                    )}
+                    <div className="mz-ev__main">
+                      <h3 className="mz-ev__title">{event.title}</h3>
+                      <p className="mz-ev__pitch">
+                        {expect}
+                        {state === "new" ? ` ${question}` : ""}
+                      </p>
+                      <p className="mz-ev__meta">{eventLine(event)}</p>
+                    </div>
+                    <div className="mz-ev__act">
+                      {state !== "new" && <span className={`mz-pill is-${PLAN_STATE[state][0]}`}>{PLAN_STATE[state][1]}</span>}
+                      {state === "new" ? (
+                        <button
+                          type="button"
+                          className="mz-btn mz-btn--primary mz-btn--lg"
+                          disabled={planningFor !== null}
+                          onClick={() => plan(() => startEventRun(event.event_id), event.event_id)}
+                        >
+                          Let's plan ✨
+                        </button>
+                      ) : (
+                        <button type="button" className="mz-btn mz-btn--ghost mz-btn--lg" onClick={() => openEvent(event.event_id)}>
+                          Open plan
+                        </button>
+                      )}
+                    </div>
                   </article>
                 );
               })}
               {events.length === 0 && <p className="mz-empty">No events coming up. Ask Muse anything below.</p>}
+              <div className="mz-quick">
+                <p className="mz-label">Or ask Muse</p>
+                <div className="mz-chat__ex">
+                  {EXAMPLES.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      className="mz-chip-btn"
+                      onClick={() => {
+                        setChatQuestion({ id: Date.now(), text: q });
+                        setTab("chat");
+                      }}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </section>
           )}
+          {!showPlan && <AtAGlance asOf={chatAsOf} ready={eventsLoaded} />}
 
           {showPlan && (
             <button type="button" className="mz-back" onClick={backToEvents}>
@@ -525,6 +552,13 @@ function AgentPage() {
                 </div>
               </div>
 
+              {replanBanner && (
+                <p className="mz-replan" role="status">
+                  <i aria-hidden="true" />
+                  {replanBanner}
+                </p>
+              )}
+
               <div className="mz-card mz-graph-card">
                 {view === "owner" ? (
                   <StoryGraph story={story} runs={runsById} busy={busy} reveal={reveal} onDecide={onDecide} onOpenRun={openRun} />
@@ -539,7 +573,7 @@ function AgentPage() {
                 {view === "owner" && (
                   <div className="mz-legend2" aria-hidden="true">
                     <span><i className="d" />Done</span>
-                    <span><i className="w" />Needs your OK</span>
+                    <span><i className="w" />Needs your OK or in progress</span>
                     <span><i className="x" />Fell through</span>
                   </div>
                 )}
@@ -605,23 +639,24 @@ function AgentPage() {
           <div className="mz-audit">
             <i />
             {counts ? `${counts.checks} ${counts.checks === 1 ? "check" : "checks"} · ` : ""}nothing changes without your OK
+            {chatAsOf && <span className="mz-audit__demo">Demo date: {demoDateLabel(chatAsOf)}</span>}
           </div>
         </form>
       </div>
 
-      <div className="mz-toasts" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className={`mz-toast is-${t.tone}`} role="status">
-            <span className="mz-toast__who">{t.who}</span>
-            <div>
-              <div className="mz-toast__title">{t.title}</div>
-              {t.text && <div className="mz-toast__text">{t.text}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
     </section>
   );
+}
+
+/** Shown while Muse replans, until the new plan is ready (the model call itself is not delayed). */
+function replanLine(step: RunStep, run: AgentRun, model: string): string {
+  if (step.action === "schedule_shift") {
+    const args = (step.resolved_args ?? step.args) as Record<string, unknown>;
+    const who = employeeName(run, String(args.employee_id)).split(" ")[0];
+    return `${who} declined. Muse is looking for someone else… · ${model}`;
+  }
+  const supplier = String((step.result as Record<string, unknown> | null)?.supplier_name ?? "The supplier");
+  return `${supplier} declined. Muse is looking for another supplier… · ${model}`;
 }
 
 /** "in 27 s", or "after 2 attempts; the last took 27 s": latency_ms covers the final model call only. */

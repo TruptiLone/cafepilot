@@ -31,7 +31,7 @@ export function formatClock(value: string): string {
     .replace(":00", "");
 }
 
-/** "Sun, Nov 1, 8 AM–2 PM" from a shift's start and end. */
+/** "Sun, Nov 8, 8 AM–2 PM" from a shift's start and end. */
 export function timeRange(start: unknown, end: unknown): string {
   const startText = text(start);
   const endText = text(end);

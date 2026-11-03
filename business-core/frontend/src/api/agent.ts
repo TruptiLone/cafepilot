@@ -1,4 +1,5 @@
 export const ACTIVE_CAFE_ID = "CAFE001";
+export const ACTIVE_CAFE_NAME = "CafePilot Demo Cafe";
 
 export type StepStatus =
   | "pending"
@@ -40,7 +41,7 @@ export type Acknowledgement = {
   headline: string;
   details: string[];
   caveat: string | null;
-  tone?: "done" | "waiting" | "problem" | "declined";
+  tone?: "done" | "waiting" | "awaiting" | "problem" | "declined";
   next_step?: "find_alternative" | "find_cover" | null;
 };
 
@@ -147,6 +148,7 @@ export type ChatRow = {
   as_of: string | null;
   estimated: boolean;
   detail: string | null;
+  below_reorder_point?: boolean;
 };
 
 export type ChatAnswer = {
@@ -160,6 +162,11 @@ export type ChatAnswer = {
   rows: ChatRow[];
   /** Small lines after the rows, e.g. items with no usable count. */
   notes?: string[];
+  /** The reply to show and speak: Spark's sentences when every number checked out, else the code answer. */
+  reply?: string | null;
+  reply_by?: "muse" | "code";
+  /** Up to two next steps chosen by code: "ask" is another question, "plan" hands off to the plan flow. */
+  follow_ups?: { label: string; kind: "ask" | "plan"; text: string }[];
   lookups: { action: string; summary: string | null; error: string | null }[];
   plan_request: string | null;
 };
@@ -313,4 +320,21 @@ export function replanStep(runId: string, nodeId: string): Promise<StartRunRespo
     `/api/v1/agent/runs/${encodeURIComponent(runId)}/nodes/${encodeURIComponent(nodeId)}/replan`,
     { method: "POST", headers: { Accept: "application/json" } },
   );
+}
+
+export type GlanceRow = { name: string; text: string; detail: string | null };
+
+/** At a glance on the Plan home: below reorder point, next deliveries, who's working (all looked up). */
+export type Glance = {
+  as_of: string;
+  running_low: GlanceRow[];
+  coming_in: GlanceRow[];
+  working: GlanceRow[];
+  working_label: string;
+  working_day: string;
+};
+
+export function getGlance(asOf?: string, signal?: AbortSignal): Promise<Glance> {
+  const query = new URLSearchParams({ cafe_id: ACTIVE_CAFE_ID, ...(asOf ? { as_of: asOf } : {}) });
+  return requestJson<Glance>(`/api/v1/agent/glance?${query}`, { signal });
 }

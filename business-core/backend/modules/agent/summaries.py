@@ -298,21 +298,32 @@ def _suppliers(result: Row, ctx: RunContext) -> str:
 
 def _deliveries(result: Row, ctx: RunContext) -> str:
     rows = result.get("deliveries") or []
-    window = span(result.get("start_at"), result.get("end_at"), ctx.tz)
-    if not rows:
-        return f"No deliveries are scheduled for {window}" if window else "No deliveries are scheduled"
-    orders = [d for d in rows if d.get("kind") == "order"]
-    text = "" if orders else "No supplier orders are open. "
     first: dict[tuple[str, str], Row] = {}
-    for d in rows:  # earliest first: the next delivery of each item, orders listed apart from regular ones
-        first.setdefault((str(d.get("kind")), str(d.get("ingredient_id"))), d)
-    parts = []
-    for d in list(first.values())[:4]:
+    for d in rows:  # earliest first: each order line, and the next regular delivery of each item
+        first.setdefault((str(d.get("kind")), str(d.get("ingredient_id")), str(d.get("po_number"))), d)
+
+    def item(d: Row) -> str:
         when = local_time(str(d.get("arrives_at")), ctx.tz)
-        source = f"{d['supplier']} {d.get('po_number') or ''}, {d.get('status')}".replace(" ,", ",") if d.get("kind") == "order" else "regular delivery"
-        parts.append(f"{str(d['name']).lower()} {quantity(d['quantity'], d.get('unit'))} {day(when)} {clock(when)} ({source})"
-                     if when else f"{str(d['name']).lower()} {quantity(d['quantity'], d.get('unit'))} ({source})")
-    return text + "Next: " + _list(parts, 4)
+        text = f"{quantity(d['quantity'], d.get('unit'))} {str(d['name']).lower()}"
+        return f"{text} {day(when)} {clock(when)}" if when else text
+
+    orders = [d for d in first.values() if d.get("kind") == "order"]
+    regular = [d for d in first.values() if d.get("kind") == "regular"]
+    parts = []
+    if orders:
+        parts.append("On order: " + _list(
+            (f"{item(d)} from {d['supplier']}{' ' + d['po_number'] if d.get('po_number') else ''} ({d.get('status')})" for d in orders), 4) + ".")
+    else:
+        parts.append("Nothing extra is on order.")
+    if regular:
+        parts.append("Regular delivery: " + _list((item(d) for d in regular), 4) + ".")
+    missing = [str(n).lower() for n in result.get("without_delivery") or []]
+    if missing:
+        parts.append("No scheduled delivery for " + (" or ".join(missing) if len(missing) <= 2 else _list(missing)) + ".")
+    if not rows and not missing:
+        window = span(result.get("start_at"), result.get("end_at"), ctx.tz)
+        return f"No deliveries are scheduled for {window}." if window else "No deliveries are scheduled."
+    return " ".join(parts)
 
 
 def summarize_step(node: Any, ctx: RunContext) -> str | None:

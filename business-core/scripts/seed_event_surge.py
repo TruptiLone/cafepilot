@@ -1,12 +1,13 @@
 """Event Surge demo scenario (AF-01): a believable Thursday-to-Sunday picture for CAFE001.
 
-Story: farmers market Sunday Nov 1, 8 AM-2 PM. Thursday Oct 29 at 5 PM the closing shift
+Story: farmers market Sunday Nov 8, 8 AM-2 PM. Thursday Nov 5 at 5 PM the closing shift
 counts milk, beans and pastries (milk is low before the next morning's regular delivery); a
 pitcher of oat milk is spilled at 5:40 PM. Sunday
 already has a shift lead, a cashier, and one barista from noon. The café's busy-event
 target is 4 people, so the morning is short by 2 and the early afternoon by 1.
 
-Every row is synthetic and tagged with ``AF_EVENT_SURGE_20261101_``. January 2025 demo
+Every row is synthetic and tagged with ``AF_EVENT_SURGE_20261108_``. All times are PST (-08:00):
+daylight saving ended Sun Nov 1. January 2025 demo
 data is never touched.
 
 Usage (from business-core/, after ./scripts/seed_all.sh):
@@ -26,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session
 
 from backend.db.session import SessionLocal
@@ -38,10 +39,11 @@ from backend.modules.staffing.models import Employee, Shift
 from scripts.seed_demo_operations import _seed_record
 
 CAFE_ID = "CAFE001"
-PREFIX = "AF_EVENT_SURGE_20261101_"
-AS_OF = "2026-10-29T18:00:00-07:00"
+PREFIX = "AF_EVENT_SURGE_20261108_"
+OLD_PREFIXES = ("AF_EVENT_SURGE_20261101_",)  # earlier demo dates; reset still removes them
+AS_OF = "2026-11-05T18:00:00-08:00"  # the demo clock: Thu Nov 5, 6 PM
 
-COUNTED_AT = datetime.fromisoformat("2026-10-29T17:00:00-07:00")
+COUNTED_AT = datetime.fromisoformat("2026-11-05T17:00:00-08:00")
 COUNT_ID = f"{PREFIX}COUNT_THU_CLOSE"
 COUNT_QUANTITIES = {
     "WHOLE_MILK": Decimal("3000.000"),
@@ -51,17 +53,17 @@ COUNT_QUANTITIES = {
     "COLD_BREW_CONCENTRATE": Decimal("4000.000"),
     "BUTTER_CROISSANT": Decimal("30.000"),
     "BLUEBERRY_MUFFIN": Decimal("24.000"),
-    "BANANA_NUT_MUFFIN": Decimal("9.000"),
+    "BANANA_NUT_MUFFIN": Decimal("14.000"),
     "CHOCOLATE_CHIP_MUFFIN": Decimal("16.000"),
 }
 # Reorder points for the main items ("are we low on anything"). Oat milk (1.25 L after the spill) and
-# banana nut muffins (9) are deliberately below theirs on Thursday evening; the rest are above.
+# banana nut muffins (14, enough for Sunday) are deliberately below theirs on Thursday evening; the rest are above.
 REORDER_POINTS = {
     "OAT_MILK": Decimal("3000.000"),
     "WHOLE_MILK": Decimal("2000.000"),
     "COFFEE_BEANS": Decimal("3000.000"),
     "BLUEBERRY_MUFFIN": Decimal("12.000"),
-    "BANANA_NUT_MUFFIN": Decimal("12.000"),
+    "BANANA_NUT_MUFFIN": Decimal("16.000"),
     "CHOCOLATE_CHIP_MUFFIN": Decimal("12.000"),
     "BUTTER_CROISSANT": Decimal("15.000"),
 }
@@ -74,29 +76,29 @@ SPILL = {
     "is_estimated": False,
     "source_type": "waste_log",
     "source_id": f"{PREFIX}WASTE_001",
-    "occurred_at": datetime.fromisoformat("2026-10-29T17:40:00-07:00"),
-    "recorded_at": datetime.fromisoformat("2026-10-29T17:45:00-07:00"),
+    "occurred_at": datetime.fromisoformat("2026-11-05T17:40:00-08:00"),
+    "recorded_at": datetime.fromisoformat("2026-11-05T17:45:00-08:00"),
     "recorded_by": "DEMO_EMP_002",
     "reason": "Steamed pitcher spilled at close",
 }
 SUNDAY_SHIFTS = (
-    # employee, start, end  (all PST, after the Nov 1 daylight-saving change)
+    # employee, start, end on Sun Nov 8 (PST)
     ("DEMO_EMP_002", "07:00", "15:00"),  # Jordan Brooks, shift lead
     ("DEMO_EMP_007", "08:00", "14:00"),  # Ava Thompson, cashier
     ("DEMO_EMP_005", "12:00", "17:00"),  # Nora Williams, barista (afternoon to close)
 )
-# A normal roster for the days before the market (PDT), so the café panel shows real cover.
+# A normal roster for the days before the market (Fri and Sat, PST), so the café panel shows real cover.
 ROSTER_SHIFTS = (
-    ("DEMO_EMP_001", "2026-10-30T07:00", "2026-10-30T15:00"),
-    ("DEMO_EMP_002", "2026-10-30T07:00", "2026-10-30T15:00"),
-    ("DEMO_EMP_004", "2026-10-30T11:00", "2026-10-30T19:00"),
-    ("DEMO_EMP_005", "2026-10-30T12:00", "2026-10-30T19:00"),
-    ("DEMO_EMP_001", "2026-10-31T07:00", "2026-10-31T15:00"),
-    ("DEMO_EMP_007", "2026-10-31T07:00", "2026-10-31T13:00"),
-    ("DEMO_EMP_004", "2026-10-31T12:00", "2026-10-31T17:00"),
-    ("DEMO_EMP_002", "2026-10-31T13:00", "2026-10-31T17:00"),
+    ("DEMO_EMP_001", "2026-11-06T07:00", "2026-11-06T15:00"),
+    ("DEMO_EMP_002", "2026-11-06T07:00", "2026-11-06T15:00"),
+    ("DEMO_EMP_004", "2026-11-06T11:00", "2026-11-06T19:00"),
+    ("DEMO_EMP_005", "2026-11-06T12:00", "2026-11-06T19:00"),
+    ("DEMO_EMP_001", "2026-11-07T07:00", "2026-11-07T15:00"),
+    ("DEMO_EMP_007", "2026-11-07T07:00", "2026-11-07T13:00"),
+    ("DEMO_EMP_004", "2026-11-07T12:00", "2026-11-07T17:00"),
+    ("DEMO_EMP_002", "2026-11-07T13:00", "2026-11-07T17:00"),
 )
-SEEDED_AT = datetime.fromisoformat("2026-10-28T12:00:00-07:00")
+SEEDED_AT = datetime.fromisoformat("2026-11-04T12:00:00-08:00")
 
 # The Sunday market milk, confirmed by Willow Ridge (matches demo-assets/receiving/packing-slip-PS-58213).
 DEMO_ORDER_ID = f"{PREFIX}PO_1042"
@@ -143,8 +145,8 @@ def _shift_rows() -> list[dict]:
                 "shift_id": f"{PREFIX}SHIFT_{employee_id[-3:]}",
                 "cafe_id": CAFE_ID,
                 "employee_id": employee_id,
-                "start_at": datetime.fromisoformat(f"2026-11-01T{start}:00-08:00"),
-                "end_at": datetime.fromisoformat(f"2026-11-01T{end}:00-08:00"),
+                "start_at": datetime.fromisoformat(f"2026-11-08T{start}:00-08:00"),
+                "end_at": datetime.fromisoformat(f"2026-11-08T{end}:00-08:00"),
                 "status": "scheduled",
                 "created_at": SEEDED_AT,
             }
@@ -155,8 +157,8 @@ def _shift_rows() -> list[dict]:
                 "shift_id": f"{PREFIX}ROSTER_{start[5:10].replace('-', '')}_{employee_id[-3:]}",
                 "cafe_id": CAFE_ID,
                 "employee_id": employee_id,
-                "start_at": datetime.fromisoformat(f"{start}:00-07:00"),
-                "end_at": datetime.fromisoformat(f"{end}:00-07:00"),
+                "start_at": datetime.fromisoformat(f"{start}:00-08:00"),
+                "end_at": datetime.fromisoformat(f"{end}:00-08:00"),
                 "status": "scheduled",
                 "created_at": SEEDED_AT,
             }
@@ -181,7 +183,7 @@ def seed_event_surge(session: Session, *, with_delivery: bool = False) -> SeedRe
             "count_id": COUNT_ID,
             "cafe_id": CAFE_ID,
             "counted_at": COUNTED_AT,
-            "recorded_at": datetime.fromisoformat("2026-10-29T17:15:00-07:00"),
+            "recorded_at": datetime.fromisoformat("2026-11-05T17:15:00-08:00"),
             "counted_by": "DEMO_EMP_002",
             "status": "verified",
             "is_synthetic": True,
@@ -219,14 +221,14 @@ def seed_event_surge(session: Session, *, with_delivery: bool = False) -> SeedRe
         session.flush()
         orders = 0
         if with_delivery and session.get(PurchaseOrder, DEMO_ORDER_ID) is None:
-            delivery = datetime.fromisoformat("2026-11-01T05:30:00-08:00")
+            delivery = datetime.fromisoformat("2026-11-08T05:30:00-08:00")
             session.add(
                 PurchaseOrder(
                     order_id=DEMO_ORDER_ID, cafe_id=CAFE_ID, po_number="PO-1042", supplier_id="WILLOW_RIDGE",
                     supplier_name="Willow Ridge Dairy Supply", status="confirmed", requested_delivery_at=delivery,
-                    confirmed_delivery_at=delivery, sent_at=datetime.fromisoformat("2026-10-29T18:20:00-07:00"),
-                    respond_at=datetime.fromisoformat("2026-10-29T18:20:08-07:00"),
-                    responded_at=datetime.fromisoformat("2026-10-29T18:20:08-07:00"), pending_decision="confirmed",
+                    confirmed_delivery_at=delivery, sent_at=datetime.fromisoformat("2026-11-05T18:20:00-08:00"),
+                    respond_at=datetime.fromisoformat("2026-11-05T18:20:08-08:00"),
+                    responded_at=datetime.fromisoformat("2026-11-05T18:20:08-08:00"), pending_decision="confirmed",
                     total_cents=sum(cases * price for *_, cases, price in DEMO_ORDER_LINES), simulated=True,
                     note="Demo order for the Sunday market (synthetic).",
                     lines=[
@@ -242,6 +244,10 @@ def seed_event_surge(session: Session, *, with_delivery: bool = False) -> SeedRe
             orders = 1
             session.flush()
     return SeedResult(counts, lines, movements, shifts, orders, reorder_points)
+
+
+def _tagged(column):
+    return or_(*(column.startswith(p) for p in (PREFIX, *OLD_PREFIXES)))
 
 
 def plan_reset(session: Session) -> ResetPlan:
@@ -263,10 +269,10 @@ def plan_reset(session: Session) -> ResetPlan:
                 agent_counts.append(result["count_id"])
             elif node.action == "record_inventory_movement" and result.get("movement_id"):
                 agent_movements.append(result["movement_id"])
-    scenario_shifts = list(session.scalars(select(Shift.shift_id).where(Shift.shift_id.startswith(PREFIX))))
-    scenario_counts = list(session.scalars(select(StockCount.count_id).where(StockCount.count_id.startswith(PREFIX))))
+    scenario_shifts = list(session.scalars(select(Shift.shift_id).where(_tagged(Shift.shift_id))))
+    scenario_counts = list(session.scalars(select(StockCount.count_id).where(_tagged(StockCount.count_id))))
     scenario_moves = list(
-        session.scalars(select(InventoryMovement.movement_id).where(InventoryMovement.movement_id.startswith(PREFIX)))
+        session.scalars(select(InventoryMovement.movement_id).where(_tagged(InventoryMovement.movement_id)))
     )
     existing_agent_shifts = list(session.scalars(select(Shift.shift_id).where(Shift.shift_id.in_(agent_shifts))))
     existing_agent_counts = list(session.scalars(select(StockCount.count_id).where(StockCount.count_id.in_(agent_counts))))
@@ -276,7 +282,7 @@ def plan_reset(session: Session) -> ResetPlan:
     orders = list(session.scalars(
         select(PurchaseOrder.order_id).where(
             PurchaseOrder.cafe_id == CAFE_ID,
-            (PurchaseOrder.order_id.startswith(PREFIX)) | (PurchaseOrder.source_run_id.in_(runs or [""])),
+            _tagged(PurchaseOrder.order_id) | (PurchaseOrder.source_run_id.in_(runs or [""])),
         )
     ))
     receipts = list(session.scalars(select(Receipt.receipt_id).where(Receipt.cafe_id == CAFE_ID)))

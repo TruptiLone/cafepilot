@@ -10,7 +10,8 @@ import { policyRoles } from "./roles";
 type Row = Record<string, unknown>;
 
 export type BoxKind = "event" | "demand" | "ingredients" | "suppliers" | "staff" | "sales" | "other" | "decision";
-export type BoxState = "pending" | "running" | "done" | "wait" | "declined" | "failed" | "skipped";
+/** "awaiting": confirmed but still in progress (an order awaiting delivery). */
+export type BoxState = "pending" | "running" | "done" | "wait" | "awaiting" | "declined" | "failed" | "skipped";
 
 export type DetailRow = { label: string; value: string; tone?: "bad" | "good" | "muted" };
 export type Detail = { title: string; intro?: string; rows: DetailRow[]; steps: string[] };
@@ -128,6 +129,7 @@ function decisionState(step: RunStep): BoxState {
     case "done":
       if (step.acknowledgement?.tone === "problem") return "failed";
       if (step.acknowledgement?.tone === "waiting") return "running";
+      if (step.acknowledgement?.tone === "awaiting") return "awaiting";
       return "done";
     default:
       return "pending";
@@ -334,9 +336,11 @@ function changeSummary({ step, run }: Change, names: Map<string, string>): strin
       "and",
     );
     const supplier = String(result.supplier_name);
-    if (ack?.tone === "done") {
+    if (ack?.tone === "done" && step.external_status === "received") return `${items} from ${supplier}: delivered.`;
+    if (ack?.tone === "awaiting" || ack?.tone === "done") {
       const arriving = ack.details.find((d) => d.startsWith("Arriving"));
-      return `${items} from ${supplier}: confirmed${arriving ? `, ${arriving.charAt(0).toLowerCase()}${arriving.slice(1)}` : ""}.`;
+      const when = arriving ? ` ${arriving.replace(/^Arriving /, "")}` : "";
+      return `${items} from ${supplier}: confirmed, awaiting delivery${when}.`;
     }
     return `${items} sent to ${supplier}; waiting for them to confirm.`;
   }
@@ -621,7 +625,12 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
   const allSet =
     changes.length > 0 &&
     changes.some((c) => c.step.status === "done") &&
-    changes.every((c) => c.step.status === "skipped" || (c.step.status === "done" && (c.step.acknowledgement?.tone ?? "done") === "done"));
+    changes.every(
+      (c) =>
+        c.step.status === "skipped" ||
+        // An order awaiting delivery is settled: confirmed, the delivery is the expected next step.
+        (c.step.status === "done" && ["done", "awaiting"].includes(c.step.acknowledgement?.tone ?? "done")),
+    );
   const day = run.event
     ? new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "America/Los_Angeles" }).format(new Date(run.event.starts_at))
     : null;

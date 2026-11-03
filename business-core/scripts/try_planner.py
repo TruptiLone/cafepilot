@@ -23,11 +23,11 @@ from backend.modules.agent.planner import (
 )
 
 HERO_QUERY = (
-    "Farmers market this Sunday Nov 1, 8 AM-2 PM, roughly 40 extra whole-milk lattes and "
+    "Farmers market this Sunday Nov 8, 8 AM-2 PM, roughly 40 extra whole-milk lattes and "
     "20 extra oat-milk lattes. Check milk and bean stock as of Thursday 6 PM, check Sunday "
     "staff coverage, and add a barista 7:30 AM-2:30 PM if we're short."
 )
-AS_OF = datetime.fromisoformat("2026-10-29T18:00:00-07:00")
+AS_OF = datetime.fromisoformat("2026-11-05T18:00:00-08:00")
 OUTPUT = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "agent" / "hero_plan_live.json"
 
 

@@ -26,6 +26,8 @@ SESSION_FACTORY = SessionLocal
 SUMMARY_LIMIT = 120
 ERROR_LIMIT = 200
 _KEYLIKE = re.compile(r"\bsk-[A-Za-z0-9_\-]{6,}|\bBearer\s+\S+|\b[A-Za-z0-9_\-]{32,}\b", re.IGNORECASE)
+# po_agent_b0dc…, EVT_SC_FARMERS_MARKET_20261108, RUN-901A7DA9234D, DEMO_EMP_004 (PO-1042 stays: owners see it)
+_INTERNAL_ID = re.compile(r"\b(?:[A-Za-z]+_)+[A-Za-z0-9_]*\d\w*\b|\b(?:RUN|AIC)-[0-9A-F]{6,}\b")
 
 
 def call_model(client: Any, *, model: str, messages: list[dict[str, Any]], **kwargs: Any) -> tuple[Any, int]:
@@ -46,6 +48,7 @@ def is_timeout(error: BaseException) -> bool:
 def summarize(text: Any, limit: int = SUMMARY_LIMIT) -> str:
     """One short line: whitespace collapsed, anything key-like hidden, cut to the limit."""
     line = _KEYLIKE.sub("[hidden]", " ".join(str(text or "").split()))
+    line = " ".join(_INTERNAL_ID.sub("", line).split())  # internal IDs mean nothing to the owner
     return line if len(line) <= limit else line[: limit - 1] + "…"
 
 

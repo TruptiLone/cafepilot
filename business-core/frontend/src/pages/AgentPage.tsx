@@ -20,6 +20,7 @@ import StepDetail from "../components/agent/StepDetail";
 import { employeeName } from "../components/agent/changes";
 import ChatPanel, { EXAMPLES } from "../components/muse/ChatPanel";
 import UpdatesBell from "../components/updates/UpdatesBell";
+import { demoDateLabel } from "../components/demoDate";
 import PlanMap from "../components/muse/PlanMap";
 import { type SpeechRecognitionLike, speechRecognition } from "../components/muse/speech";
 import StoryGraph from "../components/muse/StoryGraph";
@@ -85,7 +86,7 @@ function eventPitch(event: DetectedEvent): [string, string] {
   return [`${subject} is usually a normal day.`, "Want me to check we're ready?"];
 }
 
-/** When and where: "Sun, Nov 1 · 8 AM–2 PM · 0.2 miles away" (how busy it gets is in eventPitch). */
+/** When and where: "Sun, Nov 8 · 8 AM–2 PM · 0.2 miles away" (how busy it gets is in eventPitch). */
 function eventLine(event: DetectedEvent) {
   const miles = event.distance_m ? ` · ${(event.distance_m / 1609).toFixed(1)} miles away` : "";
   return `${fmt(event.starts_at, { weekday: "short", month: "short", day: "numeric" })} · ${fmt(event.starts_at, { hour: "numeric" })}–${fmt(event.ends_at, { hour: "numeric" })}${miles}`;
@@ -628,6 +629,7 @@ function AgentPage() {
           <div className="mz-audit">
             <i />
             {counts ? `${counts.checks} ${counts.checks === 1 ? "check" : "checks"} · ` : ""}nothing changes without your OK
+            {chatAsOf && <span className="mz-audit__demo">Demo date: {demoDateLabel(chatAsOf)}</span>}
           </div>
         </form>
       </div>

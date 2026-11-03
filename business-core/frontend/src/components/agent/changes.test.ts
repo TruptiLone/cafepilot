@@ -32,14 +32,14 @@ function runWith(nodes: RunStep[]): AgentRun {
     goal: "g",
     assumptions: [],
     status: "awaiting_approval",
-    as_of: "2026-10-30T01:00:00Z",
+    as_of: "2026-11-06T02:00:00Z",
     model: "m",
     attempts: 1,
     edges: [],
     levels: [],
     warnings: [],
-    created_at: "2026-10-29T19:00:00Z",
-    updated_at: "2026-10-29T19:00:00Z",
+    created_at: "2026-11-05T19:00:00Z",
+    updated_at: "2026-11-05T19:00:00Z",
     nodes,
   };
 }
@@ -51,8 +51,8 @@ const shift = node({
   status: "awaiting_approval",
   resolved_args: {
     employee_id: "E4",
-    start_at: "2026-11-01T07:30:00-08:00",
-    end_at: "2026-11-01T14:30:00-08:00",
+    start_at: "2026-11-08T07:30:00-08:00",
+    end_at: "2026-11-08T14:30:00-08:00",
   },
 });
 
@@ -62,7 +62,7 @@ describe("describeChange", () => {
       node({ result: [{ employee_id: "E4", name: "Ethan Patel", role: "barista" }] }),
       shift,
     ]);
-    expect(describeChange(shift, run)).toBe("Schedule Ethan Patel for Sun, Nov 1, 7:30 AM–2:30 PM");
+    expect(describeChange(shift, run)).toBe("Schedule Ethan Patel for Sun, Nov 8, 7:30 AM–2:30 PM");
   });
 
   it("describes a simulated supplier order in readable units", () => {
@@ -71,7 +71,7 @@ describe("describeChange", () => {
       side_effect: "write",
       resolved_args: {
         lines: [{ ingredient_id: "OAT_MILK", quantity: "2000", unit: "mL" }],
-        requested_delivery_at: "2026-11-01T06:00:00-08:00",
+        requested_delivery_at: "2026-11-08T06:00:00-08:00",
       },
     });
     const run = runWith([
@@ -80,7 +80,7 @@ describe("describeChange", () => {
       order,
     ]);
     expect(describeChange(order, run)).toBe(
-      "Order 2 L Oat Milk for delivery Sun, Nov 1 by 6 AM (simulated supplier)",
+      "Order 2 L Oat Milk for delivery Sun, Nov 8 by 6 AM (simulated supplier)",
     );
     expect(evidenceFor(order, run)).toEqual(["Oat Milk: about 4.65 L on hand, 4.8 L needed for the event."]);
   });
@@ -91,9 +91,9 @@ describe("evidenceFor a shift", () => {
     action: "coverage_report",
     result: {
       hours: [
-        { hour_start: "2026-11-01T08:00:00-08:00", scheduled_employees: 0, required_staff: 2, coverage_status: "understaffed" },
-        { hour_start: "2026-11-01T09:00:00-08:00", scheduled_employees: 1, required_staff: 2, coverage_status: "understaffed" },
-        { hour_start: "2026-11-01T10:00:00-08:00", scheduled_employees: 2, required_staff: 2, coverage_status: "adequate" },
+        { hour_start: "2026-11-08T08:00:00-08:00", scheduled_employees: 0, required_staff: 2, coverage_status: "understaffed" },
+        { hour_start: "2026-11-08T09:00:00-08:00", scheduled_employees: 1, required_staff: 2, coverage_status: "understaffed" },
+        { hour_start: "2026-11-08T10:00:00-08:00", scheduled_employees: 2, required_staff: 2, coverage_status: "adequate" },
       ],
     },
   });
@@ -113,10 +113,10 @@ describe("evidenceFor a shift", () => {
 
   it("warns about an overlapping shift", () => {
     const run = runWith([
-      node({ action: "list_shifts", result: [{ employee_id: "E4", employee_name: "Ethan", status: "scheduled", start_at: "2026-11-01T12:00:00-08:00", end_at: "2026-11-01T16:00:00-08:00" }] }),
+      node({ action: "list_shifts", result: [{ employee_id: "E4", employee_name: "Ethan", status: "scheduled", start_at: "2026-11-08T12:00:00-08:00", end_at: "2026-11-08T16:00:00-08:00" }] }),
       shift,
     ]);
-    expect(evidenceFor(shift, run)).toEqual(["Ethan already works Sun, Nov 1, 12 PM–4 PM, so this would overlap."]);
+    expect(evidenceFor(shift, run)).toEqual(["Ethan already works Sun, Nov 8, 12 PM–4 PM, so this would overlap."]);
   });
 });
 

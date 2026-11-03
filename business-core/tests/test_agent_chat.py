@@ -27,11 +27,11 @@ from zoneinfo import ZoneInfo
 
 C = "CAFE001"
 TZ = ZoneInfo("America/Los_Angeles")
-AS_OF = "2026-10-29T18:00:00-07:00"
+AS_OF = "2026-11-05T18:00:00-08:00"
 NOW = datetime.fromisoformat(AS_OF)
 WINDOWS = time_windows(NOW, TZ)
-SUNDAY = WINDOWS["days"]["sunday 2026-11-01"]
-MARKET = "EVT_SC_FARMERS_MARKET_20261101"
+SUNDAY = WINDOWS["days"]["sunday 2026-11-08"]
+MARKET = "EVT_SC_FARMERS_MARKET_20261108"
 
 
 class Router:
@@ -136,14 +136,14 @@ def test_low_means_below_the_reorder_point_in_the_database(session: Session) -> 
     flagged = sorted(r["name"] for r in body["rows"] if "below reorder point" in (r["detail"] or ""))
     assert flagged == low
     # The low items lead; no count of everything, and the unknown item is a note at the end.
-    assert body["lines"] == ["Below reorder point: Banana Nut Muffin (9 left, reorder at 12); Oat Milk (1.25 L left, reorder at 3 L)."]
+    assert body["lines"] == ["Below reorder point: Banana Nut Muffin (14 left, reorder at 16); Oat Milk (1.25 L left, reorder at 3 L)."]
     unsure = sorted(e.name for e in truth.values() if e.stock_status != "known")
     assert body["notes"] == [f"Not sure about {', '.join(unsure)}."]
 
 
 def test_do_you_have_is_answered_with_whats_on_hand_not_reorder_points(session: Session) -> None:
     body = ask(session, "do you have banana nut muffins", answer(("get_stock_estimates", {"ingredient_id": "BANANA_NUT_MUFFIN"})))
-    assert body["lines"] == ["Banana Nut Muffin 9 on hand."]
+    assert body["lines"] == ["Banana Nut Muffin 14 on hand."]
     assert "reorder" not in (body["rows"][0]["detail"] or "")
     assert body["rows"][0]["below_reorder_point"] is True  # still known to code: the Plan an order chip
     assert body["follow_ups"][0]["kind"] == "plan"
@@ -202,7 +202,7 @@ def test_staff_list(session: Session) -> None:
 
 
 def test_event_coverage_numbers_come_from_the_coverage_report(session: Session) -> None:
-    window = {"start_at": "2026-11-01T08:00:00-08:00", "end_at": "2026-11-01T14:00:00-08:00", "required_staff": 4}
+    window = {"start_at": "2026-11-08T08:00:00-08:00", "end_at": "2026-11-08T14:00:00-08:00", "required_staff": 4}
     body = ask(session, "are we covered for the market", answer(("coverage_report", window)))
     report = StaffingService(session).coverage_report(C, datetime.fromisoformat(window["start_at"]),
                                                      datetime.fromisoformat(window["end_at"]), 4)
@@ -216,7 +216,7 @@ def test_when_does_the_milk_arrive(session: Session) -> None:
     order = session.scalar(select(PurchaseOrder).where(PurchaseOrder.cafe_id == C, PurchaseOrder.status != "cancelled"))
     body = ask(session, "when does the milk arrive", answer(("get_purchase_order", {"order_id": order.order_id})))
     assert sorted((r["quantity"], r["unit"]) for r in body["rows"]) == sorted((num(l.quantity), l.unit) for l in order.lines)
-    assert all("delivery Sun Nov 1, 5:30 AM" in r["detail"] for r in body["rows"])
+    assert all("delivery Sun Nov 8, 5:30 AM" in r["detail"] for r in body["rows"])
 
 
 def test_deliveries_list_the_open_order_and_regular_delivery(session: Session) -> None:
@@ -228,11 +228,11 @@ def test_deliveries_list_the_open_order_and_regular_delivery(session: Session) -
     regular = next(r for r in policies_for(C)["standing_deliveries"] if r["ingredient_id"] == "WHOLE_MILK")
     rows = [(r["quantity"], r["unit"], r["detail"]) for r in body["rows"]]
     assert rows == [
-        (regular["quantity"], regular["unit"], "Fri Oct 30, 6 AM · regular delivery"),
-        (num(po_line.quantity), po_line.unit, "Sun Nov 1, 5:30 AM · Willow Ridge Dairy Supply PO-1042, confirmed"),
+        (regular["quantity"], regular["unit"], "Fri Nov 6, 6 AM · regular delivery"),
+        (num(po_line.quantity), po_line.unit, "Sun Nov 8, 5:30 AM · Willow Ridge Dairy Supply PO-1042, confirmed"),
     ]
-    assert body["lines"] == ["On order: 12 L whole milk Sun Nov 1 5:30 AM from Willow Ridge Dairy Supply PO-1042 (confirmed). "
-                             "Regular delivery: 12 L whole milk Fri Oct 30 6 AM."]
+    assert body["lines"] == ["On order: 12 L whole milk Sun Nov 8 5:30 AM from Willow Ridge Dairy Supply PO-1042 (confirmed). "
+                             "Regular delivery: 12 L whole milk Fri Nov 6 6 AM."]
     assert body["lookups"][0]["args"]["start_at"] == AS_OF  # the reference time, filled in by code
 
 
@@ -240,7 +240,7 @@ def test_deliveries_say_plainly_when_no_order_is_open(session: Session) -> None:
     session.delete(session.scalar(select(PurchaseOrder).where(PurchaseOrder.po_number == "PO-1042")))
     session.commit()  # rolled back with the test
     body = ask(session, "when does the milk arrive", answer(("list_deliveries", {"ingredient_id": "WHOLE_MILK"})))
-    assert body["lines"] == ["Nothing extra is on order. Regular delivery: 12 L whole milk Fri Oct 30 6 AM."]
+    assert body["lines"] == ["Nothing extra is on order. Regular delivery: 12 L whole milk Fri Nov 6 6 AM."]
 
 
 def test_milk_means_every_milk_and_says_which_have_no_delivery(session: Session) -> None:
@@ -248,8 +248,8 @@ def test_milk_means_every_milk_and_says_which_have_no_delivery(session: Session)
     session.commit()
     milks = ["WHOLE_MILK", "OAT_MILK", "ALMOND_MILK", "SKIM_MILK"]
     body = ask(session, "when does the milk arrive", answer(("list_deliveries", {"ingredient_ids": milks})))
-    assert body["lines"] == ["Nothing extra is on order. Regular delivery: 5 L oat milk Fri Oct 30 6 AM, "
-                             "12 L whole milk Fri Oct 30 6 AM. No scheduled delivery for almond milk or skim milk."]
+    assert body["lines"] == ["Nothing extra is on order. Regular delivery: 5 L oat milk Fri Nov 6 6 AM, "
+                             "12 L whole milk Fri Nov 6 6 AM. No scheduled delivery for almond milk or skim milk."]
     assert body["follow_ups"][0] == {"label": "Plan an order for almond milk", "kind": "plan", "text": "Order almond milk for this week"}
 
 
@@ -296,7 +296,7 @@ def test_a_write_request_goes_to_the_plan_flow(session: Session) -> None:
 def test_a_write_action_from_the_model_is_never_run(session: Session) -> None:
     before = session.scalar(select(func.count()).select_from(PurchaseOrder))
     routing = answer(("propose_supplier_order", {"lines": [{"ingredient_id": "OAT_MILK", "quantity": "6000", "unit": "mL"}],
-                                                 "requested_delivery_at": "2026-11-01T06:00:00-08:00"}))
+                                                 "requested_delivery_at": "2026-11-08T06:00:00-08:00"}))
     body = ask(session, "get us some oat milk", routing)
     assert body["intent"] == "needs_plan" and body["plan_request"] == "get us some oat milk"
     assert session.scalar(select(func.count()).select_from(PurchaseOrder)) == before
@@ -335,16 +335,16 @@ LOW_MUFFINS = answer(("get_stock_estimates", {"ingredient_id": "BANANA_NUT_MUFFI
 
 
 def test_sparks_reply_is_used_when_its_numbers_check_out(session: Session) -> None:
-    text = "Yes, we have 9 banana nut muffins."
+    text = "Yes, we have 14 banana nut muffins."
     body = ask(session, "do you have banana nut muffins", Router(LOW_MUFFINS, text))
     assert (body["reply"], body["reply_by"]) == (text, "muse")
-    assert body["lines"] == ["Banana Nut Muffin 9 on hand."]  # the code answer stays
+    assert body["lines"] == ["Banana Nut Muffin 14 on hand."]  # the code answer stays
 
 
 def test_a_made_up_number_is_rejected_and_code_answers(session: Session) -> None:
     body = ask(session, "do you have banana nut muffins", Router(LOW_MUFFINS, "You have 437 banana nut muffins, plenty for Sunday."))
     assert body["reply_by"] == "code"
-    assert body["reply"] == "Banana Nut Muffin 9 on hand."
+    assert body["reply"] == "Banana Nut Muffin 14 on hand."
 
 
 def test_unit_conversions_code_shows_are_allowed(session: Session) -> None:
@@ -355,7 +355,7 @@ def test_unit_conversions_code_shows_are_allowed(session: Session) -> None:
 
 def test_a_failed_reply_falls_back_to_the_code_answer(session: Session) -> None:
     body = ask(session, "do you have banana nut muffins", Router(LOW_MUFFINS))  # the reply call raises
-    assert (body["reply_by"], body["reply"]) == ("code", "Banana Nut Muffin 9 on hand.")
+    assert (body["reply_by"], body["reply"]) == ("code", "Banana Nut Muffin 14 on hand.")
 
 
 def test_number_check() -> None:
@@ -373,7 +373,7 @@ def test_low_stock_follow_ups_plan_an_order_and_check_the_event_day(session: Ses
     body = ask(session, "are we low on anything", answer(("get_stock_estimates", {})))
     assert body["follow_ups"] == [
         {"label": "Plan an order for banana nut muffin", "kind": "plan", "text": "Order more banana nut muffin before we run out"},
-        {"label": "Check Sunday stock", "kind": "ask", "text": "Do we have enough stock for Sunday?"},  # the market, not Halloween
+        {"label": "Check Sunday stock", "kind": "ask", "text": "Do we have enough stock for Sunday?"},  # the market, not Thanksgiving
     ]
     assert [r["name"] for r in body["rows"][:2]] == ["Banana Nut Muffin", "Oat Milk"]  # low items lead the table
 
@@ -395,9 +395,9 @@ def test_unreadable_routing_is_a_clear_error(session: Session) -> None:
 
 
 def test_today_and_this_week_follow_the_reference_time() -> None:
-    assert WINDOWS["today"] == {"start_at": "2026-10-29T00:00:00-07:00", "end_at": "2026-10-30T00:00:00-07:00"}
-    assert WINDOWS["this_week"] == {"start_at": "2026-10-26T00:00:00-07:00", "end_at": "2026-11-02T00:00:00-08:00"}
-    assert SUNDAY["morning"] == {"start_at": "2026-11-01T06:00:00-08:00", "end_at": "2026-11-01T12:00:00-08:00"}
+    assert WINDOWS["today"] == {"start_at": "2026-11-05T00:00:00-08:00", "end_at": "2026-11-06T00:00:00-08:00"}
+    assert WINDOWS["this_week"] == {"start_at": "2026-11-02T00:00:00-08:00", "end_at": "2026-11-09T00:00:00-08:00"}
+    assert SUNDAY["morning"] == {"start_at": "2026-11-08T06:00:00-08:00", "end_at": "2026-11-08T12:00:00-08:00"}
 
 
 def test_reference_time_defaults_to_now_like_plans(session: Session) -> None:

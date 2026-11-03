@@ -18,15 +18,15 @@ function step(overrides: Partial<AgentRun["nodes"][number]>): AgentRun["nodes"][
     result: null,
     error: null,
     replay_of: null,
-    started_at: "2026-10-29T18:00:00Z",
-    finished_at: "2026-10-29T18:00:01Z",
+    started_at: "2026-11-05T18:00:00Z",
+    finished_at: "2026-11-05T18:00:01Z",
     ...overrides,
   };
 }
 
 const marketEvent: DetectedEvent = {
   event_id: "EVT_1", title: "Santa Clara Farmers Market", category: "farmers_market",
-  starts_at: "2026-11-01T16:00:00Z", ends_at: "2026-11-01T22:00:00Z",
+  starts_at: "2026-11-08T16:00:00Z", ends_at: "2026-11-08T22:00:00Z",
   location: null, distance_m: 250, source: "Santa Clara community events (demo)", is_demo: true,
   muse_message: "", plan_state: "needs_ok", run_id: "RUN-1", latest_run_id: "RUN-1",
   expected: { confidence: "good", examples: 6, normal_drinks: 96, extra_drinks_low: 19,
@@ -43,14 +43,14 @@ const marketRun: AgentRun = {
   goal: "Get stock and staff ready for Sunday",
   assumptions: [],
   status: "awaiting_approval",
-  as_of: "2026-10-30T01:00:00Z",
+  as_of: "2026-11-06T02:00:00Z",
   model: "muse-wonder-1.0",
   attempts: 1,
   edges: [],
   levels: [],
   warnings: [],
-  created_at: "2026-10-29T18:37:00Z",
-  updated_at: "2026-10-29T18:37:00Z",
+  created_at: "2026-11-05T18:37:00Z",
+  updated_at: "2026-11-05T18:37:00Z",
   event: marketEvent,
   nodes: [
     step({ node_id: "demand", action: "estimate_event_demand", result: {
@@ -73,7 +73,7 @@ const marketRun: AgentRun = {
     step({ node_id: "coverage", action: "coverage_report" }),
     step({ node_id: "people", action: "list_employees" }),
     step({ node_id: "add_barista", action: "schedule_shift", depends_on: ["coverage", "people"], ...write,
-      resolved_args: { employee_id: "DEMO_EMP_004", start_at: "2026-11-01T08:00:00-08:00", end_at: "2026-11-01T10:00:00-08:00" } }),
+      resolved_args: { employee_id: "DEMO_EMP_004", start_at: "2026-11-08T08:00:00-08:00", end_at: "2026-11-08T10:00:00-08:00" } }),
   ],
 };
 
@@ -224,10 +224,10 @@ function afterReplan(willow: "confirmed" | "sent"): [AgentRun, Record<string, Ag
     nodes: marketRun.nodes.map((n) =>
       n === order
         ? { ...n, status: "done", replanned_in: "RUN-2", result: { supplier_name: "Bay Dairy Co.", lines: [] },
-            acknowledgement: ack("Bay Dairy Co. can't take this order", ["Bay Dairy Co. is out of oat milk until Mon, Nov 2."], "problem", "find_alternative") }
+            acknowledgement: ack("Bay Dairy Co. can't take this order", ["Bay Dairy Co. is out of oat milk until Mon, Nov 9."], "problem", "find_alternative") }
         : n === barista
           ? { ...n, status: "done", result: { shift_id: "S9" },
-              acknowledgement: ack("Ethan Patel is on the schedule", ["", "Sun, Nov 1 staffing now: 8 AM–2 PM: 4 of 4"], "done") }
+              acknowledgement: ack("Ethan Patel is on the schedule", ["", "Sun, Nov 8 staffing now: 8 AM–2 PM: 4 of 4"], "done") }
           : n,
     ),
   };
@@ -244,7 +244,7 @@ function afterReplan(willow: "confirmed" | "sent"): [AgentRun, Record<string, Ag
         { ingredient_id: "WHOLE_MILK", quantity: "12000", unit: "mL", packs: 2, pack_name: "case of 6 × 1 L" },
       ] },
       acknowledgement: confirmed
-        ? ack("Willow Ridge Dairy Supply confirmed the order", ["Order PO-1042", "Total $77.40", "Arriving Sun, Nov 1 by 6 AM"], "done")
+        ? ack("Willow Ridge Dairy Supply confirmed the order", ["Order PO-1042", "Total $77.40", "Arriving Sun, Nov 8 by 6 AM"], "done")
         : ack("Order sent to Willow Ridge Dairy Supply (simulated)", ["Order PO-1042"], "waiting"),
     }],
   };
@@ -262,9 +262,9 @@ describe("In short", () => {
     const [parent, children] = afterReplan("confirmed");
     const story = buildStory(parent, children);
     expect(story.summary).toEqual([
-      "1 case oat milk (6 × 1 L) and 2 cases whole milk (6 × 1 L) from Willow Ridge Dairy Supply: confirmed, arriving Sun, Nov 1 by 6 AM.",
-      "Ethan Patel is on the schedule (Sun, Nov 1, 8 AM–10 AM).",
-      "Sun, Nov 1 staffing now: 8 AM–2 PM: 4 of 4.",
+      "1 case oat milk (6 × 1 L) and 2 cases whole milk (6 × 1 L) from Willow Ridge Dairy Supply: confirmed, arriving Sun, Nov 8 by 6 AM.",
+      "Ethan Patel is on the schedule (Sun, Nov 8, 8 AM–10 AM).",
+      "Sun, Nov 8 staffing now: 8 AM–2 PM: 4 of 4.",
     ]);
     expect(story.summary.join(" ")).not.toContain("Bay Dairy");
     expect(story.allSet).toBe(true);

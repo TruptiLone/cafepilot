@@ -90,7 +90,29 @@ npm run dev                     # http://localhost:5173/agent
 
 Open **Ask CaféPilot** and click **Let's plan ✨** on the Santa Clara Farmers Market.
 
+### After pulling
+
+New code can add database tables (the latest is `ai_calls`, the log behind the bell's AI activity
+tab). After every `git pull`, from `business-core` with the virtual environment active:
+
+```bash
+alembic upgrade head
+```
+
+If the demo dates changed (they moved to Thu Nov 5, 2026 for the Sun Nov 8 market), reload the
+sales history and the scenario once:
+
+```bash
+PYTHONPATH=. python scripts/seed_sales_history.py --reset && PYTHONPATH=. python scripts/seed_sales_history.py
+PYTHONPATH=. python scripts/seed_event_surge.py --fresh
+```
+
 ### Demo data and timing
+
+All demo data is synthetic. The demo clock is fixed at **Thu Nov 5, 2026, 6 PM** (Pacific; daylight
+saving ended Nov 1, so every time is -08:00) and shows as "Demo date" in the sidebar. Upcoming events:
+Santa Clara Farmers Market (Sun Nov 8, 8 AM–2 PM, the main scenario), Thanksgiving (Thu Nov 26,
+usually quieter) and the Holiday Lights & Craft Fair (Sat Dec 5, usually busier).
 
 Reset the demo data before each run (from `business-core`, with the virtual environment active):
 

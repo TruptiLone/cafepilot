@@ -106,12 +106,12 @@ function UpdatesBell({ className = "" }: { className?: string }) {
               {calls?.length === 0 && <p className="updates-empty">No AI calls yet.</p>}
               {calls?.map((c) => (
                 <article key={c.id} className={`updates-item is-${c.outcome === "ok" || c.outcome === "retried" ? "ok" : "bad"}`}>
-                  <p className="updates-item__title">
-                    {PURPOSE[c.purpose]} · {modelName(c.model)} · {(c.latency_ms / 1000).toFixed(1)} s
+                  <p className="updates-item__title">{c.request_summary || PURPOSE[c.purpose]}</p>
+                  <p className="updates-item__detail">
+                    {modelName(c.model)} · {(c.latency_ms / 1000).toFixed(1)} s
                     {c.attempts > 1 ? ` · ${c.attempts} tries` : ""}
                     <span className={`updates-outcome is-${c.outcome}`}>{c.outcome}</span>
                   </p>
-                  <p className="updates-item__detail">“{c.request_summary}”</p>
                   <p className="updates-item__meta">{time(c.created_at)}</p>
                 </article>
               ))}

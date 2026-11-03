@@ -90,7 +90,7 @@ def test_a_plan_is_one_row_linked_to_its_run(session: Session, new_rows) -> None
     [row] = new_rows()
     assert (row.purpose, row.cafe_id, row.attempts, row.outcome, row.run_id) == ("plan", C, 1, "ok", run_id)
     assert row.model == get_settings().planner_model and row.latency_ms >= 0
-    assert row.request_summary == "who works here?" and row.error is None
+    assert row.request_summary == "Plan: who works here?" and row.error is None
 
 
 def test_a_second_attempt_is_one_row_marked_retried(session: Session, new_rows) -> None:
@@ -118,7 +118,7 @@ def test_chat_records_its_routing_and_reply_calls(session: Session, new_rows) ->
         app.dependency_overrides.clear()
     routing, reply = new_rows()
     assert [(r.purpose, r.outcome, r.request_summary) for r in (routing, reply)] == [
-        ("chat", "ok", "who works here"), ("chat", "ok", "reply: who works here")]
+        ("chat", "ok", "Ask: who works here"), ("chat", "ok", "Reply: who works here")]
 
 
 def test_no_key_or_full_prompt_ends_up_in_a_row(session: Session, new_rows, monkeypatch) -> None:
@@ -137,6 +137,13 @@ def test_summaries_hide_key_like_text() -> None:
     assert summarize("use sk-live-abcdef123456 now") == "use [hidden] now"
     assert summarize("x" * 40) == "[hidden]"  # one long token reads like a key
     assert summarize("word " * 60).endswith("…") and len(summarize("word " * 60)) == 120
+
+
+def test_summaries_leave_out_internal_ids() -> None:
+    assert summarize("Bay Dairy Co. rejected purchase order po_agent_b0dc435a6b: out of oat milk") == (
+        "Bay Dairy Co. rejected purchase order : out of oat milk")
+    assert summarize("Upcoming event EVT_SC_FARMERS_MARKET_20261108 for RUN-901A7DA9234D") == "Upcoming event for"
+    assert summarize("PO-1042 from Willow Ridge") == "PO-1042 from Willow Ridge"  # owners see PO numbers
 
 
 def test_ai_calls_endpoint_lists_newest_first(session: Session, ai_call_rows) -> None:

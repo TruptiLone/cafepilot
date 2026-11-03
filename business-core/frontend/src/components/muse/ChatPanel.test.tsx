@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatAnswer, ChatRow } from "../../api/agent";
 import ChatPanel, { EXAMPLES } from "./ChatPanel";
 
-const AS_OF = "2026-10-29T18:00:00-07:00";
+const AS_OF = "2026-11-05T18:00:00-08:00";
 const SPARK_REPLY = "Yes, we have 9 banana nut muffins left, under the reorder point of 12. Want me to plan an order?";
 
 function reply(overrides: Partial<ChatAnswer> = {}): ChatAnswer {

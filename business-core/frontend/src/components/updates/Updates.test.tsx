@@ -13,13 +13,14 @@ function update(overrides: Partial<CafeUpdate>): CafeUpdate {
 
 const SENT = update({ id: "order:1:sent", title: "Order PO-1042 sent to Bay Dairy Co.", detail: "1 case oat milk (6 × 1 L)", simulated: true });
 const DECLINED = update({ id: "order:1:rejected", kind: "order_rejected", at: "2026-11-02T15:51:16-08:00",
-  title: "Bay Dairy Co. declined PO-1042", detail: "Bay Dairy Co. is out of oat milk until Mon, Nov 2.", simulated: true });
+  title: "Bay Dairy Co. declined PO-1042", detail: "Bay Dairy Co. is out of oat milk until Mon, Nov 9.", simulated: true });
 const SHIFT = update({ id: "shift:s:accepted", kind: "shift_confirmed", group: "staff", at: "2026-11-02T15:50:57-08:00",
-  title: "Sofia Ramirez confirmed Sun Nov 1, 8 AM–2 PM", simulated: true });
+  title: "Sofia Ramirez confirmed Sun Nov 8, 8 AM–2 PM", simulated: true });
 const REPLAN = update({ id: "replan:r:finished", kind: "replan_finished", group: "plans", at: "2026-11-02T15:51:06-08:00",
   title: "Muse found another way", model: "muse-wonder-1.0" });
 const CALL: AICallRow = { id: "AIC-1", created_at: "2026-11-02T23:51:06Z", purpose: "replan", model: "muse-wonder-1.0",
-  latency_ms: 17_200, attempts: 2, outcome: "retried", run_id: "RUN-2", request_summary: "Bay Dairy Co. rejected purchase order", error: null };
+  latency_ms: 17_200, attempts: 2, outcome: "retried", run_id: "RUN-2",
+  request_summary: "Replan: Bay Dairy Co. declined, find another milk supplier", error: null };
 
 const json = (body: unknown) => Promise.resolve(new Response(JSON.stringify(body), { status: 200 }));
 
@@ -73,14 +74,14 @@ describe("Updates bell", () => {
     expect(screen.getByRole("button", { name: "Updates" })).toBeTruthy();  // badge cleared
   });
 
-  it("AI activity lists model calls", async () => {
+  it("AI activity lists model calls in plain words", async () => {
     serve([[]], [CALL]);
     renderBell();
     await userEvent.click(screen.getByRole("button", { name: "Updates" }));
     await userEvent.click(screen.getByRole("tab", { name: "AI activity" }));
-    expect(await screen.findByText(/Replan · Muse Wonder 1\.0 · 17\.2 s · 2 tries/)).toBeTruthy();
+    expect(await screen.findByText("Replan: Bay Dairy Co. declined, find another milk supplier")).toBeTruthy();
+    expect(screen.getByText(/Muse Wonder 1\.0 · 17\.2 s · 2 tries/)).toBeTruthy();
     expect(screen.getByText("retried")).toBeTruthy();
-    expect(screen.getByText("“Bay Dairy Co. rejected purchase order”")).toBeTruthy();
   });
 
   it("a development double mount still treats the first load as history", async () => {

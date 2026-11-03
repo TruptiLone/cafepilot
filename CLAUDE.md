@@ -84,14 +84,14 @@ Backend tests use the real Postgres and roll back. Model calls in tests use fake
 (`tests/test_agent_planner.py::FakeClient`); receiving tests replay Muse's real answers from
 `tests/fixtures/receiving/vision_live.json`.
 
-## Demo scenarios (all data is synthetic; "as of" Thu Oct 29 2026, 6 PM PT)
+## Demo scenarios (all data is synthetic; "as of" Thu Nov 5 2026, 6 PM PST, shown as "Demo date")
 
-1. **Event surge (done).** Santa Clara Farmers Market, Sun Nov 1, 8 AM–2 PM. Muse finds it, estimates
-   extra demand from the last 6 editions (typically +35 drinks), checks stock at event time (after
+1. **Event surge (done).** Santa Clara Farmers Market, Sun Nov 8, 8 AM–2 PM. Muse finds it, estimates
+   extra demand from the last 6 editions (typically +28 drinks), checks stock at event time (after
    normal use and standing deliveries), orders milk in whole cases, adds a barista (Sofia) for 2 of 4
    staffed hours. find_suppliers lets code pick the usual supplier; Bay Dairy replies it's out of oat milk
    until Monday (only known when it answers) → Muse replans automatically → Willow Ridge, approved in the graph.
-   Halloween (Sat) is a quieter event: plan should find little or nothing to do.
+   Thanksgiving (Thu Nov 26) is quieter; the Holiday Lights & Craft Fair (Sat Dec 5) is busier.
 2. **Receiving (done, backend + phone page).** Packing slip PS-58213 for PO-1042 from Willow Ridge
    (2 cases whole, 1 case oat). Muse reads the slip, counts what it can see in the photo (whole milk
    crate may hide cartons → owner counts), only accepted quantities go into stock, shortfalls draft
@@ -107,7 +107,7 @@ Catering is dropped. Staffing math in code is paused.
 - Every number shown to the owner comes from code; summaries are written by code, not the model.
 - Honest states: Proposed → Approved → Sent → Confirmed / Rejected for orders; Offered → Accepted /
   Declined for shifts. Never say "ordered" when it was only sent.
-- Times carry the café's UTC offset for that date (DST ends Nov 1).
+- Times carry the café's UTC offset for that date (DST ended Nov 1; all demo times are -08:00).
 - New migrations: add with Alembic, update `tests/test_database_schema.py` (REVISION + tables).
 - UI copy: plain café language, no jargon; "Needs your OK", "Nothing changes until you approve".
 

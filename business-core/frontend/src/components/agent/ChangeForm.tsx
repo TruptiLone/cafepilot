@@ -16,7 +16,7 @@ export function canChange(step: RunStep): boolean {
   return step.action === "propose_supplier_order" || step.action === "schedule_shift";
 }
 
-/** "2026-11-01T07:30:00-08:00" -> { date, time: "07:30", offset: "-08:00" } */
+/** "2026-11-08T07:30:00-08:00" -> { date, time: "07:30", offset: "-08:00" } */
 function splitTimestamp(value: unknown) {
   const text = String(value ?? "");
   return { date: text.slice(0, 10), time: text.slice(11, 16), offset: text.slice(19) || "Z" };

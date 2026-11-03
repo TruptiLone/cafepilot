@@ -4229,3 +4229,25 @@ body { background: var(--g-bg); }
 @media (prefers-reduced-motion: reduce) {
   .mz-replan i { animation: none; }
 }
+
+/* ---------- Demo clock and larger text (Ask CaféPilot) ---------- */
+.sidebar__demo-date { margin-top: 6px; font-size: 12px; color: var(--g-ink-2); }
+.mz-audit__demo { display: none; }
+@media (max-width: 860px) {
+  .mz-cmd > .mz-audit { flex-wrap: wrap; row-gap: 2px; }
+  .mz-audit__demo { display: block; flex-basis: 100%; text-align: center; }
+}
+/* One notch up from the polish pass: easier to read in the demo video. */
+.page--muse { font-size: 16px; }
+.mz-muse-line, .mz-ev__pitch, .mz-a__reply { font-size: 16.5px; }
+.mz-short ul, .mz-chat .mz-purpose, .mz-act__title { font-size: 16px; }
+.mz-q, .mz-a { font-size: 16px; }
+.sg-title { font-size: 14.5px; }
+.sg-box { font-size: 13.5px; }
+.sg-meta { font-size: 12px; }
+.mz-a__rows, .mz-rc__title, .mz-tile__title, .mz-ev-row__title, .mz .mz-a__more { font-size: 15px; }
+.mz-ev__meta { font-size: 14.5px; }
+.mz-greet__sub { font-size: 17px; }
+.mz-cmd__bar input { font-size: 16px; }
+.mz-replan { font-size: 16px; }
+.updates-item__title { font-size: 14.5px; }

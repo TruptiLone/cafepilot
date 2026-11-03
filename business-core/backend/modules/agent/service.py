@@ -39,14 +39,18 @@ def plan_and_validate(
     model: str | None = None,
     max_attempts: int = MAX_ATTEMPTS,
     purpose: str = "plan",
+    summary: str | None = None,
 ) -> PlanningOutcome:
-    """Plan, validate, retry once with the validator's reasons; one ai_calls row for the whole request."""
+    """Plan, validate, retry once with the validator's reasons; one ai_calls row for the whole request.
+
+    ``summary`` is what the AI activity list shows (plain words, written by code); the query is not stored.
+    """
     model = model or get_settings().planner_model
     started = time.monotonic()
     attempts = 0
 
     def log(outcome: str, error: str | None = None) -> str | None:
-        return record(cafe_id=context.cafe_id, purpose=purpose, model=model, outcome=outcome, request=query,
+        return record(cafe_id=context.cafe_id, purpose=purpose, model=model, outcome=outcome, request=summary or f"Plan: {query}",
                       attempts=max(attempts, 1), latency_ms=int((time.monotonic() - started) * 1000), error=error)
 
     feedback: tuple[str, str] | None = None

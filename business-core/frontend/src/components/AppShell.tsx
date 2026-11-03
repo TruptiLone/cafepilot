@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import Brand from "./Brand";
+import { useDemoDate } from "./demoDate";
 import UpdatesBell from "./updates/UpdatesBell";
 import { UpdatesProvider } from "./updates/UpdatesProvider";
 import {
@@ -32,6 +33,7 @@ function AppShell() {
   }, [location.pathname]);
 
   const onAgent = location.pathname.startsWith("/agent");
+  const demoDate = useDemoDate();
 
   return (
     <UpdatesProvider>
@@ -96,6 +98,7 @@ function AppShell() {
           <div className="sidebar__footer">
             <strong>CafePilot Demo Cafe</strong>
             <span>Santa Clara, CA</span>
+            {demoDate && <span className="sidebar__demo-date">Demo date: {demoDate}</span>}
           </div>
         </aside>
 

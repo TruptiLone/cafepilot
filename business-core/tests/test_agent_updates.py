@@ -53,15 +53,15 @@ def test_an_order_going_out_and_being_rejected(session: Session) -> None:
     rejected, again = updates(session, C, start)
     assert again["id"] == sent["id"]  # newest first
     assert rejected["kind"] == "order_rejected" and rejected["title"].startswith("Bay Dairy Co. declined PO-")
-    assert rejected["detail"] == "Bay Dairy Co. is out of oat milk until Mon, Nov 2."
+    assert rejected["detail"] == "Bay Dairy Co. is out of oat milk until Mon, Nov 9."
 
 
 def test_shift_replies_say_who_and_the_window_in_cafe_time(session: Session, monkeypatch) -> None:
     monkeypatch.setitem(CAFE_POLICIES[C], "staff_replies", {"respond_after_seconds": 10, "declines": ["DEMO_EMP_004"]})
-    window = {"start_at": "2026-11-01T08:00:00-08:00", "end_at": "2026-11-01T12:00:00-08:00"}
+    window = {"start_at": "2026-11-08T08:00:00-08:00", "end_at": "2026-11-08T12:00:00-08:00"}
     run = _run(session, [
         {"id": "cov", "action": "coverage_report", "reason": "r",
-         "args": {"cafe_id": C, "start_at": "2026-11-01T08:00:00-08:00", "end_at": "2026-11-01T14:00:00-08:00", "required_staff": 4}},
+         "args": {"cafe_id": C, "start_at": "2026-11-08T08:00:00-08:00", "end_at": "2026-11-08T14:00:00-08:00", "required_staff": 4}},
         {"id": "staff", "action": "list_employees", "reason": "r", "args": {"cafe_id": C}},
         {"id": "shifts", "action": "list_shifts", "reason": "r", "args": {"cafe_id": C, **window}},
         {"id": "ethan", "action": "schedule_shift", "reason": "r", "args": {"cafe_id": C, "employee_id": "DEMO_EMP_004", **window}},
@@ -73,7 +73,7 @@ def test_shift_replies_say_who_and_the_window_in_cafe_time(session: Session, mon
     assert updates(session, C, start) == []  # offered, no reply yet
     settle_due(session, cafe_id=C, now=LATER)
     staff = {u["title"]: u for u in updates(session, C, start)}
-    assert set(staff) == {"Ethan Patel declined Sun Nov 1, 8 AM–12 PM", "Sofia Ramirez confirmed Sun Nov 1, 8 AM–12 PM"}
+    assert set(staff) == {"Ethan Patel declined Sun Nov 8, 8 AM–12 PM", "Sofia Ramirez confirmed Sun Nov 8, 8 AM–12 PM"}
     assert all(u["group"] == "staff" and u["simulated"] and u["run_id"] == run.run_id for u in staff.values())
 
 
@@ -104,6 +104,6 @@ def test_endpoint_returns_only_changes_after_since(session: Session) -> None:
         assert api.get("/api/v1/agent/updates", params={"since": sent["at"]}).json() == [
             u for u in everything if datetime.fromisoformat(u["at"]) > datetime.fromisoformat(sent["at"])]
         assert sent["at"].endswith("-07:00") or sent["at"].endswith("-08:00")  # café time
-        assert api.get("/api/v1/agent/updates", params={"since": "2026-11-01T08:00:00"}).status_code == 422
+        assert api.get("/api/v1/agent/updates", params={"since": "2026-11-08T08:00:00"}).status_code == 422
     finally:
         app.dependency_overrides.clear()

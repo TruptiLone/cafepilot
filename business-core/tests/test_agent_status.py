@@ -31,14 +31,14 @@ def api():
         connection.close()
 
 
-def test_panel_prepares_for_the_market_not_halloween(api: TestClient) -> None:
+def test_panel_prepares_for_the_market_not_thanksgiving(api: TestClient) -> None:
     body = api.get("/api/v1/agent/status", params={"cafe_id": C}).json()
     assert body["focus_event_name"] == "Santa Clara Farmers Market"
-    assert body["date_label"] == "Thursday, October 29"
+    assert body["date_label"] == "Thursday, November 5"
 
     milk = {row["ingredient_id"]: row for row in body["inventory"]}
     assert milk["WHOLE_MILK"]["status"] == "short" and milk["OAT_MILK"]["status"] == "short"
-    assert body["kpis"]["stock"]["value"] == "2"
+    assert body["kpis"]["stock"]["value"] == "2"  # whole milk and oat milk
     assert (body["kpis"]["coverage"]["value"], body["kpis"]["coverage"]["of"]) == ("2", "/ 4")
 
     sunday = body["coverage"][-1]
@@ -46,7 +46,8 @@ def test_panel_prepares_for_the_market_not_halloween(api: TestClient) -> None:
     assert [d["halves"][0]["staffed"] for d in body["coverage"][:2]] == [2, 2]
 
     events = {e["name"]: e for e in body["events"]}
-    assert events["Halloween"]["plan_state"] == "new" and "fewer drinks" in events["Halloween"]["note"]
+    assert events["Thanksgiving"]["plan_state"] == "new" and "fewer drinks" in events["Thanksgiving"]["note"]
+    assert events["Holiday Lights & Craft Fair"]["plan_state"] == "new"
 
 
 def test_events_list_has_no_plan_until_the_owner_asks(api: TestClient) -> None:

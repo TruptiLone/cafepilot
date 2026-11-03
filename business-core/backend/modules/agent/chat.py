@@ -383,12 +383,12 @@ def _reply(
         record.update(latency_ms=getattr(error, "latency_ms", 0), error=f"{type(error).__name__}: {error}")
         _log_call(record)
         record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=record["latency_ms"],
-                       request=f"reply: {message}", outcome="timeout" if is_timeout(error) else "failed",
+                       request=f"Reply: {message}", outcome="timeout" if is_timeout(error) else "failed",
                        error=record["error"])
         return None, record["latency_ms"]
     record.update(latency_ms=latency_ms, response=text)
     _log_call(record)
-    record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=f"reply: {message}", outcome="ok")
+    record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=f"Reply: {message}", outcome="ok")
     return text or None, latency_ms
 
 
@@ -460,7 +460,7 @@ def _route(
         record.update(latency_ms=latency_ms, error=f"{type(error).__name__}: {error}")
         _log_call(record)
         timeout = is_timeout(error)
-        record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=message,
+        record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=f"Ask: {message}",
                        outcome="timeout" if timeout else "failed", error=record["error"])
         if timeout:
             raise ChatTimeoutError(f"Muse didn't answer within {TIMEOUT_SECONDS} seconds. Try again.") from error
@@ -473,11 +473,11 @@ def _route(
     except (json.JSONDecodeError, ValidationError) as error:
         record["error"] = f"unreadable routing: {str(error).splitlines()[0][:200]}"
         _log_call(record)
-        record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=message,
+        record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=f"Ask: {message}",
                        outcome="failed", error="unreadable routing")
         raise ModelCallError("Muse's answer wasn't readable. Try asking again.") from error
     _log_call(record)
-    record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=message, outcome="ok")
+    record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=f"Ask: {message}", outcome="ok")
     return routing, latency_ms
 
 

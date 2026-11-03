@@ -24,6 +24,23 @@ class NothingToReplanError(ValueError):
     """The change did not fail, so there is nothing to replan."""
 
 
+def replan_summary(session: Session, run: AgentPlanRun, node_id: str) -> str:
+    """Plain words for the AI activity list (no IDs): "Replan: Bay Dairy Co. declined, find another milk supplier"."""
+    node = next((n for n in run.nodes if n.node_id == node_id), None)
+    if node is not None and node.action == "propose_supplier_order":
+        order = order_for(session, run.run_id, node_id)
+        if order is not None:
+            milk = all(l.ingredient_id.endswith("_MILK") for l in order.lines)
+            return f"Replan: {order.supplier_name} declined, find another {'milk ' if milk else ''}supplier"
+    if node is not None and node.action == "schedule_shift" and isinstance(node.result, dict):
+        cafe = session.get(Cafe, run.cafe_id)
+        ctx = RunContext(list(run.nodes), run.cafe_id, cafe.timezone if cafe else "UTC")
+        who = node.result.get("employee_name") or ctx.person(str(node.result.get("employee_id", "")))
+        when = span(node.result.get("start_at"), node.result.get("end_at"), ZoneInfo(cafe.timezone if cafe else "UTC"))
+        return f"Replan: {who} declined {when}, find someone else"
+    return "Replan: a change didn't go through, find another way"
+
+
 def replan_request(session: Session, run: AgentPlanRun, node_id: str) -> str:
     settle_due(session, cafe_id=run.cafe_id)
     node = next((n for n in run.nodes if n.node_id == node_id), None)

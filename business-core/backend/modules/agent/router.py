@@ -27,7 +27,7 @@ from backend.modules.agent.status import CafeStatus, cafe_status, event_id_for_r
 from backend.modules.agent.summaries import summarize_run
 from backend.modules.agent.acknowledgements import Acknowledgement, Stage, change_statuses
 from backend.modules.purchasing.service import settle_due
-from backend.modules.agent.replanning import NothingToReplanError, replan_request, replans_of
+from backend.modules.agent.replanning import NothingToReplanError, replan_request, replan_summary, replans_of
 from backend.modules.agent.executor import (
     ApprovalStateError,
     EditValidationError,
@@ -81,14 +81,15 @@ def get_planner_client() -> Any:
 
 
 def _plan(
-    request: PlanRequest, database_session: Session, client: Any, purpose: str = "plan", event_id: str | None = None
+    request: PlanRequest, database_session: Session, client: Any, purpose: str = "plan", event_id: str | None = None,
+    summary: str | None = None,
 ) -> tuple[PlanningOutcome, Any]:
     try:
         context = build_planning_context(database_session, request.cafe_id, request.as_of, event_id=event_id)
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
     try:
-        outcome = plan_and_validate(request.query, context, client, purpose=purpose)
+        outcome = plan_and_validate(request.query, context, client, purpose=purpose, summary=summary)
     except (PlannerError, ModelCallError) as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
     return outcome, context
@@ -258,9 +259,10 @@ def _start(
     parent_run_id: str | None = None,
     parent_node_id: str | None = None,
     event_id: str | None = None,
+    summary: str | None = None,
 ) -> CreateRunResponse:
     purpose = "replan" if parent_run_id else "plan"
-    outcome, context = _plan(request, database_session, client, purpose, event_id)
+    outcome, context = _plan(request, database_session, client, purpose, event_id, summary)
     planning = _plan_response(outcome, context)
     if not outcome.validation.valid:
         return CreateRunResponse(planning=planning, run=None)
@@ -530,7 +532,7 @@ def start_run_for_event(
     if event is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     request = PlanRequest(query=event.request, cafe_id=event.cafe_id, as_of=event.knowledge_as_of)
-    return _start(request, database_session, client, event_id=event_id)
+    return _start(request, database_session, client, event_id=event_id, summary=f"Plan: {event.title}")
 
 
 @router.post("/runs/{run_id}/nodes/{node_id}/replan", response_model=CreateRunResponse)
@@ -550,4 +552,5 @@ def replan_step(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
     request = PlanRequest(query=query, cafe_id=run.cafe_id, as_of=run.as_of)
     return _start(request, database_session, client, parent_run_id=run_id, parent_node_id=node_id,
+                  summary=replan_summary(database_session, run, node_id),
                   event_id=event_id_for_run(database_session, run))

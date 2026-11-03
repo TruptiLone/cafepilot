@@ -5,7 +5,7 @@ import ReceivingPage from "./ReceivingPage";
 
 const order = {
   order_id: "PO1", po_number: "PO-1042", supplier_name: "Willow Ridge Dairy Supply", status: "confirmed",
-  requested_delivery_at: "2026-11-01T13:30:00Z", confirmed_delivery_at: "2026-11-01T13:30:00Z", simulated: true,
+  requested_delivery_at: "2026-11-08T13:30:00Z", confirmed_delivery_at: "2026-11-08T13:30:00Z", simulated: true,
   lines: [{ line_no: 1, ingredient_id: "WHOLE_MILK", supplier_item_number: "WR-1001", description: "Whole Milk, 1 L carton",
     quantity: "12000", unit: "mL", packs: 2, pack_name: "case of 6 × 1 L" }],
 };

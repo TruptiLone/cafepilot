@@ -62,9 +62,17 @@ def no_log_file(tmp_path, monkeypatch):
     monkeypatch.setattr(planner_module, "LLM_LOG_PATH", tmp_path / "llm.jsonl")
 
 
-def rows(ai_call_rows) -> list[AICall]:
+@pytest.fixture
+def new_rows(ai_call_rows):
+    """Rows written during this test (the local database may already hold real ones)."""
     with ai_call_rows() as s:
-        return list(s.scalars(select(AICall).order_by(AICall.created_at)))
+        before = set(s.scalars(select(AICall.id)))
+
+    def read() -> list[AICall]:
+        with ai_call_rows() as s:
+            return [r for r in s.scalars(select(AICall).order_by(AICall.created_at)) if r.id not in before]
+
+    return read
 
 
 def plan(session: Session, client, query: str = "who works here?") -> TestClient:
@@ -76,31 +84,31 @@ def plan(session: Session, client, query: str = "who works here?") -> TestClient
         app.dependency_overrides.clear()
 
 
-def test_a_plan_is_one_row_linked_to_its_run(session: Session, ai_call_rows) -> None:
+def test_a_plan_is_one_row_linked_to_its_run(session: Session, new_rows) -> None:
     response = plan(session, Scripted(PLAN))
     run_id = response.json()["run"]["run_id"]
-    [row] = rows(ai_call_rows)
+    [row] = new_rows()
     assert (row.purpose, row.cafe_id, row.attempts, row.outcome, row.run_id) == ("plan", C, 1, "ok", run_id)
     assert row.model == get_settings().planner_model and row.latency_ms >= 0
     assert row.request_summary == "who works here?" and row.error is None
 
 
-def test_a_second_attempt_is_one_row_marked_retried(session: Session, ai_call_rows) -> None:
+def test_a_second_attempt_is_one_row_marked_retried(session: Session, new_rows) -> None:
     plan(session, Scripted("not json", PLAN))
-    [row] = rows(ai_call_rows)
+    [row] = new_rows()
     assert (row.attempts, row.outcome) == (2, "retried")
 
 
-def test_failures_and_timeouts_are_recorded(session: Session, ai_call_rows) -> None:
+def test_failures_and_timeouts_are_recorded(session: Session, new_rows) -> None:
     assert plan(session, Scripted("not json")).status_code == 502
     assert plan(session, Scripted(type("APITimeoutError", (Exception,), {})("t"))).status_code == 502
-    failed, timed_out = rows(ai_call_rows)
+    failed, timed_out = new_rows()
     assert (failed.outcome, failed.attempts) == ("failed", 2)
     assert (timed_out.outcome, timed_out.attempts) == ("timeout", 1)
     assert timed_out.error and "took too long" in timed_out.error
 
 
-def test_chat_records_its_routing_and_reply_calls(session: Session, ai_call_rows) -> None:
+def test_chat_records_its_routing_and_reply_calls(session: Session, new_rows) -> None:
     client = Scripted({"intent": "answer", "actions": [{"action": "list_employees", "args": {}}]}, "Here's the team.")
     app.dependency_overrides[get_db] = lambda: session
     app.dependency_overrides[get_chat_client] = lambda: client
@@ -108,17 +116,17 @@ def test_chat_records_its_routing_and_reply_calls(session: Session, ai_call_rows
         TestClient(app).post("/api/v1/agent/chat", json={"message": "who works here", "channel": "text"})
     finally:
         app.dependency_overrides.clear()
-    routing, reply = rows(ai_call_rows)
+    routing, reply = new_rows()
     assert [(r.purpose, r.outcome, r.request_summary) for r in (routing, reply)] == [
         ("chat", "ok", "who works here"), ("chat", "ok", "reply: who works here")]
 
 
-def test_no_key_or_full_prompt_ends_up_in_a_row(session: Session, ai_call_rows, monkeypatch) -> None:
+def test_no_key_or_full_prompt_ends_up_in_a_row(session: Session, new_rows, monkeypatch) -> None:
     secret = "sk-test-SECRET-KEY-1234567890"
     monkeypatch.setattr(get_settings(), "model_api_key", SecretStr(secret))
     query = ("Prepare for the market " * 20) + f" and use key {secret} with Bearer abc.def.ghi"
     plan(session, Scripted(PLAN), query)
-    [row] = rows(ai_call_rows)
+    [row] = new_rows()
     stored = " ".join(str(getattr(row, c.name)) for c in AICall.__table__.columns)
     assert secret not in stored and "Bearer abc" not in stored
     assert SYSTEM_PROMPT[:60] not in stored and "reference_data" not in stored
@@ -148,7 +156,9 @@ def test_ai_calls_endpoint_lists_newest_first(session: Session, ai_call_rows) ->
         two = api.get("/api/v1/agent/ai-calls?limit=2").json()
     finally:
         app.dependency_overrides.clear()
-    assert [c["purpose"] for c in listed] == ["replan", "chat", "plan"]  # this café only, newest first
+    ours = [c for c in listed if c["id"].startswith("AIC-T")]  # the local database may hold real calls too
+    assert [c["purpose"] for c in ours] == ["replan", "chat", "plan"]  # newest first
+    assert all(c["cafe_id"] == C for c in listed)  # this café only
     assert [c["id"] for c in two] == ["AIC-T2", "AIC-T1"]
     assert set(listed[0]) == {"id", "cafe_id", "created_at", "purpose", "model", "latency_ms", "attempts", "outcome",
                               "run_id", "request_summary", "error"}

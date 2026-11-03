@@ -208,7 +208,7 @@ def _run_out(database_session: Session, run: Any) -> RunOut:
             node.acknowledgement = status_.acknowledgement
             node.lifecycle = status_.lifecycle
             node.external_status = status_.external_status
-            if status_.acknowledgement and status_.acknowledgement.tone in ("done", "waiting", "problem"):
+            if status_.acknowledgement and status_.acknowledgement.tone in ("done", "waiting", "awaiting", "problem"):
                 node.summary = status_.acknowledgement.headline
     out.closing_message = closing
     out.waiting_on = waiting

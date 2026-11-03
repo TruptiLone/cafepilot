@@ -1,6 +1,7 @@
 """Status changes for the Updates bell, read from records that already exist.
 
-Supplier orders (sent, confirmed, rejected) come from purchase_orders; shift replies (confirmed,
+Supplier orders (sent, confirmed, rejected, delivered) come from purchase_orders and their checked-in
+receipts; shift replies (confirmed,
 declined) from shift_offers; replans from the replan's run (finished) and its ai_calls row (started,
 when the request began). Nothing is invented: every line is built from one of those records, and
 "simulated" is the record's own flag (the reply came from the demo policy).
@@ -20,6 +21,7 @@ from backend.modules.agent.models import AICall, AgentPlanRun
 from backend.modules.agent.summaries import clock, day, quantity, span
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.purchasing.models import PurchaseOrder, ShiftOffer
+from backend.modules.purchasing.service import delivery_for
 from backend.modules.staffing.models import Employee, Shift
 
 CONFIRMED_ORDERS = ("confirmed", "partially_received", "received")
@@ -64,6 +66,15 @@ def updates(session: Session, cafe_id: str, since: datetime | None = None, limit
             add(f"order:{order.order_id}:confirmed", "order_confirmed", "orders", order.responded_at,
                 f"{order.supplier_name} confirmed {po}", f"{items}; arriving {day(arrives)} {clock(arrives)}",
                 order.simulated, order.source_run_id)
+            if order.status in ("received", "partially_received"):
+                receipt = delivery_for(session, order.order_id)
+                fully = order.status == "received"
+                add(f"order:{order.order_id}:delivered", "order_delivered" if fully else "order_partly_delivered", "orders",
+                    receipt.confirmed_at if receipt else None,
+                    f"{po} {'delivered' if fully else 'partly delivered'}: {order.supplier_name}",
+                    f"Checked in{f' (slip {receipt.slip_number})' if receipt and receipt.slip_number else ''}"
+                    + ("; everything matched" if fully else "; a credit request covers what's missing"),
+                    False, order.source_run_id)
         elif order.status == "rejected":
             add(f"order:{order.order_id}:rejected", "order_rejected", "orders", order.responded_at,
                 f"{order.supplier_name} declined {po}", order.response_reason, order.simulated, order.source_run_id)

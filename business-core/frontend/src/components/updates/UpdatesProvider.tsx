@@ -28,7 +28,7 @@ export function simulatedLabel(update: CafeUpdate): string {
 }
 
 export function updateTone(update: CafeUpdate): "good" | "bad" | "wait" {
-  if (/rejected|declined/.test(update.kind)) return "bad";
+  if (/rejected|declined|partly/.test(update.kind)) return "bad";
   if (update.kind === "replan_started" || update.kind === "order_sent") return "wait";
   return "good";
 }

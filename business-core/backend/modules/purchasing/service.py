@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from backend.db.config import ENV_FILE
 from backend.models.cafe import Cafe
 from backend.modules.agent.cafe_policies import policies_for
-from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, ShiftOffer
+from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, Receipt, ShiftOffer
 
 
 class SupplierNotFoundError(LookupError):
@@ -328,6 +328,16 @@ def settle_due(session: Session, *, cafe_id: str | None = None, now: datetime | 
 def order_for(session: Session, run_id: str, node_id: str) -> PurchaseOrder | None:
     return session.scalar(
         select(PurchaseOrder).where(PurchaseOrder.source_run_id == run_id, PurchaseOrder.source_node_id == node_id)
+    )
+
+
+def delivery_for(session: Session, order_id: str) -> Receipt | None:
+    """The latest checked-in delivery against an order (None until a delivery is confirmed)."""
+    return session.scalar(
+        select(Receipt)
+        .where(Receipt.order_id == order_id, Receipt.status == "confirmed")
+        .order_by(Receipt.confirmed_at.desc())
+        .limit(1)
     )
 
 

@@ -41,7 +41,7 @@ export type Acknowledgement = {
   headline: string;
   details: string[];
   caveat: string | null;
-  tone?: "done" | "waiting" | "problem" | "declined";
+  tone?: "done" | "waiting" | "awaiting" | "problem" | "declined";
   next_step?: "find_alternative" | "find_cover" | null;
 };
 

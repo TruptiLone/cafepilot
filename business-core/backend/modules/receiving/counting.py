@@ -6,7 +6,9 @@ For each kind of item on the order (or the slip, when there is no order):
   3. Muse Spark checks the numbered boxes: one item? two merged? not an item? a duplicate? which
      product (only when several look alike)? and points at items without a box.
   4. SAM confirms each pointed spot; only a new, confident box counts.
-  5. Code totals each product. It is "confident" only when SAM and Spark agree and SAM is sure.
+  5. Code totals each product. It is "confident" only when SAM and Spark agree and SAM is sure:
+     every box that counts is a sure SAM box holding one item, Spark found nothing SAM missed, and
+     Spark only threw out boxes SAM itself was unsure of (a reflection, a shadow).
 
 The result has the same shape as Muse's plain photo read (``PhotoRead``), so ``service.recompare``
 compares it with the order unchanged. A count that isn't confident is marked "may hide more", so a
@@ -240,14 +242,16 @@ def count_group(client: Any, model: str, image: bytes, mime: str, noun: str, nam
     seconds += time.monotonic() - started
     result.check_confidence = answer.get("confidence") if isinstance(answer.get("confidence"), str) else None
     verdicts = {v.get("n"): v for v in answer.get("boxes") or [] if isinstance(v, dict)}
+    agree = bool(verdicts)
     for box in boxes:
         verdict = verdicts.get(box["n"], {"items": 1})  # no verdict: keep SAM's box
-        if verdict.get("duplicate_of"):
-            continue
         try:
-            items = max(0, min(int(verdict.get("items", 1)), MAX_PER_BOX))
+            items = 0 if verdict.get("duplicate_of") else max(0, min(int(verdict.get("items", 1)), MAX_PER_BOX))
         except (TypeError, ValueError):
             items = 1
+        sure = box["c"] is None or box["c"] >= SURE
+        # Spark may throw out a box SAM was unsure of; anything else it changes is a disagreement.
+        agree = agree and (items == 1 and sure or items == 0 and not sure)
         result.counts[_pick(verdict.get("product"), names)] += items
 
     missed = [m for m in answer.get("missed") or [] if isinstance(m, dict)]
@@ -271,8 +275,7 @@ def count_group(client: Any, model: str, image: bytes, mime: str, noun: str, nam
                 break
     result.missed_confirmed = len(added)
 
-    agree = sum(result.counts.values()) == len(boxes) and not missed and bool(verdicts)
-    result.confident = agree and (result.min_conf or 0) >= SURE and result.check_confidence != "low"
+    result.confident = agree and not missed and result.check_confidence != "low"
     result.seconds = round(seconds, 1)
     return result
 

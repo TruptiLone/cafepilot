@@ -1,7 +1,7 @@
 """What the owner is told after a decision, written by code from what actually happened.
 
 Every change has an honest lifecycle:
-  supplier order: Proposed → Approved → Sent → Confirmed | Rejected
+  supplier order: Proposed → Approved → Sent → Confirmed → Awaiting delivery → Delivered | Rejected
   shift:          Proposed → Approved → Offered → Accepted | Declined
   anything else:  Proposed → Approved → Done
 "Approved" never means "done": the supplier or the employee still has to answer.
@@ -24,7 +24,7 @@ from backend.models.cafe import Cafe
 from backend.modules.agent.models import AgentApproval
 from backend.modules.agent.summaries import RunContext, clock, day, quantity, span
 from backend.modules.purchasing.models import PurchaseOrder, ShiftOffer
-from backend.modules.purchasing.service import offer_for, order_for
+from backend.modules.purchasing.service import delivery_for, offer_for, order_for
 from backend.modules.staffing.service import StaffingService
 
 
@@ -32,7 +32,8 @@ class Acknowledgement(BaseModel):
     headline: str
     details: list[str]
     caveat: str | None = None
-    tone: Literal["done", "waiting", "problem", "declined"] = "done"
+    # awaiting: confirmed, still in progress (the delivery hasn't been checked in yet)
+    tone: Literal["done", "waiting", "awaiting", "problem", "declined"] = "done"
     next_step: str | None = None
 
 
@@ -175,14 +176,45 @@ def _order_status(session: Session, node: Any, ctx: RunContext) -> ChangeStatus:
             ),
         )
     confirmed_at = (order.confirmed_delivery_at or order.requested_delivery_at).astimezone(ctx.tz)
+    confirmed = Stage(stage="Confirmed", state="done", at=order.responded_at)
+    if order.status in ("received", "partially_received"):
+        receipt = delivery_for(session, order.order_id)
+        checked = receipt.confirmed_at if receipt else None
+        slip = f", slip {receipt.slip_number}" if receipt and receipt.slip_number else ""
+        if order.status == "received":
+            return ChangeStatus(
+                lifecycle=[*stages, sent, confirmed, Stage(stage="Delivered", state="done", at=checked)],
+                external_status=order.status,
+                acknowledgement=Acknowledgement(
+                    headline=f"{order.supplier_name} delivered the order",
+                    details=[*details, f"Checked in{slip}: everything matched"],
+                    caveat="Stock went up by what was checked in.",
+                    tone="done",
+                ),
+            )
+        missing = [
+            f"{quantity(l.quantity - (l.received_quantity or 0), l.unit)} {ctx.ingredient(l.ingredient_id).lower()}"
+            for l in order.lines
+            if (l.received_quantity or 0) < l.quantity
+        ]
+        return ChangeStatus(
+            lifecycle=[*stages, sent, confirmed, Stage(stage="Partly delivered", state="failed", at=checked)],
+            external_status=order.status,
+            acknowledgement=Acknowledgement(
+                headline=f"{order.supplier_name} delivered part of the order",
+                details=[*details, f"Checked in{slip}", f"Still missing {', '.join(missing)}"],
+                caveat="Stock went up only by what arrived; a credit request covers the rest.",
+                tone="problem",
+            ),
+        )
     return ChangeStatus(
-        lifecycle=[*stages, sent, Stage(stage="Confirmed", state="done", at=order.responded_at)],
+        lifecycle=[*stages, sent, confirmed, Stage(stage="Awaiting delivery", state="current")],
         external_status=order.status,
         acknowledgement=Acknowledgement(
-            headline=f"{order.supplier_name} confirmed the order",
+            headline=f"{order.supplier_name} confirmed – awaiting delivery",
             details=[*details, f"Arriving {day(confirmed_at)} by {clock(confirmed_at)}"],
             caveat=f"{simulated_note}Stock goes up only when the delivery is received and checked in.",
-            tone="done",
+            tone="awaiting",
         ),
     )
 

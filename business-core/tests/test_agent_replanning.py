@@ -21,6 +21,7 @@ from backend.modules.agent.validator import validate_plan
 from backend.modules.purchasing.models import PurchaseOrder
 from backend.modules.purchasing import service as purchasing_service
 from backend.modules.purchasing.service import DemoTiming, settle_due
+from backend.modules.receiving import service as receiving_service
 from scripts.seed_event_surge import apply_reset, plan_reset, seed_event_surge
 from tests.test_agent_planner import FakeClient
 
@@ -93,10 +94,35 @@ def test_approved_order_is_sent_then_answered_honestly(session: Session) -> None
         settle_due(session, cafe_id=C, now=LATER)
         body = api.get(f"/api/v1/agent/runs/{run.run_id}").json()
         order = next(n for n in body["nodes"] if n["node_id"] == "order")
-        assert order["lifecycle"][-1]["stage"] == "Confirmed" and order["external_status"] == "confirmed"
-        assert order["acknowledgement"]["headline"] == "Willow Ridge Dairy Supply confirmed the order"
+        # Confirmed is still in progress: the delivery hasn't been checked in.
+        assert [s["stage"] for s in order["lifecycle"]][-2:] == ["Confirmed", "Awaiting delivery"]
+        assert order["lifecycle"][-1]["state"] == "current" and order["external_status"] == "confirmed"
+        assert order["acknowledgement"]["headline"] == "Willow Ridge Dairy Supply confirmed – awaiting delivery"
+        assert order["acknowledgement"]["tone"] == "awaiting"
         assert "Arriving Sun Nov 8 by 6 AM" in order["acknowledgement"]["details"]
         assert body["waiting_on"] == []
+
+        # The delivery check confirms a receipt against the order: Delivered.
+        po = session.get(PurchaseOrder, order["result"]["order_id"])
+        receipt = receiving_service.start_receipt(session, C, po.order_id)
+        receipt.slip_number, receipt.status, receipt.confirmed_at = "PS-58214", "confirmed", LATER
+        po.status = "received"
+        session.flush()
+        body = api.get(f"/api/v1/agent/runs/{run.run_id}").json()
+        order = next(n for n in body["nodes"] if n["node_id"] == "order")
+        assert order["lifecycle"][-1]["stage"] == "Delivered" and order["lifecycle"][-1]["state"] == "done"
+        assert order["acknowledgement"]["headline"] == "Willow Ridge Dairy Supply delivered the order"
+        assert order["acknowledgement"]["tone"] == "done"
+        assert "Checked in, slip PS-58214: everything matched" in order["acknowledgement"]["details"]
+        updates = api.get("/api/v1/agent/updates", params={"cafe_id": C}).json()
+        assert any(u["kind"] == "order_delivered" and u["title"].startswith(f"{po.po_number} delivered") for u in updates)
+
+        po.status, po.lines[0].received_quantity = "partially_received", 0
+        session.flush()
+        order = next(n for n in api.get(f"/api/v1/agent/runs/{run.run_id}").json()["nodes"] if n["node_id"] == "order")
+        assert order["lifecycle"][-1] == {**order["lifecycle"][-1], "stage": "Partly delivered", "state": "failed"}
+        assert order["acknowledgement"]["tone"] == "problem"
+        assert any(d.startswith("Still missing") for d in order["acknowledgement"]["details"])
     finally:
         app.dependency_overrides.clear()
 

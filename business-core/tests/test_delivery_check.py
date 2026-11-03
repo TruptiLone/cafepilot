@@ -177,3 +177,27 @@ def test_code_picks_what_sam_looks_for() -> None:
     assert noun_for("OAT_MILK", "Oat Milk Barista Edition, 1 L carton") == "milk carton"
     assert noun_for(None, "Plain Bagels, dozen") == "plain bagel"
     assert noun_for(None, "Glass") == "glass"
+
+
+def _weak(n: int) -> str:
+    """n faint boxes below the cartons (reflections in a steel counter), SAM only half sure."""
+    return "".join(f"<|box;x1={10 + 40 * i};y1=200;x2={40 + 40 * i};y2=240;w={W};h={H};c=0.5|>" for i in range(n))
+
+
+def test_spark_throwing_out_weak_reflections_keeps_the_count_sure() -> None:
+    check = _check(6, 6)
+    check["boxes"] += [{"n": 13, "items": 0, "duplicate_of": None}, {"n": 14, "items": 0, "duplicate_of": None}]
+    client = Glasses(slip=SLIP, sam={"milk carton": _boxes(12) + _weak(2)}, check=check)
+    _, groups = count_delivery(client, "muse-spark-1.3", _jpeg(), "image/jpeg",
+                               [Product("Whole Milk", "milk carton"), Product("Oat Milk", "milk carton")])
+    assert groups[0].sam_boxes == 14 and groups[0].counts == {"Whole Milk": 6, "Oat Milk": 6}
+    assert groups[0].confident
+
+
+def test_spark_throwing_out_a_box_sam_was_sure_of_is_a_disagreement() -> None:
+    check = _check(6, 6)
+    check["boxes"][0]["items"] = 0  # SAM was 95% sure of box 1; Spark says it isn't a carton
+    client = Glasses(slip=SLIP, sam={"milk carton": _boxes(12)}, check=check)
+    _, groups = count_delivery(client, "muse-spark-1.3", _jpeg(), "image/jpeg",
+                               [Product("Whole Milk", "milk carton"), Product("Oat Milk", "milk carton")])
+    assert groups[0].counts == {"Whole Milk": 5, "Oat Milk": 6} and not groups[0].confident

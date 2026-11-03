@@ -86,7 +86,7 @@ function UpdatesBell({ className = "" }: { className?: string }) {
                   <section key={group} aria-label={label}>
                     <h4 className="updates-group">{label}</h4>
                     {items.map((u) => (
-                      <article key={u.id} className={`updates-item is-${u.kind.includes("declined") || u.kind.includes("rejected") ? "bad" : "ok"}`}>
+                      <article key={u.id} className={`updates-item is-${/declined|rejected|partly/.test(u.kind) ? "bad" : "ok"}`}>
                         <p className="updates-item__title">{u.title}</p>
                         {u.detail && <p className="updates-item__detail">{u.detail}</p>}
                         <p className="updates-item__meta">

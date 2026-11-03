@@ -174,10 +174,16 @@ function AgentPage() {
     }
   }, [childIds, children]);
 
-  // Keep refreshing while Muse is working or a supplier / employee hasn't answered yet.
+  // Keep refreshing while Muse is working, a supplier / employee hasn't answered yet, or a confirmed
+  // order is awaiting delivery (the glasses' delivery check turns it into "Delivered").
   useEffect(() => {
     const active = [run, ...childIds.map((id) => children[id])].filter(Boolean) as AgentRun[];
-    const live = active.filter((r) => r.status === "running" || (r.waiting_on && r.waiting_on.length > 0));
+    const live = active.filter(
+      (r) =>
+        r.status === "running" ||
+        (r.waiting_on && r.waiting_on.length > 0) ||
+        r.nodes.some((n) => n.acknowledgement?.tone === "awaiting"),
+    );
     if (!live.length) return;
     const timer = window.setTimeout(() => {
       for (const r of live) {
@@ -567,7 +573,7 @@ function AgentPage() {
                 {view === "owner" && (
                   <div className="mz-legend2" aria-hidden="true">
                     <span><i className="d" />Done</span>
-                    <span><i className="w" />Needs your OK</span>
+                    <span><i className="w" />Needs your OK or in progress</span>
                     <span><i className="x" />Fell through</span>
                   </div>
                 )}

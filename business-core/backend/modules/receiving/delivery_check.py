@@ -62,6 +62,8 @@ def _glasses_line(receipt: Receipt, outcome: str, po: str | None) -> str:
         return f"{label} received: all {len(receipt.lines)} items match. Stock updated."
     issues = [f"{service._product(l.description)}: {_WORDS.get(l.status, l.status)}"
               for l in receipt.lines if l.status != "match"]
+    if not issues:  # every line matches, but the count wasn't sure enough to finish on its own
+        return f"{label} matches the order, but the count isn't certain. Check it and confirm."
     return f"{label} needs your OK. " + "; ".join(issues) + "."
 
 

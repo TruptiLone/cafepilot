@@ -210,14 +210,14 @@ describe("buildStory labels", () => {
 
 // ---------- "In short" from the plan and its replans ---------------------------------
 
-const ack = (headline: string, details: string[], tone: "done" | "waiting" | "problem", next_step: "find_alternative" | null = null) =>
+const ack = (headline: string, details: string[], tone: "done" | "waiting" | "awaiting" | "problem", next_step: "find_alternative" | null = null) =>
   ({ headline, details, caveat: null, tone, next_step });
 
 const order = marketRun.nodes.find((n) => n.node_id === "order")!;
 const barista = marketRun.nodes.find((n) => n.node_id === "add_barista")!;
 
 /** Bay Dairy refused; Willow Ridge took the order in a replan; the barista shift was added. */
-function afterReplan(willow: "confirmed" | "sent"): [AgentRun, Record<string, AgentRun>] {
+function afterReplan(willow: "delivered" | "confirmed" | "sent"): [AgentRun, Record<string, AgentRun>] {
   const parent: AgentRun = {
     ...marketRun,
     status: "completed",
@@ -231,21 +231,23 @@ function afterReplan(willow: "confirmed" | "sent"): [AgentRun, Record<string, Ag
           : n,
     ),
   };
-  const confirmed = willow === "confirmed";
   const child: AgentRun = {
     ...marketRun,
     run_id: "RUN-2",
     model: "muse-wonder-1.0",
     parent_run_id: "RUN-1",
     nodes: [{
-      ...order, node_id: "resend", status: "done",
+      ...order, node_id: "resend", status: "done", external_status: willow === "sent" ? "sent" : willow === "delivered" ? "received" : "confirmed",
       result: { supplier_name: "Willow Ridge Dairy Supply", status: "sent", lines: [
         { ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL", packs: 1, pack_name: "case of 6 × 1 L" },
         { ingredient_id: "WHOLE_MILK", quantity: "12000", unit: "mL", packs: 2, pack_name: "case of 6 × 1 L" },
       ] },
-      acknowledgement: confirmed
-        ? ack("Willow Ridge Dairy Supply confirmed the order", ["Order PO-1042", "Total $77.40", "Arriving Sun, Nov 8 by 6 AM"], "done")
-        : ack("Order sent to Willow Ridge Dairy Supply (simulated)", ["Order PO-1042"], "waiting"),
+      acknowledgement:
+        willow === "delivered"
+          ? ack("Willow Ridge Dairy Supply delivered the order", ["Order PO-1042", "Checked in, slip PS-58214: everything matched"], "done")
+          : willow === "confirmed"
+            ? ack("Willow Ridge Dairy Supply confirmed – awaiting delivery", ["Order PO-1042", "Total $77.40", "Arriving Sun, Nov 8 by 6 AM"], "awaiting")
+            : ack("Order sent to Willow Ridge Dairy Supply (simulated)", ["Order PO-1042"], "waiting"),
     }],
   };
   return [parent, { "RUN-2": child }];
@@ -262,7 +264,7 @@ describe("In short", () => {
     const [parent, children] = afterReplan("confirmed");
     const story = buildStory(parent, children);
     expect(story.summary).toEqual([
-      "1 case oat milk (6 × 1 L) and 2 cases whole milk (6 × 1 L) from Willow Ridge Dairy Supply: confirmed, arriving Sun, Nov 8 by 6 AM.",
+      "1 case oat milk (6 × 1 L) and 2 cases whole milk (6 × 1 L) from Willow Ridge Dairy Supply: confirmed, awaiting delivery Sun, Nov 8 by 6 AM.",
       "Ethan Patel is on the schedule (Sun, Nov 8, 8 AM–10 AM).",
       "Sun, Nov 8 staffing now: 8 AM–2 PM: 4 of 4.",
     ]);
@@ -270,6 +272,16 @@ describe("In short", () => {
     expect(story.allSet).toBe(true);
     expect(story.summaryTitle).toBe("All set for Sunday");
     expect(story.boxes.find((b) => b.id === "c:RUN-2:resend")!.model).toBe("muse-wonder-1.0");
+    // Confirmed but not delivered yet: in progress (yellow), not a green tick.
+    expect(story.boxes.find((b) => b.id === "c:RUN-2:resend")!.state).toBe("awaiting");
+  });
+
+  it("turns the order green once the delivery check confirms it", () => {
+    const [parent, children] = afterReplan("delivered");
+    const story = buildStory(parent, children);
+    expect(story.summary[0]).toBe("1 case oat milk (6 × 1 L) and 2 cases whole milk (6 × 1 L) from Willow Ridge Dairy Supply: delivered.");
+    expect(story.boxes.find((b) => b.id === "c:RUN-2:resend")!.state).toBe("done");
+    expect(story.summaryTitle).toBe("All set for Sunday");
   });
 
   it("is not all set while the new supplier hasn't confirmed", () => {

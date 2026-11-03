@@ -4312,3 +4312,8 @@ body { background: var(--g-bg); }
 }
 .mz-glance__sub { display: block; font-size: 13px; font-weight: 500; color: var(--g-ink-3); margin-top: 1px; }
 .sidebar__demo-date { white-space: nowrap; }
+
+/* An order confirmed and awaiting delivery: still in progress, so a yellow outline, not a green tick. */
+.sg-box[data-s="awaiting"] { border-color: var(--g-saffron); background: #fffcf6; }
+.sg-box[data-s="awaiting"] .sg-ico { box-shadow: inset 0 0 0 1.5px var(--g-saffron); }
+.sg-box[data-s="awaiting"] .sg-ico::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--g-saffron); }

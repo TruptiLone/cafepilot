@@ -20,6 +20,7 @@ import StepDetail from "../components/agent/StepDetail";
 import { employeeName } from "../components/agent/changes";
 import ChatPanel, { EXAMPLES } from "../components/muse/ChatPanel";
 import UpdatesBell from "../components/updates/UpdatesBell";
+import AtAGlance from "../components/muse/AtAGlance";
 import { demoDateLabel } from "../components/demoDate";
 import PlanMap from "../components/muse/PlanMap";
 import { type SpeechRecognitionLike, speechRecognition } from "../components/muse/speech";
@@ -106,6 +107,7 @@ function AgentPage() {
   const eventId = searchParams.get("event");
 
   const [events, setEvents] = useState<DetectedEvent[]>([]);
+  const [eventsLoaded, setEventsLoaded] = useState(false);
   const [run, setRun] = useState<AgentRun | null>(null);
   const [children, setChildren] = useState<Record<string, AgentRun>>({});
   const [runError, setRunError] = useState<string | null>(null);
@@ -129,7 +131,8 @@ function AgentPage() {
   const refreshEvents = useCallback(() => {
     listEvents()
       .then(setEvents)
-      .catch(() => setEvents([]));
+      .catch(() => setEvents([]))
+      .finally(() => setEventsLoaded(true));
   }, []);
 
   useEffect(refreshEvents, [refreshEvents]);
@@ -409,7 +412,7 @@ function AgentPage() {
 
         <ChatPanel hidden={tab !== "chat"} asOf={chatAsOf} onPlan={planFromChat} question={chatQuestion} />
 
-        <div className="mz-scroll" hidden={tab === "chat"}>
+        <div className={`mz-scroll${showPlan ? "" : " mz-scroll--home"}`} hidden={tab === "chat"}>
           {!showPlan && (
             <section className="mz-events" aria-label="Events Muse found">
               <header className="mz-greet">
@@ -486,6 +489,7 @@ function AgentPage() {
               </div>
             </section>
           )}
+          {!showPlan && <AtAGlance asOf={chatAsOf} ready={eventsLoaded} />}
 
           {showPlan && (
             <button type="button" className="mz-back" onClick={backToEvents}>

@@ -129,10 +129,20 @@ const marketEvent: DetectedEvent = {
 type Route = (url: string, init?: RequestInit) => Promise<Response> | undefined;
 
 /** Fetch stub: events always answer; `route` handles the rest. */
+const GLANCE = {
+  as_of: "2026-11-05T18:00:00-08:00",
+  running_low: [{ name: "Oat Milk", text: "1.25 L left", detail: "reorder at 3 L" }],
+  coming_in: [{ name: "Whole Milk", text: "12 L", detail: "Fri Nov 6, 6 AM · regular delivery" }],
+  working: [{ name: "Jordan Brooks", text: "7 AM–3 PM", detail: null }],
+  working_label: "Working tomorrow",
+  working_day: "Fri Nov 6",
+};
+
 function stubFetch(route: Route, events: DetectedEvent[] = []) {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.startsWith("/api/v1/agent/events?")) return jsonResponse(events);
+    if (url.startsWith("/api/v1/agent/glance?")) return jsonResponse(GLANCE);
     return route(url, init) ?? jsonResponse({ detail: "not found" }, 404);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -210,6 +220,24 @@ describe("AgentPage", () => {
 
     expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
     expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")).toBe(true);
+  });
+
+  it("shows At a glance on the Plan home only, from the café's records, at the demo time", async () => {
+    const fetchMock = stubFetch((url, init) => {
+      if (url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST") return jsonResponse({ planning: planning(), run });
+      return jsonResponse(run);
+    }, [{ ...marketEvent, knowledge_as_of: "2026-11-05T18:00:00-08:00" }]);
+    renderPage();
+    const glance = await screen.findByRole("complementary", { name: "At a glance" });
+    expect(within(within(glance).getByRole("region", { name: "Running low" })).getByText("1.25 L left")).toBeTruthy();
+    expect(within(glance).getByRole("region", { name: "Coming in" })).toBeTruthy();
+    expect(within(within(glance).getByRole("region", { name: "Working tomorrow, Fri Nov 6" })).getByText("Jordan Brooks")).toBeTruthy();
+    const asked = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.startsWith("/api/v1/agent/glance?"));
+    expect(new URL(asked as string, "http://x").searchParams.get("as_of")).toBe("2026-11-05T18:00:00-08:00");
+
+    await userEvent.click(screen.getByRole("button", { name: "Let's plan ✨" }));
+    expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "At a glance" })).toBeNull();  // not in the open plan view
   });
 
   it("opens the existing plan for an event that was already checked", async () => {

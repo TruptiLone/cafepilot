@@ -21,6 +21,7 @@ from backend.modules.agent.planner import (
 from backend.models.cafe import Cafe
 from backend.modules.agent.ai_calls import link_run, recent as recent_ai_calls
 from backend.modules.agent.updates import updates as cafe_updates
+from backend.modules.agent.glance import glance as cafe_glance
 from backend.modules.agent.chat import ChatTimeoutError, answer as chat_answer, create_chat_client
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
 from backend.modules.agent.status import CafeStatus, cafe_status, event_id_for_run, event_plan
@@ -500,6 +501,38 @@ def read_cafe_status(cafe_id: str = Query("CAFE001"), database_session: Session 
     database_session.commit()
     try:
         return cafe_status(database_session, cafe_id)
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
+
+
+class GlanceRow(BaseModel):
+    name: str
+    text: str
+    detail: str | None = None
+
+
+class GlanceOut(BaseModel):
+    as_of: str
+    running_low: list[GlanceRow]
+    coming_in: list[GlanceRow]
+    working: list[GlanceRow]
+    working_label: str
+    working_day: str
+
+
+@router.get("/glance", response_model=GlanceOut)
+def read_glance(
+    cafe_id: str = Query("CAFE001"),
+    as_of: datetime | None = Query(None, description="Reference time (with offset); defaults to now"),
+    database_session: Session = Depends(get_db),
+) -> GlanceOut:
+    """At a glance on the Plan home: below reorder point, next deliveries, who's working. Read-only."""
+    if as_of is not None and as_of.utcoffset() is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="as_of must include a timezone")
+    settle_due(database_session, cafe_id=cafe_id)
+    database_session.commit()
+    try:
+        return GlanceOut(**cafe_glance(database_session, cafe_id, as_of or datetime.now().astimezone()))
     except LookupError as error:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
 

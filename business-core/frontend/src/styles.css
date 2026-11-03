@@ -4251,3 +4251,64 @@ body { background: var(--g-bg); }
 .mz-cmd__bar input { font-size: 16px; }
 .mz-replan { font-size: 16px; }
 .updates-item__title { font-size: 14.5px; }
+
+/* ---------- Ask CaféPilot: one 960 px column, one type scale ---------- */
+/* Header, tabs, content and input share the column; their borders still run edge to edge. */
+.mz { --mz-col: 960px; --mz-gutter: 24px; }
+.mz-pane-head, .mz-tabs, .mz-scroll, .mz-cmd, .mz-cmd:has(.mz-chat__col) {
+  padding-left: max(var(--mz-gutter), calc((100% - var(--mz-col)) / 2));
+  padding-right: max(var(--mz-gutter), calc((100% - var(--mz-col)) / 2));
+}
+.mz-scroll > *, .mz-chat__col, .mz-cmd__bar, .mz-cmd > .mz-audit { max-width: none; }
+.mz-tabs { gap: 8px; }
+.mz .mz-tab:first-child { padding-left: 0; }
+
+/* Type scale: nav 15 · tabs 16 · card titles 18 · card text 16 · labels 13 · footers 13 (never below 12) */
+.navigation__link { font-size: 15px; }
+.sidebar__footer, .sidebar__demo-date { font-size: 13px; }
+.sidebar__footer strong { font-size: 14px; }
+.mz .mz-tab { font-size: 16px; padding: 12px 12px 13px; }
+.mz-tab__n { font-size: 12px; padding: 1px 7px; }
+.mz-label { font-size: 13px; }
+.mz-muted, .mz-live, .mz-pill, .mz-chip, .mz-tag, .mz-a__meta { font-size: 13px; }
+.mz-ev__title { font-size: 18px; }
+.mz-ev__pitch, .mz-muse-line, .mz-a__reply, .mz-short ul, .mz-a, .mz-q, .mz-chat .mz-purpose, .mz-greet__sub, .mz-act__title { font-size: 16px; }
+.mz-ev__meta, .mz-a__rows, .mz .mz-chip-btn, .mz .mz-a__more, .mz .mz-scroll > .mz-back, .mz-ev__muse { font-size: 15px; }
+.mz-foot, .mz-audit, .mz-a__note { font-size: 13px; }
+.mz .mz-btn { font-size: 14px; }
+.mz .mz-btn--lg { font-size: 16px; }
+.sg-elabel, .sg-trail li { font-size: 12px; }  /* plan map: only the tiniest labels move up; layout unchanged */
+.updates-sim, .updates-outcome, .updates-group { font-size: 12px; }
+.updates-item__meta { font-size: 13px; }
+
+/* Roomier cards, same warm style */
+.mz-ev { padding: 22px 24px; gap: 20px; }
+.mz-a { padding: 16px 20px; }
+.mz-short { padding: 18px 22px; }
+
+/* Plan home: events, and "At a glance" on the right (below the events on narrower screens) */
+.mz-scroll--home { display: grid; grid-template-columns: minmax(0, 1fr) 280px; column-gap: 28px; row-gap: 14px; align-content: start; }
+.mz-scroll--home > * { grid-column: 1 / -1; align-self: start; }
+.mz-scroll--home > .mz-events { grid-column: 1; }
+.mz-scroll--home > .mz-glance { grid-column: 2; grid-row: 1; }
+.mz-glance { display: flex; flex-direction: column; gap: 12px; padding-top: 6px; }
+.mz-glance__card { padding: 16px 18px; border-radius: 16px; background: #fff; }
+.mz-glance__card.is-warn { border-color: #ebd3a6; background: #fffbf3; }
+.mz-glance__title { font-size: 18px; font-weight: 600; margin-bottom: 8px !important; }
+.mz-glance__card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.mz-glance__card li { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 10px; font-size: 15px; line-height: 1.35; }
+.mz-glance__name { font-weight: 500; color: var(--g-ink); }
+.mz-glance__text { color: var(--g-ink); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mz-glance__detail { grid-column: 1 / -1; font-size: 13px; color: var(--g-ink-3); }
+.mz-glance__empty { font-size: 15px; color: var(--g-ink-3); }
+@media (max-width: 1100px) {
+  .mz-scroll--home { grid-template-columns: minmax(0, 1fr); }
+  .mz-scroll--home > .mz-glance { grid-column: 1; grid-row: auto; }
+}
+@media (max-width: 860px) {
+  .mz { --mz-gutter: 16px; }
+  .mz-tabs { padding-left: 16px; padding-right: 16px; }
+  .mz-ev { padding: 18px; }
+}
+.mz-glance__sub { display: block; font-size: 13px; font-weight: 500; color: var(--g-ink-3); margin-top: 1px; }
+.sidebar__demo-date { white-space: nowrap; }

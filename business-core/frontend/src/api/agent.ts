@@ -321,3 +321,20 @@ export function replanStep(runId: string, nodeId: string): Promise<StartRunRespo
     { method: "POST", headers: { Accept: "application/json" } },
   );
 }
+
+export type GlanceRow = { name: string; text: string; detail: string | null };
+
+/** At a glance on the Plan home: below reorder point, next deliveries, who's working (all looked up). */
+export type Glance = {
+  as_of: string;
+  running_low: GlanceRow[];
+  coming_in: GlanceRow[];
+  working: GlanceRow[];
+  working_label: string;
+  working_day: string;
+};
+
+export function getGlance(asOf?: string, signal?: AbortSignal): Promise<Glance> {
+  const query = new URLSearchParams({ cafe_id: ACTIVE_CAFE_ID, ...(asOf ? { as_of: asOf } : {}) });
+  return requestJson<Glance>(`/api/v1/agent/glance?${query}`, { signal });
+}

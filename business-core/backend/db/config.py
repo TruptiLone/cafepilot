@@ -25,6 +25,17 @@ class Settings(BaseSettings):
     model_api_base_url: str = "https://api.meta.ai/v1"
     planner_model: str = "muse-wonder-1.0"
     vision_model: str = "muse-spark-1.3"
+    image_model: str = "muse-image-1.0"
+    media_upload_token: SecretStr | None = None
+    media_storage_dir: Path = Path(__file__).resolve().parents[2] / "var" / "media"
+    media_max_upload_bytes: int = 100 * 1024 * 1024
+    video_storage_dir: Path = Path(__file__).resolve().parents[2] / "uploads" / "videos"
+    video_max_seconds: int = 30
+    video_max_frames: int = 30
+    ffmpeg_bin: str = "ffmpeg"
+    ffprobe_bin: str = "ffprobe"
+    barista_shared_photos_dir: Path = Path.home() / "Pictures" / "BaristaShared"
+    barista_photo_port: int = 8004
 
     @property
     def database_url(self) -> URL:

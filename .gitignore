@@ -26,3 +26,5 @@ BaristaGlassesAgent/Configuration/Local.xcconfig
 **/xcuserdata/
 *.xcuserstate
 DerivedData/
+# Glasses recordings and their extracted frames (real captures; never commit)
+business-core/uploads/

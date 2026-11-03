@@ -6,6 +6,12 @@ from backend.modules.agent import ai_calls
 
 
 @pytest.fixture(autouse=True)
+def no_folder_monitor(monkeypatch):
+    """The glasses receiver app must not watch the real ~/Pictures/BaristaShared during tests."""
+    monkeypatch.setenv("BARISTA_PAIR_MONITOR", "0")
+
+
+@pytest.fixture(autouse=True)
 def ai_call_rows(monkeypatch):
     """ai_calls rows written during a test go to one connection that is rolled back afterwards.
 

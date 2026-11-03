@@ -35,10 +35,14 @@ class Model:
         pass
 
 
+NO_FFMPEG = "Video integration tests require the existing ffmpeg/ffprobe executables."
+needs_ffmpeg = pytest.mark.skipif(not shutil.which("ffmpeg") or not shutil.which("ffprobe"), reason=NO_FFMPEG)
+
+
 @pytest.fixture(scope="module")
 def sample(tmp_path_factory):
     if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
-        pytest.skip("Video integration tests require the existing ffmpeg/ffprobe executables.")
+        pytest.skip(NO_FFMPEG)
     path = tmp_path_factory.mktemp("video-sample") / "sample.mp4"
     subprocess.run(["ffmpeg", "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
                     "color=c=white:s=48x64:r=15", "-t", "2", "-an", "-c:v", "libx264",
@@ -147,6 +151,7 @@ def test_oversized_upload_not_published(service, sample):
     assert not settings.video_storage_dir.exists()
 
 
+@needs_ffmpeg  # without ffprobe the API reports "ffprobe is not installed", not a decoding failure
 def test_undecodable_mp4_reports_failure_and_retains_file(service):
     client, settings, model = service
     body = b"\x00\x00\x00\x18ftypisom" + b"broken"

@@ -518,12 +518,29 @@ describe("AgentPage", () => {
     expect(await screen.findByText("Bay Dairy Co. declined. Muse is looking for another supplier… · Muse Spark 1.3")).toBeTruthy();
   });
 
-  it("has two tabs: Plan and Ask", async () => {
+  it("has three tabs: Plan, Ask and Posts", async () => {
     mockApi();
     renderPage();
     const tabs = within(await screen.findByRole("navigation", { name: "Muse" }));
-    expect(tabs.getAllByRole("button").map((b) => b.textContent?.replace(/\d+$/, "").trim())).toEqual(["Plan", "Ask"]);
+    expect(tabs.getAllByRole("button").map((b) => b.textContent?.replace(/\d+$/, "").trim())).toEqual(["Plan", "Ask", "Posts"]);
     expect(tabs.queryByRole("link")).toBeNull();  // Deliveries is gone; Receive delivery stays in the sidebar
+  });
+
+  it("offers Make a post only for upcoming events and opens Posts with that event", async () => {
+    const asOf = "2026-11-05T18:00:00-08:00";
+    const upcoming = { ...marketEvent, knowledge_as_of: asOf };
+    const past = { ...marketEvent, event_id: "EVT_HALLOWEEN", title: "Halloween", starts_at: "2026-10-31T14:00:00-07:00",
+      ends_at: "2026-10-31T17:00:00-07:00", knowledge_as_of: asOf };
+    stubFetch((url) => (url === "/api/v1/agent/promo-posts" ? jsonResponse([]) : undefined), [upcoming, past]);
+    renderPage();
+    const cards = await screen.findAllByRole("article");
+    const card = (title: string) => cards.find((c) => within(c).queryByRole("heading", { name: title }))!;
+    expect(within(card("Halloween")).queryByRole("button", { name: "Make a post" })).toBeNull();
+    await userEvent.click(within(card(upcoming.title)).getByRole("button", { name: "Make a post" }));
+    const posts = await screen.findByRole("region", { name: "Make a post" });
+    expect((within(posts).getByRole("combobox") as HTMLSelectElement).value).toBe(upcoming.event_id);
+    expect(within(posts).queryByRole("option", { name: /Halloween/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Posts" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("chat asks with the demo event's reference time, and Plan it starts a plan", async () => {

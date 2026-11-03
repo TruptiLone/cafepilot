@@ -20,3 +20,9 @@ node_modules/
 .DS_Store
 # Local run data: agent run logs, model-call log, benchmarks (never commit; this repo is public)
 var/
+
+# BaristaGlassesAgent (iOS): machine-local credentials and Xcode per-user/build files
+BaristaGlassesAgent/Configuration/Local.xcconfig
+**/xcuserdata/
+*.xcuserstate
+DerivedData/

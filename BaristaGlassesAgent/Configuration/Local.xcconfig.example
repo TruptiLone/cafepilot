@@ -1,0 +1,13 @@
+// Copy to Local.xcconfig (ignored by Git).
+// Developer Mode: use 0 and leave the client token empty.
+META_APP_ID = 0
+CLIENT_TOKEN =
+// Local Mac receiver token from business-core/.env (never commit the real value).
+PHOTO_SYNC_TOKEN =
+// Use your Apple Developer team ID from Xcode Signing & Capabilities.
+DEVELOPMENT_TEAM = YOUR_TEAM_ID
+
+// Debug currently uses Bluetooth-only Stage 2 setup for Personal Teams.
+// For a supported team, enable the full Wi-Fi entitlement in the later stage:
+// CODE_SIGN_ENTITLEMENTS = BaristaGlassesAgent/BaristaGlassesAgent.entitlements
+// WIFI_STREAMING_CONFIGURED = YES

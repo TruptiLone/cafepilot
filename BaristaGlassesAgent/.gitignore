@@ -1,0 +1,5 @@
+# Machine-local Meta credentials and signing overrides.
+Configuration/Local.xcconfig
+*.xcuserstate
+xcuserdata/
+DerivedData/

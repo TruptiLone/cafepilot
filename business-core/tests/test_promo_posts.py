@@ -227,6 +227,7 @@ def test_an_image_that_works_on_the_retry_is_used(api, ai_activity) -> None:
     assert {r["outcome"] for r in ai_activity if "background" in r["request"]} == {"retried"}
     assert {r["outcome"] for r in ai_activity if "caption" in r["request"]} == {"ok"}  # every call is in AI activity
     assert {r["purpose"] for r in ai_activity} == {"other"}
+    assert {r["cafe_id"] for r in ai_activity} == {C}  # listed under the café in AI activity
 
 
 # ---------- the endpoint: offer limits, drafts only, no secrets ----------

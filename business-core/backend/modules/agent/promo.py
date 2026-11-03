@@ -110,6 +110,7 @@ class Facts:
     location: str | None
     cafe_name: str
     offer: str
+    cafe_id: str | None = None  # so AI activity lists the calls under the café
 
     @property
     def date_line(self) -> str:  # "Sunday, November 8"
@@ -153,7 +154,7 @@ def facts_for(session: Session, event_id: str, offer: str, *, allow_past: bool =
     tz = ZoneInfo(cafe.timezone if cafe else "UTC")
     return Facts(event_id=event.event_id, title=event.name, category=event.event_type,
                  starts=event.starts_at.astimezone(tz), ends=event.ends_at.astimezone(tz), location=event.location,
-                 cafe_name=cafe.name if cafe else "Our café", offer=offer)
+                 cafe_name=cafe.name if cafe else "Our café", offer=offer, cafe_id=event.cafe_id)
 
 
 # ---------------------------------------------------------------------------
@@ -258,11 +259,11 @@ def write_caption(client: Any, model: str, facts: Facts, variant: int) -> Captio
                                        messages=[{"role": "user", "content": prompt}])
     except Exception as error:
         latency = getattr(error, "latency_ms", 0)
-        record_ai_call(cafe_id=None, purpose="other", model=model, latency_ms=latency, request=summary,
+        record_ai_call(cafe_id=facts.cafe_id, purpose="other", model=model, latency_ms=latency, request=summary,
                        outcome="timeout" if is_timeout(error) else "failed", error=f"{type(error).__name__}: {error}")
         caption, tags = code_caption(facts)
         return CaptionResult(caption, tags, "code", f"Muse didn't answer ({type(error).__name__})", None, latency)
-    record_ai_call(cafe_id=None, purpose="other", model=model, latency_ms=latency, request=summary, outcome="ok")
+    record_ai_call(cafe_id=facts.cafe_id, purpose="other", model=model, latency_ms=latency, request=summary, outcome="ok")
     text = response.choices[0].message.content or ""
     match = _FENCE.match(text)
     try:
@@ -319,13 +320,13 @@ def muse_background(client: Any, model: str, facts: Facts, variant: int) -> Back
                                                 "enable_shell": False}})
             total += latency
             picture = Image.open(io.BytesIO(base64.b64decode(response.data[0].b64_json))).convert("RGB")
-            record_ai_call(cafe_id=None, purpose="other", model=model, latency_ms=total, request=summary,
+            record_ai_call(cafe_id=facts.cafe_id, purpose="other", model=model, latency_ms=total, request=summary,
                            outcome="ok" if attempt == 1 else "retried", attempts=attempt)
             return BackgroundResult(picture, "muse-image", None, model, total, attempt)
         except Exception as error:  # timeout, API error or an unreadable image: retry once, then draw
             total += getattr(error, "latency_ms", 0)
             last_error = error
-    record_ai_call(cafe_id=None, purpose="other", model=model, latency_ms=total, request=summary,
+    record_ai_call(cafe_id=facts.cafe_id, purpose="other", model=model, latency_ms=total, request=summary,
                    outcome="timeout" if last_error is not None and is_timeout(last_error) else "failed",
                    attempts=IMAGE_TRIES, error=f"{type(last_error).__name__}: {last_error}")
     note = f"Muse Image didn't deliver after {IMAGE_TRIES} tries ({type(last_error).__name__}); drawn by code"

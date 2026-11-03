@@ -281,3 +281,23 @@ def test_no_secrets_in_responses_or_files(api, folders) -> None:
     for text in (body, files, c.get("/api/v1/agent/promo-posts").text):
         assert not any(s in text for s in secrets)
         assert not re.search(r"sk-[A-Za-z0-9]{8,}|Bearer\s|api[_-]?key", text, re.IGNORECASE)
+
+
+def test_the_committed_samples_are_small_labelled_drafts(api, monkeypatch) -> None:
+    monkeypatch.setattr(promo, "SAMPLE_DIR", Path(__file__).resolve().parents[1] / "demo-assets" / "promo-samples")
+    client, _ = api
+    c = client(Muse())
+    listed = c.get("/api/v1/agent/promo-posts").json()
+    samples = [d for d in listed if d["sample"]]
+    assert {d["event_title"] for d in samples} == {"Halloween", "Thanksgiving", "Holiday Lights & Craft Fair",
+                                                   "Santa Clara Farmers Market"}
+    for d in samples:
+        assert d["status"] == "draft" and d["label"] == "AI-generated draft (demo)"
+        assert not re.search(r"\bpublished\b|\bposted\b", json.dumps(d), re.IGNORECASE)
+        path = promo.SAMPLE_DIR / f"{d['id'].lower()}.jpg"
+        assert path.stat().st_size < 300 * 1024
+        image = c.get(d["image_url"])
+        assert image.status_code == 200 and Image.open(io.BytesIO(image.content)).size == (1080, 1080)
+        facts = promo.facts_for(api[1], d["event_id"], d["offer_text"], allow_past=True)
+        if d["caption_source"] == "muse":
+            assert promo.check_caption(d["caption"], d["hashtags"], facts) == []

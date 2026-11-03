@@ -52,7 +52,7 @@ MARGIN = 72
 VARIANTS = 2
 IMAGE_TIMEOUT_S = 45
 IMAGE_TRIES = 2  # one retry
-CAPTION_TIMEOUT_S = 30
+CAPTION_TIMEOUT_S = 45  # 8 calls at once (4 captions + 4 images) took Spark up to 30 s
 SAMPLE_LABEL = "AI-generated draft (demo)"
 DRAFT_LABEL = "AI-generated draft"
 

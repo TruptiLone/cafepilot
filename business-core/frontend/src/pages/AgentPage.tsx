@@ -17,7 +17,9 @@ import {
   startRun,
 } from "../api/agent";
 import StepDetail from "../components/agent/StepDetail";
+import { employeeName } from "../components/agent/changes";
 import ChatPanel, { EXAMPLES } from "../components/muse/ChatPanel";
+import UpdatesBell from "../components/updates/UpdatesBell";
 import PlanMap from "../components/muse/PlanMap";
 import { type SpeechRecognitionLike, speechRecognition } from "../components/muse/speech";
 import StoryGraph from "../components/muse/StoryGraph";
@@ -37,7 +39,6 @@ const PLAN_STATE: Record<PlanState, [string, string]> = {
 };
 
 type View = "owner" | "technical";
-type Toast = { id: number; tone: "good" | "bad" | "wait"; who: string; title: string; text: string };
 
 function errorMessage(error: unknown): string {
   return error instanceof AgentApiError ? error.message : "Something went wrong. Try again.";
@@ -98,8 +99,6 @@ function signature(runs: (AgentRun | null | undefined)[]) {
     .join("#");
 }
 
-const FINAL_STAGES = /^(Confirmed|Rejected|Accepted|Declined)/;
-
 function AgentPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const runId = searchParams.get("run");
@@ -122,11 +121,9 @@ function AgentPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [replanning, setReplanning] = useState<string | null>(null);
   const [reveal, setReveal] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
   const [listening, setListening] = useState(false);
   const recognition = useRef<SpeechRecognitionLike | null>(null);
   const attempted = useRef(new Set<string>());
-  const stages = useRef(new Map<string, string>());
 
   const refreshEvents = useCallback(() => {
     listEvents()
@@ -196,35 +193,6 @@ function AgentPage() {
   useEffect(() => {
     if (sig) refreshEvents();
   }, [sig, refreshEvents]);
-
-  // Supplier and staff replies become notifications.
-  useEffect(() => {
-    const all = [run, ...childIds.map((id) => children[id])].filter(Boolean) as AgentRun[];
-    const fresh: Toast[] = [];
-    for (const r of all) {
-      for (const n of r.nodes) {
-        const last = n.lifecycle?.[n.lifecycle.length - 1];
-        if (!last) continue;
-        const key = `${r.run_id}:${n.node_id}`;
-        const before = stages.current.get(key);
-        stages.current.set(key, last.stage);
-        if (before !== undefined && before !== last.stage && FINAL_STAGES.test(last.stage)) {
-          const bad = /Rejected|Declined/.test(last.stage);
-          fresh.push({
-            id: Date.now() + fresh.length,
-            tone: bad ? "bad" : "good",
-            who: n.action === "schedule_shift" ? "Staff" : "Supplier",
-            title: n.acknowledgement?.headline ?? last.stage,
-            text: n.acknowledgement?.details[0] ?? "",
-          });
-        }
-      }
-    }
-    if (fresh.length) {
-      setToasts((t) => [...t, ...fresh]);
-      for (const toast of fresh) window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== toast.id)), 7000);
-    }
-  }, [run, children, childIds]);
 
   // When a supplier says no (or someone declines), Muse looks for another way right away.
   // It only proposes: the new change still waits for the owner's OK.
@@ -387,6 +355,9 @@ function AgentPage() {
         ? ["waiting", `Waiting on ${waitingOn.join(" and ")}`]
         : ["watching", "Watching for events"];
   const showPlan = !!run || !!planningFor || !!rejectedPlanning;
+  const replanningStep = replanning ? run?.nodes.find((n) => n.node_id === replanning) : undefined;
+  const replanBanner =
+    run && replanningStep ? replanLine(replanningStep, run, modelName(selectedEvent?.planner_model ?? run.model)) : null;
 
   return (
     <section className="page page--muse mz" aria-label="Ask CaféPilot">
@@ -410,6 +381,7 @@ function AgentPage() {
             <i />
             <span>{live[1]}</span>
           </div>
+          <UpdatesBell className="updates--pane" />
         </header>
 
         <nav className="mz-tabs" aria-label="Muse">
@@ -569,6 +541,13 @@ function AgentPage() {
                 </div>
               </div>
 
+              {replanBanner && (
+                <p className="mz-replan" role="status">
+                  <i aria-hidden="true" />
+                  {replanBanner}
+                </p>
+              )}
+
               <div className="mz-card mz-graph-card">
                 {view === "owner" ? (
                   <StoryGraph story={story} runs={runsById} busy={busy} reveal={reveal} onDecide={onDecide} onOpenRun={openRun} />
@@ -653,19 +632,19 @@ function AgentPage() {
         </form>
       </div>
 
-      <div className="mz-toasts" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className={`mz-toast is-${t.tone}`} role="status">
-            <span className="mz-toast__who">{t.who}</span>
-            <div>
-              <div className="mz-toast__title">{t.title}</div>
-              {t.text && <div className="mz-toast__text">{t.text}</div>}
-            </div>
-          </div>
-        ))}
-      </div>
     </section>
   );
+}
+
+/** Shown while Muse replans, until the new plan is ready (the model call itself is not delayed). */
+function replanLine(step: RunStep, run: AgentRun, model: string): string {
+  if (step.action === "schedule_shift") {
+    const args = (step.resolved_args ?? step.args) as Record<string, unknown>;
+    const who = employeeName(run, String(args.employee_id)).split(" ")[0];
+    return `${who} declined. Muse is looking for someone else… · ${model}`;
+  }
+  const supplier = String((step.result as Record<string, unknown> | null)?.supplier_name ?? "The supplier");
+  return `${supplier} declined. Muse is looking for another supplier… · ${model}`;
 }
 
 /** "in 27 s", or "after 2 attempts; the last took 27 s": latency_ms covers the final model call only. */

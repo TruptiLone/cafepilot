@@ -20,6 +20,7 @@ from backend.modules.agent.planner import (
 )
 from backend.models.cafe import Cafe
 from backend.modules.agent.ai_calls import link_run, recent as recent_ai_calls
+from backend.modules.agent.updates import updates as cafe_updates
 from backend.modules.agent.chat import ChatTimeoutError, answer as chat_answer, create_chat_client
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
 from backend.modules.agent.status import CafeStatus, cafe_status, event_id_for_run, event_plan
@@ -396,6 +397,36 @@ def chat(request: ChatRequest, database_session: Session = Depends(get_db), clie
         raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(error)) from error
     except ModelCallError as error:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(error)) from error
+
+
+class UpdateOut(BaseModel):
+    id: str
+    kind: str
+    group: Literal["staff", "orders", "plans"]
+    at: str
+    title: str
+    detail: str | None
+    simulated: bool
+    run_id: str | None
+    model: str | None
+
+
+@router.get("/updates", response_model=list[UpdateOut])
+def list_updates(
+    cafe_id: str = Query("CAFE001"),
+    since: datetime | None = Query(None, description="Only changes after this time (with UTC offset)."),
+    limit: int = Query(50, ge=1, le=200),
+    database_session: Session = Depends(get_db),
+) -> list[UpdateOut]:
+    """Status changes for the Updates bell, newest first. Simulated replies that are due are settled first."""
+    if since is not None and since.tzinfo is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="since must include a UTC offset")
+    settle_due(database_session, cafe_id=cafe_id)
+    database_session.commit()
+    try:
+        return [UpdateOut(**u) for u in cafe_updates(database_session, cafe_id, since, limit)]
+    except LookupError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cafe not found") from error
 
 
 class AICallOut(BaseModel):

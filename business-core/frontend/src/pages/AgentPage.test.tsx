@@ -471,6 +471,25 @@ describe("AgentPage", () => {
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/v1/agent/chat")).toHaveLength(1);  // asked once
   });
 
+  it("while Muse replans, says who declined and which model is looking", async () => {
+    const rejected: AgentRun = {
+      ...run, status: "completed", waiting_on: [],
+      nodes: [...run.nodes.slice(0, 3), {
+        ...run.nodes[3], action: "propose_supplier_order", status: "done",
+        resolved_args: { lines: [{ ingredient_id: "OAT_MILK", quantity: "6000", unit: "mL" }] },
+        result: { order_id: "po_1", supplier_name: "Bay Dairy Co." },
+        acknowledgement: { headline: "Bay Dairy Co. can't take this order", details: ["Out of oat milk."], caveat: null,
+          tone: "problem", next_step: "find_alternative" },
+      }],
+    };
+    stubFetch((url, init) => {
+      if (url.endsWith("/nodes/add_barista/replan") && init?.method === "POST") return new Promise<Response>(() => undefined);
+      return jsonResponse(rejected);
+    });
+    renderPage("/agent?run=RUN-1");
+    expect(await screen.findByText("Bay Dairy Co. declined. Muse is looking for another supplier… · Muse Spark 1.3")).toBeTruthy();
+  });
+
   it("has two tabs: Plan and Ask", async () => {
     mockApi();
     renderPage();

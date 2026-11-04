@@ -132,7 +132,10 @@ type Route = (url: string, init?: RequestInit) => Promise<Response> | undefined;
 const GLANCE = {
   as_of: "2026-11-05T18:00:00-08:00",
   running_low: [{ name: "Oat Milk", text: "1.25 L left", detail: "reorder at 3 L" }],
-  coming_in: [{ name: "Whole Milk", text: "12 L", detail: "Fri Nov 6, 6 AM · regular delivery" }],
+  coming_in: [
+    { name: "Whole Milk", text: "12 L", detail: "Fri Nov 6, 6 AM · regular delivery" },
+    { name: "Butter Croissant", text: "10", detail: "Sun Nov 8, 6 AM · Willow Ridge Dairy Supply PO-123, partially_received" },
+  ],
   working: [{ name: "Jordan Brooks", text: "7 AM–3 PM", detail: null }],
   working_label: "Working tomorrow",
   working_day: "Fri Nov 6",
@@ -216,7 +219,7 @@ describe("AgentPage", () => {
     // +35 typical extra drinks (from the event's history) reads as a crowd
     expect(within(events).getByText("Sunday's market usually brings a crowd. Want me to get ready?")).toBeTruthy();
     expect(within(events).getByText("Sun, Nov 8 · 8 AM–2 PM · 0.2 miles away")).toBeTruthy();
-    await userEvent.click(within(events).getByRole("button", { name: "Let's plan ✨" }));
+    await userEvent.click(within(events).getByRole("button", { name: "Let's plan" }));
 
     expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
     expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")).toBe(true);
@@ -230,12 +233,14 @@ describe("AgentPage", () => {
     renderPage();
     const glance = await screen.findByRole("complementary", { name: "At a glance" });
     expect(within(within(glance).getByRole("region", { name: "Running low" })).getByText("1.25 L left")).toBeTruthy();
-    expect(within(glance).getByRole("region", { name: "Coming in" })).toBeTruthy();
+    const coming = within(glance).getByRole("region", { name: "Coming in" });
+    expect(within(coming).getByText("Sun Nov 8, 6 AM · Willow Ridge Dairy Supply PO-123, Partly received")).toBeTruthy();
+    expect(coming.textContent).not.toContain("_");
     expect(within(within(glance).getByRole("region", { name: "Working tomorrow, Fri Nov 6" })).getByText("Jordan Brooks")).toBeTruthy();
     const asked = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.startsWith("/api/v1/agent/glance?"));
     expect(new URL(asked as string, "http://x").searchParams.get("as_of")).toBe("2026-11-05T18:00:00-08:00");
 
-    await userEvent.click(screen.getByRole("button", { name: "Let's plan ✨" }));
+    await userEvent.click(screen.getByRole("button", { name: "Let's plan" }));
     expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
     expect(screen.queryByRole("complementary", { name: "At a glance" })).toBeNull();  // not in the open plan view
   });

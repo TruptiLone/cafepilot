@@ -485,7 +485,7 @@ function AgentPage() {
                           disabled={planningFor !== null}
                           onClick={() => plan(() => startEventRun(event.event_id), event.event_id)}
                         >
-                          Let's plan ✨
+                          Let's plan
                         </button>
                       ) : (
                         <button type="button" className="mz-btn mz-btn--ghost mz-btn--lg" onClick={() => openEvent(event.event_id)}>

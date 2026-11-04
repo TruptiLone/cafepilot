@@ -25,7 +25,14 @@ from backend.modules.agent.updates import updates as cafe_updates
 from backend.modules.agent.glance import glance as cafe_glance
 from backend.modules.agent import promo
 from backend.modules.agent.chat import ChatTimeoutError, answer as chat_answer, create_chat_client
-from backend.modules.agent.events import DetectedEvent, detected_events, get_event
+from backend.modules.agent.events import (
+    DetectedEvent,
+    PastEvent,
+    detected_events,
+    discover_demo_events,
+    get_event,
+    past_events,
+)
 from backend.modules.agent.status import CafeStatus, cafe_status, event_id_for_run, event_plan
 from backend.modules.agent.summaries import summarize_run
 from backend.modules.agent.acknowledgements import Acknowledgement, Stage, change_statuses
@@ -546,6 +553,29 @@ def list_events(cafe_id: str = Query("CAFE001"), database_session: Session = Dep
     for event in events:
         event.run_id, event.latest_run_id, event.plan_state = event_plan(database_session, event.event_id)
     return events
+
+
+@router.get("/events/past", response_model=list[PastEvent])
+def list_past_events(
+    cafe_id: str = Query("CAFE001"),
+    as_of: datetime | None = Query(None, description="The (demo) clock; events that ended before it, newest first."),
+    limit: int = Query(5, ge=1, le=20),
+    database_session: Session = Depends(get_db),
+) -> list[PastEvent]:
+    if as_of is not None and as_of.tzinfo is None:
+        raise HTTPException(status_code=422, detail="as_of needs a UTC offset")
+    return past_events(database_session, cafe_id, as_of or datetime.now().astimezone(), limit)
+
+
+@router.post("/events/discover-demo", response_model=list[DetectedEvent])
+def discover_demo(cafe_id: str = Query("CAFE001"), database_session: Session = Depends(get_db)) -> list[DetectedEvent]:
+    """Demo only, scripted (not live web monitoring): reveal the events a fresh reset hid, once.
+    Returns the newly found events; empty when there is nothing new."""
+    found = discover_demo_events(database_session, cafe_id, datetime.now().astimezone())
+    database_session.commit()
+    for event in found:
+        event.run_id, event.latest_run_id, event.plan_state = event_plan(database_session, event.event_id)
+    return found
 
 
 @router.get("/events/{event_id}", response_model=DetectedEvent)

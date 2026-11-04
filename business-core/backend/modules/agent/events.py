@@ -114,6 +114,22 @@ def _describe(event: CafeEvent, demand: EventDemandResult, tz: ZoneInfo) -> tupl
     return expected, message, request
 
 
+class PastEvent(BaseModel):
+    event_id: str
+    title: str
+    category: str
+    starts_at: datetime
+    ends_at: datetime
+    note: str | None = Field(description="The calendar's short note, e.g. \"usually quieter\".")
+
+
+# Demo only. Event discovery in the demo is scripted, not live web monitoring: after a fresh reset the
+# Santa Clara Farmers Market waits (discovery_pending) until the owner's first question in Ask, when the
+# app calls POST /events/discover-demo and Muse "finds" it. Planning and demand use the same code as
+# for any other event.
+DEMO_DISCOVERY_EVENT_IDS = ("EVT_SC_FARMERS_MARKET_20261108",)
+
+
 def _to_detected(session: Session, event: CafeEvent, tz: ZoneInfo, as_of: datetime) -> DetectedEvent:
     demand = estimate_event_demand(
         session, EventDemandInput(cafe_id=event.cafe_id, event_id=event.event_id, as_of=as_of)
@@ -151,15 +167,52 @@ def detected_events(session: Session, cafe_id: str) -> list[DetectedEvent]:
     tz = ZoneInfo(cafe.timezone)
     rows = session.scalars(
         select(CafeEvent)
-        .where(CafeEvent.cafe_id == cafe_id, CafeEvent.status == "upcoming")
+        .where(CafeEvent.cafe_id == cafe_id, CafeEvent.status == "upcoming", CafeEvent.discovery_pending.is_(False))
         .order_by(CafeEvent.starts_at)
     )
-    return [_to_detected(session, event, tz, _knowledge_as_of(event)) for event in rows]
+    # Upcoming means after the (demo) clock, not the real one.
+    return [_to_detected(session, event, tz, _knowledge_as_of(event)) for event in rows
+            if event.ends_at > _knowledge_as_of(event)]
+
+
+def past_events(session: Session, cafe_id: str, as_of: datetime, limit: int = 5) -> list[PastEvent]:
+    """The most recent events before ``as_of`` (the demo clock), newest first. Read-only."""
+    rows = session.scalars(
+        select(CafeEvent)
+        .where(CafeEvent.cafe_id == cafe_id, CafeEvent.status != "cancelled", CafeEvent.ends_at <= as_of)
+        .order_by(CafeEvent.starts_at.desc())
+        .limit(limit)
+    )
+    return [PastEvent(event_id=e.event_id, title=e.name, category=e.event_type, starts_at=e.starts_at,
+                      ends_at=e.ends_at, note=e.notes) for e in rows]
+
+
+def hide_demo_discovery(session: Session, cafe_id: str) -> int:
+    """Demo reset: the market goes back to waiting for its scripted discovery."""
+    rows = session.scalars(select(CafeEvent).where(CafeEvent.cafe_id == cafe_id,
+                                                   CafeEvent.event_id.in_(DEMO_DISCOVERY_EVENT_IDS)))
+    hidden = 0
+    for event in rows:
+        event.discovery_pending, event.discovered_at = True, None
+        hidden += 1
+    session.flush()
+    return hidden
+
+
+def discover_demo_events(session: Session, cafe_id: str, now: datetime) -> list[DetectedEvent]:
+    """The scripted discovery: events still waiting become visible once; later calls find nothing new."""
+    rows = list(session.scalars(select(CafeEvent).where(CafeEvent.cafe_id == cafe_id,
+                                                        CafeEvent.discovery_pending.is_(True))))
+    for event in rows:
+        event.discovery_pending, event.discovered_at = False, now
+    session.flush()
+    found = {e.event_id for e in rows}
+    return [e for e in detected_events(session, cafe_id) if e.event_id in found]
 
 
 def get_event(session: Session, event_id: str) -> DetectedEvent | None:
     event = session.get(CafeEvent, event_id)
-    if event is None or event.status != "upcoming":
+    if event is None or event.status != "upcoming" or event.discovery_pending:
         return None
     cafe = session.get(Cafe, event.cafe_id)
     tz = ZoneInfo(cafe.timezone if cafe else "UTC")

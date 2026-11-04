@@ -14,34 +14,12 @@ import {
   sendCreditRequest,
   startReceipt,
   type ImageSource,
-  type LineStatus,
   type OpenOrder,
   type Received,
   type Receipt,
   type ReceiptLine,
 } from "../api/receiving";
-
-const STATUS_LABEL: Record<LineStatus, string> = {
-  match: "Matches",
-  needs_count: "Please count",
-  short: "Short",
-  short_shipped: "Back-ordered",
-  over: "Too many",
-  not_on_order: "Not ordered",
-  missing: "Missing",
-  damaged: "Damaged",
-};
-
-const STATUS_TONE: Record<LineStatus, "good" | "ask" | "bad"> = {
-  match: "good",
-  needs_count: "ask",
-  short: "bad",
-  short_shipped: "bad",
-  over: "bad",
-  not_on_order: "bad",
-  missing: "bad",
-  damaged: "bad",
-};
+import { lineView, seenSummary, tally } from "./receivingView";
 
 function when(iso: string | null) {
   if (!iso) return "";
@@ -55,12 +33,6 @@ function when(iso: string | null) {
   });
 }
 
-function units(quantity: string | null, unitSize: string | null): number | null {
-  if (quantity == null) return null;
-  const size = Number(unitSize ?? 1) || 1;
-  return Math.round(Number(quantity) / size);
-}
-
 function stockAmount(quantity: string, unit: string) {
   const n = Number(quantity);
   if (unit === "mL") return `${(n / 1000).toLocaleString("en-US", { maximumFractionDigits: 1 })} L`;
@@ -69,6 +41,7 @@ function stockAmount(quantity: string, unit: string) {
 }
 
 type Busy = null | "start" | "slip" | "photo" | "count" | "confirm" | "credit";
+type Run = (kind: Exclude<Busy, null>, action: () => Promise<Receipt>) => Promise<void>;
 
 const BUSY_TEXT: Record<Exclude<Busy, null>, string> = {
   start: "Opening the delivery check…",
@@ -78,6 +51,8 @@ const BUSY_TEXT: Record<Exclude<Busy, null>, string> = {
   confirm: "Adding to stock…",
   credit: "Sending the credit request…",
 };
+
+const STEPS = ["Slip", "Delivery", "Count", "Confirm"];
 
 function ReceivingPage() {
   const [orders, setOrders] = useState<OpenOrder[] | null>(null);
@@ -147,15 +122,22 @@ function ReceivingPage() {
     loadOrders();
   };
 
+  const bothRead = receipt != null && receipt.has_photo_image && (receipt.slip_number != null || receipt.has_slip_image);
+
   return (
     <section className="page page--receiving" aria-labelledby="page-title">
       <div className="rcv">
         <header className="rcv-head">
-          <p className="page__eyebrow">Receiving</p>
-          <h1 id="page-title">Check a delivery</h1>
-          <p className="page__description">
-            Look at the packing slip, then the delivery. Muse reads both; only what you accept goes into stock.
-          </p>
+          <div>
+            <p className="rcv-eyebrow">Receiving</p>
+            <h1 id="page-title">Check a delivery</h1>
+            <p className="rcv-subtitle">
+              {bothRead
+                ? "Muse read the slip and the photo. Only what you accept goes into stock."
+                : "Look at the packing slip, then the delivery. Muse reads both; only what you accept goes into stock."}
+            </p>
+          </div>
+          {receipt && <PoCard receipt={receipt} />}
         </header>
 
         {error && (
@@ -165,19 +147,39 @@ function ReceivingPage() {
         )}
 
         {!receipt ? (
-          <>
+          <div className="rcv-lists">
             <ExpectedDeliveries
               orders={orders}
               busy={busy === "start"}
               onStart={(orderId) => run("start", () => startReceipt(orderId))}
             />
             <ReceivedDeliveries received={received} busy={busy === "start"} onOpen={(id) => run("start", () => getReceipt(id))} />
-          </>
+          </div>
         ) : (
           <DeliveryCheck receipt={receipt} busy={busy} run={run} onDone={reset} />
         )}
       </div>
     </section>
+  );
+}
+
+function PoCard({ receipt }: { receipt: Receipt }) {
+  const order = receipt.order;
+  if (!order) {
+    return (
+      <div className="rcv-po rcv-po--missing">
+        <p className="rcv-po__title">{receipt.slip_po_number ? `${receipt.slip_po_number} · not found` : "Not on an order yet"}</p>
+        <p className="rcv-po__when">Nothing goes into stock without an order</p>
+      </div>
+    );
+  }
+  return (
+    <div className="rcv-po">
+      <p className="rcv-po__title">
+        {order.po_number ?? order.order_id} · {order.supplier_name}
+      </p>
+      <p className="rcv-po__when">Expected {when(order.confirmed_delivery_at ?? order.requested_delivery_at)}</p>
+    </div>
   );
 }
 
@@ -264,272 +266,376 @@ function ReceivedDeliveries({
   );
 }
 
-function DeliveryCheck({
-  receipt,
-  busy,
-  run,
-  onDone,
-}: {
-  receipt: Receipt;
-  busy: Busy;
-  run: (kind: Exclude<Busy, null>, action: () => Promise<Receipt>) => Promise<void>;
-  onDone: () => void;
-}) {
+function DeliveryCheck({ receipt, busy, run, onDone }: { receipt: Receipt; busy: Busy; run: Run; onDone: () => void }) {
   const id = receipt.receipt_id;
   const confirmed = receipt.status === "confirmed";
   const hasSlip = receipt.slip_number != null || receipt.has_slip_image;
   const step = confirmed ? 4 : !hasSlip ? 0 : !receipt.has_photo_image ? 1 : receipt.summary.needs_count ? 2 : 3;
+  const needsCount = receipt.summary.needs_count;
 
   return (
-    <div className="rcv-stack">
+    <div className="rcv-check">
       <ol className="rcv-steps" aria-label="Progress">
-        {["Slip", "Delivery", "Count", "Confirm"].map((label, i) => (
-          <li key={label} className={i < step ? "is-done" : i === step ? "is-current" : ""}>
-            <span className="rcv-steps__dot" aria-hidden="true" />
-            {label}
+        {STEPS.map((label, i) => (
+          <li
+            key={label}
+            className={i < step ? "is-done" : i === step ? "is-current" : ""}
+            aria-current={i === step ? "step" : undefined}
+          >
+            <span className="rcv-steps__bar" aria-hidden="true" />
+            <span className="rcv-steps__label">
+              {i + 1} · {label}
+            </span>
           </li>
         ))}
       </ol>
 
-      <MuseSays text={busy ? BUSY_TEXT[busy] : receipt.muse_message} thinking={busy != null} />
+      <MuseBanner receipt={receipt} busy={busy} />
 
-      <Capture
-        title="Packing slip"
-        done={hasSlip}
-        busy={busy === "slip"}
-        disabled={busy != null || confirmed}
-        image={receipt.has_slip_image ? imageUrl(id, "slip") : null}
-        detail={
-          hasSlip
-            ? [
-                receipt.slip_number && `Slip ${receipt.slip_number}`,
-                receipt.slip_supplier,
-                receipt.order?.po_number
-                  ? `matches ${receipt.order.po_number}`
-                  : receipt.slip_po_number
-                    ? `${receipt.slip_po_number} — no matching order`
-                    : null,
-              ]
-                .filter(Boolean)
-                .join(" · ")
-            : "Point your glasses or phone at the slip."
-        }
-        onCapture={(source) => run("slip", () => readSlip(id, source))}
-      />
-
-      <Capture
-        title="The delivery"
-        done={receipt.has_photo_image}
-        busy={busy === "photo"}
-        disabled={busy != null || confirmed || !hasSlip}
-        image={receipt.has_photo_image ? imageUrl(id, "photo") : null}
-        detail={
-          receipt.has_photo_image
-            ? receipt.photo_notes ?? "Muse counted what it could see."
-            : hasSlip
-              ? "Now look at the cases and crates that came in."
-              : "After the slip."
-        }
-        onCapture={(source) => run("photo", () => readPhoto(id, source))}
-      />
-
-      {receipt.lines.length > 0 && (
-        <div className="rcv-stack">
-          <h2 className="rcv-section-title">
-            What arrived
-            <span className="rcv-muted">
-              {receipt.summary.match} of {receipt.summary.lines} match
-            </span>
-          </h2>
-          {receipt.lines.map((line) => (
-            <LineCard
-              key={line.line_no}
-              line={line}
-              locked={confirmed || busy != null}
-              onCount={(counted, rejected, reason) => run("count", () => countLine(id, line.line_no, counted, rejected, reason))}
-            />
-          ))}
+      <div className="rcv-body">
+        <div className="rcv-photos">
+          <PhotoCard
+            title="Packing slip"
+            placeholder="Slip photo"
+            fit="contain"
+            done={hasSlip}
+            busy={busy === "slip"}
+            disabled={busy != null}
+            locked={confirmed}
+            image={receipt.has_slip_image ? imageUrl(id, "slip") : null}
+            facts={
+              hasSlip ? (
+                <>
+                  <p>
+                    {receipt.slip_number && <strong>{receipt.slip_number}</strong>}
+                    {receipt.slip_number && receipt.slip_supplier && " · "}
+                    {receipt.slip_supplier}
+                  </p>
+                  <p>
+                    {receipt.order?.po_number
+                      ? `Matches ${receipt.order.po_number}`
+                      : receipt.slip_po_number
+                        ? `${receipt.slip_po_number}: no matching order`
+                        : "No PO number on the slip"}
+                  </p>
+                </>
+              ) : (
+                <p>Point your glasses or phone at the slip.</p>
+              )
+            }
+            onCapture={(source) => run("slip", () => readSlip(id, source))}
+          />
+          <PhotoCard
+            title="The delivery"
+            placeholder="Delivery photo"
+            fit="contain"
+            done={receipt.has_photo_image}
+            busy={busy === "photo"}
+            disabled={busy != null || !hasSlip}
+            locked={confirmed}
+            image={receipt.has_photo_image ? imageUrl(id, "photo") : null}
+            facts={
+              receipt.has_photo_image ? (
+                <>
+                  <p>
+                    {receipt.photo_notes?.startsWith("Counted with SAM 3.1") ? (
+                      <>
+                        Counted with <strong>SAM 3.1</strong> + <strong>Muse Spark</strong>
+                      </>
+                    ) : (
+                      <>
+                        Read by <strong>Muse Spark</strong>
+                      </>
+                    )}
+                  </p>
+                  {receipt.lines.length > 0 && <p>{seenSummary(receipt.lines)}</p>}
+                </>
+              ) : (
+                <p>{hasSlip ? "Now look at the cases and crates that came in." : "After the slip."}</p>
+              )
+            }
+            onCapture={(source) => run("photo", () => readPhoto(id, source))}
+          />
         </div>
-      )}
 
-      {!confirmed && receipt.lines.length > 0 && (
-        <div className="rcv-confirm">
-          <p className="rcv-muted">
-            {receipt.summary.needs_count
-              ? `Count ${receipt.summary.needs_count === 1 ? "1 line" : `${receipt.summary.needs_count} lines`} before adding to stock.`
-              : receipt.summary.problems
-                ? "Only what's here goes into stock. Muse drafts a credit request for the rest."
-                : "Everything matches the slip."}
-          </p>
-          <button
-            className="rcv-button rcv-button--primary"
-            type="button"
-            disabled={busy != null || receipt.summary.needs_count > 0 || !receipt.order}
-            onClick={() => run("confirm", () => confirmReceipt(id))}
-          >
-            Approve and add to stock
-          </button>
+        <div className="rcv-arrived">
+          {receipt.lines.length > 0 ? (
+            <>
+              <h2 className="rcv-section-title">
+                What arrived
+                <span className="rcv-muted">
+                  {receipt.summary.match} of {receipt.summary.lines} match
+                </span>
+              </h2>
+              {receipt.lines.map((line) => (
+                <LineRow
+                  key={line.line_no}
+                  line={line}
+                  photoRead={receipt.has_photo_image}
+                  locked={confirmed || busy != null}
+                  onCount={(counted) => run("count", () => countLine(id, line.line_no, counted, 0))}
+                />
+              ))}
+            </>
+          ) : (
+            <OnTheOrder order={receipt.order} />
+          )}
+
+          {!confirmed && receipt.lines.length > 0 && (
+            <div className="rcv-card rcv-confirm">
+              <p className="rcv-muted">
+                {!receipt.order
+                  ? "This slip doesn't match an order yet, so nothing can go into stock."
+                  : needsCount
+                    ? `Count ${needsCount === 1 ? "1 item" : `${needsCount} items`} first. Nothing goes into stock until you confirm.`
+                    : "Nothing goes into stock until you confirm. Short items can become a credit request."}
+              </p>
+              <button
+                className="rcv-button rcv-button--primary"
+                type="button"
+                disabled={busy != null || needsCount > 0 || !receipt.order}
+                onClick={() => run("confirm", () => confirmReceipt(id))}
+              >
+                Confirm what arrived
+              </button>
+            </div>
+          )}
+
+          {confirmed && <Done receipt={receipt} busy={busy} run={run} onDone={onDone} />}
         </div>
-      )}
-
-      {confirmed && <Done receipt={receipt} busy={busy} run={run} onDone={onDone} />}
-    </div>
-  );
-}
-
-function MuseSays({ text, thinking }: { text: string; thinking: boolean }) {
-  return (
-    <div className={`rcv-muse${thinking ? " is-thinking" : ""}`} aria-live="polite">
-      <span className="rcv-muse__orb" aria-hidden="true" />
-      <div>
-        <p className="rcv-muse__name">Muse</p>
-        <p className="rcv-muse__text">{text}</p>
       </div>
     </div>
   );
 }
 
-function Capture({
+/** A viewfinder with a check in it: Muse looked at the delivery. */
+function ViewfinderIcon() {
+  return (
+    <svg viewBox="0 0 32 32" width="30" height="30" fill="none" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 11V7a3 3 0 0 1 3-3h4M21 4h4a3 3 0 0 1 3 3v4M28 21v4a3 3 0 0 1-3 3h-4M11 28H7a3 3 0 0 1-3-3v-4" stroke="currentColor" />
+      <path d="M10.5 16.5l3.6 3.6 7.4-7.6" stroke="var(--rcv-glow)" />
+    </svg>
+  );
+}
+
+const TALLY = [
+  ["match", "match"],
+  ["check", "check"],
+  ["count", "count it"],
+] as const;
+
+function MuseBanner({ receipt, busy }: { receipt: Receipt; busy: Busy }) {
+  const counts = tally(receipt.lines);
+  const label = busy
+    ? "Muse is working"
+    : receipt.status === "confirmed"
+      ? "Checked in"
+      : receipt.has_photo_image
+        ? "Muse checked the delivery"
+        : "Muse";
+  return (
+    <div className={`rcv-muse${busy ? " is-thinking" : ""}`}>
+      <span className="rcv-muse__icon" aria-hidden="true">
+        <ViewfinderIcon />
+      </span>
+      <div className="rcv-muse__body" aria-live="polite">
+        <p className="rcv-muse__name">{label}</p>
+        <p className="rcv-muse__text">{busy ? BUSY_TEXT[busy] : receipt.muse_message}</p>
+      </div>
+      {receipt.has_photo_image && receipt.lines.length > 0 && (
+        <dl className="rcv-tally" aria-label="Items by what they need">
+          {TALLY.map(([need, text]) => (
+            <div key={need} className={`rcv-tally__item rcv-tally__item--${need}`} data-testid={`tally-${need}`}>
+              <dt>{text}</dt>
+              <dd>{counts[need]}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
+}
+
+function PhotoCard({
   title,
+  placeholder,
+  fit,
   done,
   busy,
   disabled,
+  locked,
   image,
-  detail,
+  facts,
   onCapture,
 }: {
   title: string;
+  placeholder: string;
+  fit: "contain" | "cover";
   done: boolean;
   busy: boolean;
   disabled: boolean;
+  locked: boolean;
   image: string | null;
-  detail: string;
+  facts: React.ReactNode;
   onCapture: (source: ImageSource) => void;
 }) {
+  const upload = (label: string) => (
+    <label className={`rcv-button rcv-button--small rcv-button--ghost${disabled ? " is-disabled" : ""}`}>
+      {label}
+      <input
+        type="file"
+        accept="image/*"
+        capture="environment"
+        disabled={disabled}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) onCapture({ file });
+          event.target.value = "";
+        }}
+      />
+    </label>
+  );
   return (
-    <article className={`rcv-card rcv-capture${done ? " is-done" : ""}${busy ? " is-busy" : ""}`}>
-      <div className="rcv-capture__thumb">
-        {image ? <img src={image} alt={title} /> : <span aria-hidden="true">{busy ? "…" : "＋"}</span>}
+    <article className={`rcv-card rcv-photo${busy ? " is-busy" : ""}`}>
+      <div className="rcv-photo__head">
+        <h3 className="rcv-photo__title">{title}</h3>
+        {busy ? <span className="rcv-chip rcv-chip--ask">Reading…</span> : done && <span className="rcv-chip rcv-chip--good">Read</span>}
       </div>
-      <div className="rcv-capture__body">
-        <p className="rcv-capture__title">
-          {title}
-          {done && <span className="rcv-chip rcv-chip--good">Read</span>}
-        </p>
-        <p className="rcv-muted">{detail}</p>
-        {!done && (
-          <div className="rcv-capture__actions">
-            <button className="rcv-button rcv-button--small" type="button" disabled={disabled} onClick={() => onCapture({ demo: true })}>
-              Use demo photo
-            </button>
-            <label className={`rcv-button rcv-button--small rcv-button--ghost${disabled ? " is-disabled" : ""}`}>
-              Take or upload
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                disabled={disabled}
-                onChange={(event) => {
-                  const file = event.target.files?.[0];
-                  if (file) onCapture({ file });
-                  event.target.value = "";
-                }}
-              />
-            </label>
-          </div>
+      <div className={`rcv-photo__frame${image ? "" : " is-empty"}`}>
+        {image ? <img src={image} alt={title} style={{ objectFit: fit }} /> : <span>{placeholder}</span>}
+      </div>
+      <div className="rcv-photo__facts">{facts}</div>
+      <div className="rcv-photo__actions">
+        {!locked &&
+          (done ? (
+            upload("Retake")
+          ) : (
+            <>
+              <button className="rcv-button rcv-button--small" type="button" disabled={disabled} onClick={() => onCapture({ demo: true })}>
+                Use demo photo
+              </button>
+              {upload("Take or upload")}
+            </>
+          ))}
+        {image && (
+          <a className="rcv-button rcv-button--small rcv-button--ghost" href={image} target="_blank" rel="noreferrer">
+            View full size
+          </a>
         )}
       </div>
     </article>
   );
 }
 
-function LineCard({
+/** Before the slip is read: what the order says is coming. */
+function OnTheOrder({ order }: { order: OpenOrder | null }) {
+  if (!order) {
+    return (
+      <>
+        <h2 className="rcv-section-title">What arrived</h2>
+        <p className="rcv-card rcv-muted">Muse lists the items once it has read the slip.</p>
+      </>
+    );
+  }
+  return (
+    <>
+      <h2 className="rcv-section-title">
+        On the order
+        <span className="rcv-muted">waiting for the slip</span>
+      </h2>
+      {order.lines.map((line) => (
+        <article className="rcv-card rcv-row rcv-row--waiting" key={line.line_no}>
+          <div className="rcv-row__name">
+            <p className="rcv-row__title">{line.description ?? line.ingredient_id}</p>
+            {line.supplier_item_number && <p className="rcv-muted">{line.supplier_item_number}</p>}
+          </div>
+          <dl className="rcv-row__nums">
+            <Num label="Ordered" value={line.packs ?? "—"} />
+            <Num label="Slip says" value="—" />
+            <Num label="Muse saw" value="—" />
+          </dl>
+        </article>
+      ))}
+    </>
+  );
+}
+
+function Num({ label, value, note }: { label: string; value: number | string; note?: string }) {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>
+        {value}
+        {note && <small>{note}</small>}
+      </dd>
+    </div>
+  );
+}
+
+function LineRow({
   line,
+  photoRead,
   locked,
   onCount,
 }: {
   line: ReceiptLine;
+  photoRead: boolean;
   locked: boolean;
-  onCount: (counted: number, rejected: number, reason?: string) => void;
+  onCount: (counted: number) => void;
 }) {
-  const seen = units(line.seen_quantity, line.unit_size);
-  const expected = units(line.slip_shipped_quantity ?? line.ordered_quantity, line.unit_size);
-  const counted = units(line.counted_quantity, line.unit_size);
-  const [count, setCount] = useState<number>(counted ?? seen ?? expected ?? 0);
-  const asksForCount = line.status === "needs_count" && line.seen_quantity != null;
+  const view = lineView(line, photoRead);
+  const start = view.counted ?? view.seen ?? view.slip ?? view.ordered ?? 0;
+  const [count, setCount] = useState<number>(start);
+  const asksForCount = line.status === "needs_count" && view.tone !== "wait";
   const [open, setOpen] = useState(asksForCount);
+  const name = line.description.split(",")[0];
 
   useEffect(() => {
     if (asksForCount) setOpen(true);
-    setCount(counted ?? seen ?? expected ?? 0);
-  }, [asksForCount, counted, seen, expected]);
-
-  const rows: [string, string | undefined][] = [
-    ["Ordered", line.display.ordered],
-    ["Slip says", line.display.shipped],
-    [line.seen_may_hide_more ? "Muse sees (may hide more)" : "Muse sees", line.display.seen],
-    ["You counted", line.display.counted],
-    ["Into stock", line.display.accepted],
-  ];
+    setCount(start);
+  }, [asksForCount, start]);
 
   return (
-    <article className={`rcv-card rcv-line rcv-line--${STATUS_TONE[line.status]}`}>
-      <div className="rcv-line__top">
-        <div>
-          <p className="rcv-line__name">{line.description}</p>
-          {line.supplier_item_number && <p className="rcv-muted">{line.supplier_item_number}</p>}
-        </div>
-        <span className={`rcv-chip rcv-chip--${STATUS_TONE[line.status]}`}>{STATUS_LABEL[line.status]}</span>
+    <article className={`rcv-card rcv-row rcv-row--${view.tone}`}>
+      <div className="rcv-row__name">
+        <p className="rcv-row__title">{line.description}</p>
+        {line.supplier_item_number && <p className="rcv-muted">{line.supplier_item_number}</p>}
       </div>
-      <dl className="rcv-line__facts">
-        {rows
-          .filter(([, value]) => value)
-          .map(([label, value]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
+      <dl className="rcv-row__nums">
+        <Num label="Ordered" value={view.ordered ?? "—"} />
+        <Num label="Slip says" value={view.slip ?? "—"} />
+        <Num label="Muse saw" value={view.tone === "wait" ? "—" : view.seen ?? "?"} note={view.counted != null ? `you counted ${view.counted}` : undefined} />
       </dl>
-      <p className="rcv-line__message">{line.message}</p>
-
-      {!locked &&
-        (open ? (
-          <div className="rcv-count">
-            <span className="rcv-count__label">Cartons here</span>
-            <div className="rcv-stepper">
-              <button type="button" aria-label="One fewer" onClick={() => setCount((n) => Math.max(0, n - 1))}>
-                −
-              </button>
-              <output aria-label="Cartons counted">{count}</output>
-              <button type="button" aria-label="One more" onClick={() => setCount((n) => n + 1)}>
-                +
+      <div className="rcv-row__action">
+        <span className={`rcv-chip rcv-chip--${view.tone}`}>{view.badge}</span>
+        {!locked &&
+          (open ? (
+            <div className="rcv-count">
+              <div className="rcv-stepper">
+                <button type="button" aria-label={`One fewer ${name}`} onClick={() => setCount((n) => Math.max(0, n - 1))}>
+                  −
+                </button>
+                <output aria-label={`${name} counted`}>{count}</output>
+                <button type="button" aria-label={`One more ${name}`} onClick={() => setCount((n) => n + 1)}>
+                  +
+                </button>
+              </div>
+              <button className="rcv-button rcv-button--small rcv-button--primary" type="button" onClick={() => onCount(count)}>
+                Save count
               </button>
             </div>
-            <button className="rcv-button rcv-button--small rcv-button--primary" type="button" onClick={() => onCount(count, 0)}>
-              Save count
+          ) : (
+            <button className="rcv-link" type="button" onClick={() => setOpen(true)}>
+              Count it myself
             </button>
-          </div>
-        ) : (
-          <button className="rcv-link" type="button" onClick={() => setOpen(true)}>
-            Count it myself
-          </button>
-        ))}
+          ))}
+      </div>
+      {line.status !== "match" && view.tone !== "wait" && <p className="rcv-row__message">{line.message}</p>}
     </article>
   );
 }
 
-function Done({
-  receipt,
-  busy,
-  run,
-  onDone,
-}: {
-  receipt: Receipt;
-  busy: Busy;
-  run: (kind: Exclude<Busy, null>, action: () => Promise<Receipt>) => Promise<void>;
-  onDone: () => void;
-}) {
+function Done({ receipt, busy, run, onDone }: { receipt: Receipt; busy: Busy; run: Run; onDone: () => void }) {
   const added = receipt.lines.filter((l) => l.accepted_quantity && Number(l.accepted_quantity) > 0);
   const credit = receipt.credit_request;
   const [stock, setStock] = useState<Map<string, StockEstimate>>(new Map());
@@ -580,7 +686,7 @@ function Done({
 
       {credit && (
         <article className="rcv-card rcv-credit">
-          <div className="rcv-line__top">
+          <div className="rcv-order__top">
             <p className="rcv-done__title">Credit request {credit.credit_ref}</p>
             <span className={`rcv-chip rcv-chip--${credit.status === "sent" ? "good" : "ask"}`}>
               {credit.status === "sent" ? "Sent" : "Draft"}

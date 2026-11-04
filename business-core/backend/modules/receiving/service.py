@@ -33,7 +33,9 @@ from backend.modules.purchasing.models import PurchaseOrder, Receipt, ReceiptLin
 from backend.modules.purchasing.service import settle_due
 from backend.modules.receiving.vision import PhotoRead, SlipRead
 
-IMAGE_DIR = Path("var/receiving")
+ROOT = Path(__file__).resolve().parents[3]  # business-core/
+# Saved with full paths, so the API finds photos a receiver from another folder saved (and vice versa).
+IMAGE_DIR = ROOT / "var" / "receiving"
 ZERO = Decimal("0")
 
 
@@ -335,13 +337,29 @@ def start_receipt(session: Session, cafe_id: str, order_id: str | None = None) -
     return receipt
 
 
+def open_check(session: Session, cafe_id: str, order_id: str) -> Receipt | None:
+    """The check already under way for an order: one the glasses read first, else a draft started by hand."""
+    drafts = session.scalars(select(Receipt).where(Receipt.cafe_id == cafe_id, Receipt.order_id == order_id,
+                                                   Receipt.status == "draft")
+                             .order_by(Receipt.started_at.desc())).all()
+    return next((r for r in drafts if r.slip_read is not None), None) or next(iter(drafts), None)
+
+
 def _save_image(receipt: Receipt, kind: str, image: bytes, mime: str) -> str:
     folder = IMAGE_DIR / receipt.receipt_id
     folder.mkdir(parents=True, exist_ok=True)
     suffix = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}.get(mime, ".img")
     path = folder / f"{kind}{suffix}"
     path.write_bytes(image)
-    return str(path)
+    return str(path.resolve())
+
+
+def image_file(stored: str | None) -> Path | None:
+    """The saved photo on disk; older checks stored paths relative to business-core/."""
+    if not stored:
+        return None
+    path = Path(stored)
+    return path if path.is_absolute() else ROOT / path
 
 
 def _refuse_received_slip(session: Session, receipt: Receipt, slip_number: str | None) -> None:

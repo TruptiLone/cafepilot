@@ -274,12 +274,12 @@ Ports: Postgres 5433 · API 8001 · web app 5173 · optional glasses photo recei
 From `business-core` (needs the `.venv` there):
 
 ```bash
-./scripts/start_demo.sh           # stop old servers, reset the data (with delivery), start API, web app and photo receiver
+./scripts/start_demo.sh           # stop old servers, reset the data (PO-123 is the only delivery), start API, web app and photo receiver
 ./scripts/start_demo.sh --reset   # between takes: reset the data and empty the shared photo folder; servers keep running
 ./scripts/start_demo.sh --stop    # stop servers started elsewhere
 ```
 
-Ctrl-C in the `start_demo.sh` terminal stops all three servers. Logs go to `business-core/var/demo-logs/`.
+Ctrl-C in the `start_demo.sh` terminal stops all three servers. Logs go to `business-core/var/demo-logs/`. Run all servers from one folder: the script also stops the older media server on 8003 and warns if a CaféPilot server is still running from another checkout (they share the database).
 
 ### After pulling
 
@@ -342,7 +342,7 @@ cd business-core && python -m pytest -q          # backend; needs the Postgres c
 cd business-core/frontend && npx tsc --noEmit && npx vitest run && npm run build
 ```
 
-447 backend tests (plus 3 migration tests that only run against a throwaway database) and 139
+450 backend tests (plus 3 migration tests that only run against a throwaway database) and 139
 frontend tests, all passing on Nov 4, 2026. CI runs both on every push and pull request
 ([`.github/workflows/business-core.yml`](.github/workflows/business-core.yml)); it has no model
 key, so model calls in tests use fake clients or recorded answers.

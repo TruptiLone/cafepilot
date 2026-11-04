@@ -172,3 +172,33 @@ def test_a_later_delivery_is_compared_with_what_is_still_due(session: Session) -
     later = api.post("/api/v1/receiving/receipts", json={"cafe_id": C}).json()
     body = api.post(f"/api/v1/receiving/receipts/{later['receipt_id']}/slip", json={"use_demo_image": True}).json()
     assert _line(body, "WHOLE_MILK")["display"]["ordered"] == "3 cartons (3 L)"
+
+
+def test_check_this_delivery_opens_the_check_already_under_way(session: Session) -> None:
+    # The glasses read the slip first (started without an order; the slip matched PO-1042).
+    api, _, rid, _, _ = _checked_delivery(session)
+    opened = api.post("/api/v1/receiving/receipts", json={"cafe_id": C, "order_id": DEMO_ORDER_ID}).json()
+    assert opened["receipt_id"] == rid and opened["slip_number"] == "PS-58213"
+
+
+def test_check_this_delivery_twice_reuses_one_draft(session: Session) -> None:
+    api = _api(session, VisionClient())
+    first = api.post("/api/v1/receiving/receipts", json={"cafe_id": C, "order_id": DEMO_ORDER_ID}).json()
+    again = api.post("/api/v1/receiving/receipts", json={"cafe_id": C, "order_id": DEMO_ORDER_ID}).json()
+    assert again["receipt_id"] == first["receipt_id"]
+    # Without an order (something arrived that isn't listed) each check is new.
+    blank = api.post("/api/v1/receiving/receipts", json={"cafe_id": C}).json()
+    assert blank["receipt_id"] != first["receipt_id"]
+
+
+def test_photos_are_saved_with_full_paths_and_older_relative_ones_still_load(session: Session, tmp_path) -> None:
+    api, _, rid, _, _ = _checked_delivery(session)
+    receipt = session.get(service.Receipt, rid)
+    assert Path(receipt.slip_image_path).is_absolute() and Path(receipt.photo_image_path).is_absolute()
+    assert api.get(f"/api/v1/receiving/receipts/{rid}/images/slip").status_code == 200
+
+    # A check saved before full paths: relative to business-core/, whichever folder the API runs from.
+    receipt.slip_image_path = "demo-assets/receiving/packing-slip-PS-58213.png"
+    session.flush()
+    assert service.image_file(receipt.slip_image_path) == service.ROOT / receipt.slip_image_path
+    assert api.get(f"/api/v1/receiving/receipts/{rid}/images/slip").status_code == 200

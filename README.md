@@ -133,6 +133,14 @@ PYTHONPATH=. python scripts/seed_event_surge.py --fresh --with-delivery  # plus 
 This removes the agent's runs and the changes they made (orders, shifts, stock counts), then reloads
 the scenario. The server can stay running; refresh the page.
 
+For a recording, one command stops old servers, resets the data (with delivery) and starts the API
+(8001), the web app (5173) and the glasses photo receiver (8004); Ctrl-C stops all three:
+
+```bash
+./scripts/start_demo.sh           # from business-core; needs .venv there
+./scripts/start_demo.sh --reset   # between takes (data and shared photos; servers keep running)
+```
+
 Event discovery in the demo is scripted, not live web monitoring: `--fresh` hides the Santa Clara
 Farmers Market, and after your first question in **Ask** the app "finds" it (one call to
 `POST /api/v1/agent/events/discover-demo`), shows "Muse found a new event" and adds it to **Events**.

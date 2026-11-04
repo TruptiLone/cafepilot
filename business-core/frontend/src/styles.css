@@ -3875,6 +3875,8 @@ h1 {
   --g-red: #a9524a;
   --g-red-tint: #faf1f0;
   --g-red-line: #e3c3be;
+  --g-sky-tint: #ddf0fb;
+  --g-sky-ink: #1b6a9c;
   --g-shadow: 0 1px 2px rgba(31, 35, 40, 0.04), 0 2px 8px rgba(31, 35, 40, 0.03);
   --g-sans: "Geist", "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
   --g-serif: "Newsreader", Georgia, serif;
@@ -4333,21 +4335,20 @@ body { background: var(--g-bg); }
 }
 
 /* ---------- Ask CaféPilot polish: one 900 px column, larger type, event cards ---------- */
-.mz { --g-warm: #e98a6c; --g-warm-tint: #fdf0eb; --g-warm-ink: #a9472c; }
 .page--muse { font-size: 15px; }
 .mz-scroll > * { width: 100%; max-width: 900px; align-self: center; }
 .mz .mz-scroll > .mz-back { align-self: center; text-align: left; font-size: 14.5px; }
 .mz-cmd__bar, .mz-cmd > .mz-audit { width: 100%; max-width: 900px; margin-left: auto; margin-right: auto; }
 .mz-label { font-size: 12px; }
 .mz-greet { display: flex; align-items: center; gap: 14px; padding: 6px 0 4px; }
-.mz-greet__mark { width: 44px; height: 44px; flex: none; border-radius: 13px; background: var(--g-warm-tint); color: var(--g-warm-ink); display: grid; place-items: center; }
+.mz-greet__mark { width: 44px; height: 44px; flex: none; border-radius: 13px; background: var(--g-sky-tint); color: var(--g-sky-ink); display: grid; place-items: center; }
 .mz-greet__mark svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .mz-greet__hi { font-family: var(--g-serif); font-size: 30px; font-weight: 400; line-height: 1.15; letter-spacing: -0.01em; }
 .mz-greet__sub { font-size: 16px; color: var(--g-ink-2); margin-top: 4px !important; }
 .mz-events { gap: 12px; }
 .mz-ev { grid-template-columns: auto minmax(0, 1fr) auto; gap: 18px; padding: 18px 20px; border-radius: 16px; align-items: center; }
 .mz-ev__chip { flex-direction: column; justify-content: center; width: 64px; height: 64px; padding: 0; border-radius: 14px;
-  background: var(--g-warm-tint); color: var(--g-warm-ink); font-size: 12px; letter-spacing: 0.05em; line-height: 1.2; }
+  background: var(--g-sky-tint); color: var(--g-sky-ink); font-size: 12px; letter-spacing: 0.05em; line-height: 1.2; }
 .mz-ev__chip b { font-size: 13px; font-weight: 700; }
 .mz-ev__main { display: flex; flex-direction: column; gap: 4px; }
 .mz-ev__title { font-size: 18px; font-weight: 600; line-height: 1.3; white-space: normal; }

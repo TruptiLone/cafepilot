@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.session import SessionLocal
 from backend.models.cafe import Cafe
+from backend.modules.agent.events import hide_demo_discovery
 from backend.modules.agent.models import AgentApproval, AgentNodeRun, AgentPlanRun
 from backend.modules.inventory.models import InventoryItem, InventoryMovement, StockCount, StockCountLine
 from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, Receipt, ReceiptLine, ShiftOffer
@@ -363,12 +364,16 @@ def main() -> int:
             if not args.fresh:
                 return 0
         result = seed_event_surge(session, with_delivery=args.with_delivery)
+        # A fresh demo starts before Muse has "found" the market (scripted discovery, see agent/events.py).
+        hidden = hide_demo_discovery(session, CAFE_ID) if args.fresh else 0
         session.commit()
     print(
         "Event Surge scenario ready: "
         f"{result.counts} count, {result.count_lines} count lines, {result.movements} movement, "
         f"{result.shifts} shifts" + (", demo order PO-1042" if result.orders else "") + f" created. Ask with knowledge as of {AS_OF}."
     )
+    if hidden:
+        print("Santa Clara Farmers Market is hidden until Muse finds it (after the first question in Ask).")
     return 0
 
 

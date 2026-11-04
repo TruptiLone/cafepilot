@@ -8,6 +8,7 @@ from backend.db.session import engine, get_db
 from backend.main import app
 from backend.models.cafe import Cafe
 from backend.modules.agent.events import hide_demo_discovery
+from backend.modules.agent.router import get_planner_client
 from scripts.seed_event_surge import apply_reset, plan_reset, seed_event_surge
 
 C = "CAFE001"
@@ -27,6 +28,7 @@ def db_and_api():
         seed_event_surge(db)
         hide_demo_discovery(db, C)  # what seed_event_surge.py --fresh does
         app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_planner_client] = lambda: object()  # no model needed (CI has no key)
         yield db, TestClient(app)
     finally:
         app.dependency_overrides.clear()

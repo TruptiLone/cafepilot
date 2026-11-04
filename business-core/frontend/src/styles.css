@@ -28,6 +28,7 @@
   --g-glance-gap: 110px;
   --g-glance-col: 320px;
   --g-control-h: 44px;
+  --g-edge: 96px;        /* space above the header and below the footer (desktop) */
   color: #191918;
   background: #f5f5f3;
   font-family: var(--g-font-ui);
@@ -4739,4 +4740,55 @@ h1 { letter-spacing: -0.01em; }  /* page titles are display size: only a hair of
   .mz-ev { padding: var(--g-space-4) var(--g-space-4); }
   .mz-glance__card { padding: var(--g-card-pad); }
   .rcv-card { padding: var(--g-space-4); }
+}
+
+/* ---------- Room at the screen edges: nothing touches the top or bottom ---------- */
+@media (min-width: 861px) {
+  .app-frame { padding-block: var(--g-edge); min-height: 100vh; }
+  .app-body { min-height: calc(100vh - 2 * var(--g-edge)); }
+  .sidebar { top: var(--g-edge); height: calc(100vh - 2 * var(--g-edge)); }
+  .page--muse { height: calc(100vh - 2 * var(--g-edge)); }
+  .mz-toasts { top: calc(var(--g-edge) + 72px); }
+}
+@media (max-width: 860px) {
+  :root { --g-edge: 48px; }
+  .app-frame { padding-block: var(--g-edge); }
+}
+
+/* ---------- Events tab: Upcoming, then Past events (read-only) ---------- */
+.mz-label--section { margin-top: var(--g-section-gap); }
+.mz-ev--past { background: var(--g-subtle); box-shadow: none; grid-template-columns: auto minmax(0, 1fr); }
+.mz-ev--past .mz-ev__chip { background: #fff; color: var(--g-ink-2); }
+.mz-ev--past .mz-ev__pitch { color: var(--g-ink-2); }
+.mz-ev.is-new { border-color: var(--g-sky-ink); box-shadow: 0 0 0 3px var(--g-sky-tint); }
+
+/* ---------- "Muse found a new event" (the demo's scripted discovery) ---------- */
+.mz-live[data-live="found"] i { background: var(--g-sky-ink); }
+.mz-found {
+  position: fixed;
+  right: var(--g-space-6);
+  bottom: calc(var(--g-edge) + 120px);
+  z-index: 60;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: var(--g-space-3) var(--g-space-4);
+  width: min(560px, calc(100vw - 2 * var(--g-space-4)));
+  padding: var(--g-space-4) var(--g-space-5);
+  background: #fff;
+  border: 1px solid var(--g-line);
+  border-left: 4px solid var(--g-sky-ink);
+  border-radius: 14px;
+  box-shadow: 0 14px 40px rgba(31, 35, 40, 0.18);
+  animation: mz-rise 0.3s ease both;
+}
+.mz-found__mark { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--g-sky-tint); color: var(--g-sky-ink); }
+.mz-found__mark svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.mz-found__title { margin: 0; font-size: var(--g-fs-body); font-weight: var(--g-fw-semibold); color: var(--g-ink); }
+.mz-found__text { margin: 2px 0 0; font-size: var(--g-fs-small); color: var(--g-ink-3); }
+.mz .mz-found__close { width: var(--g-control-h); height: var(--g-control-h); font-size: var(--g-fs-section); color: var(--g-ink-3); }
+@media (max-width: 860px) {
+  .mz-found { right: var(--g-space-4); left: var(--g-space-4); bottom: var(--g-space-4); width: auto; grid-template-columns: auto minmax(0, 1fr) auto; }
+  .mz-found .mz-btn { grid-column: 1 / -1; justify-content: center; }
+  .mz-found__close { grid-row: 1; grid-column: 3; }
 }

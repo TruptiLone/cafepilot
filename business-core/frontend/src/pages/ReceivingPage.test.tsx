@@ -34,7 +34,7 @@ afterEach(() => vi.restoreAllMocks());
 describe("ReceivingPage", () => {
   it("lists the expected delivery and asks the owner to count what Muse can't see", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
-      String(input).endsWith("/orders?cafe_id=CAFE001") ? reply([order]) : reply(receipt),
+      String(input).endsWith("/orders?cafe_id=CAFE001") ? reply([order]) : String(input).includes("/received?") ? reply([]) : reply(receipt),
     );
     render(<MemoryRouter><ReceivingPage /></MemoryRouter>);
 
@@ -49,5 +49,45 @@ describe("ReceivingPage", () => {
     fireEvent.click(screen.getByText("Save count"));
     const [, options] = fetchMock.mock.calls.at(-1)!;
     expect(JSON.parse(String((options as RequestInit).body))).toMatchObject({ counted_units: 4 });
+  });
+
+  it("opens an order's delivery check from a fixed link", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
+      String(input).endsWith("/orders?cafe_id=CAFE001") ? reply([order]) : String(input).includes("/received?") ? reply([]) : reply(receipt),
+    );
+    render(<MemoryRouter initialEntries={["/receiving?po=PO-1042"]}><ReceivingPage /></MemoryRouter>);
+
+    expect(await screen.findByText("Cartons here")).toBeTruthy();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      "/api/v1/receiving/orders/PO-1042/check?cafe_id=CAFE001",
+    );
+  });
+
+  it("lists the deliveries already received", async () => {
+    const done = { receipt_id: "RCV2", po_number: "PO-123", supplier_name: "Willow Ridge Dairy Supply",
+      order_status: "partially_received", slip_number: "PS-58216", confirmed_at: "2026-11-04T03:00:00Z", credit_ref: "CR-58216" };
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
+      String(input).includes("/received?") ? reply([done]) : String(input).includes("/orders?") ? reply([]) : reply(receipt),
+    );
+    render(<MemoryRouter><ReceivingPage /></MemoryRouter>);
+
+    expect(await screen.findByText("Received")).toBeTruthy();
+    expect(screen.getByText("Part received")).toBeTruthy();
+    expect(screen.getByText(/PO-123 · slip PS-58216 · checked in/)).toBeTruthy();
+    expect(screen.getByText("Credit request CR-58216")).toBeTruthy();
+    fireEvent.click(screen.getByText("View check-in"));
+    expect((await screen.findAllByText("Cartons here")).length).toBeGreaterThan(0);
+  });
+
+  it("says plainly when an order has no delivery check yet", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((input) =>
+      String(input).includes("/check")
+        ? Promise.resolve(new Response(JSON.stringify({ detail: "No delivery check for PO-124 yet." }), { status: 404 }))
+        : String(input).includes("/orders?") ? reply([order]) : String(input).includes("/received?") ? reply([]) : reply(receipt),
+    );
+    render(<MemoryRouter initialEntries={["/receiving?po=PO-124"]}><ReceivingPage /></MemoryRouter>);
+
+    expect(await screen.findByText("No delivery check for PO-124 yet.")).toBeTruthy();
+    expect(await screen.findByText("Willow Ridge Dairy Supply")).toBeTruthy(); // the expected deliveries stay
   });
 });

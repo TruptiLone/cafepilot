@@ -4,7 +4,9 @@ import { getStockEstimates, type StockEstimate } from "../api/inventory";
 import {
   confirmReceipt,
   countLine,
+  getCheckForPo,
   getReceipt,
+  listReceived,
   imageUrl,
   listOpenOrders,
   readPhoto,
@@ -14,6 +16,7 @@ import {
   type ImageSource,
   type LineStatus,
   type OpenOrder,
+  type Received,
   type Receipt,
   type ReceiptLine,
 } from "../api/receiving";
@@ -78,15 +81,17 @@ const BUSY_TEXT: Record<Exclude<Busy, null>, string> = {
 
 function ReceivingPage() {
   const [orders, setOrders] = useState<OpenOrder[] | null>(null);
+  const [received, setReceived] = useState<Received[]>([]);
   const [receipt, setReceiptState] = useState<Receipt | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const openId = searchParams.get("receipt");
+  const openPo = searchParams.get("po");
 
   // Keep the delivery in the address, so going back (e.g. from Inventory) returns to it.
   const setReceipt = (next: Receipt | null) => {
     setReceiptState(next);
     if ((next?.receipt_id ?? null) !== openId) {
-      setSearchParams(next ? { receipt: next.receipt_id } : {}, { replace: true });
+      setSearchParams(next ? { ...(openPo ? { po: openPo } : {}), receipt: next.receipt_id } : {}, { replace: true });
     }
   };
 
@@ -101,10 +106,25 @@ function ReceivingPage() {
   const [busy, setBusy] = useState<Busy>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // A fixed link per order for the demo (/receiving?po=PO-123): it opens that order's delivery check.
+  useEffect(() => {
+    if (!openPo || openId) return;
+    getCheckForPo(openPo)
+      .then((found) => {
+        setReceiptState(found);
+        setSearchParams({ po: openPo, receipt: found.receipt_id }, { replace: true });
+      })
+      .catch((e: Error) => setError(e.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openPo, openId]);
+
   const loadOrders = () => {
     listOpenOrders()
       .then(setOrders)
       .catch((e: Error) => setError(e.message));
+    listReceived()
+      .then(setReceived)
+      .catch(() => setReceived([]));
   };
 
   useEffect(loadOrders, []);
@@ -145,11 +165,14 @@ function ReceivingPage() {
         )}
 
         {!receipt ? (
-          <ExpectedDeliveries
-            orders={orders}
-            busy={busy === "start"}
-            onStart={(orderId) => run("start", () => startReceipt(orderId))}
-          />
+          <>
+            <ExpectedDeliveries
+              orders={orders}
+              busy={busy === "start"}
+              onStart={(orderId) => run("start", () => startReceipt(orderId))}
+            />
+            <ReceivedDeliveries received={received} busy={busy === "start"} onOpen={(id) => run("start", () => getReceipt(id))} />
+          </>
         ) : (
           <DeliveryCheck receipt={receipt} busy={busy} run={run} onDone={reset} />
         )}
@@ -181,7 +204,6 @@ function ExpectedDeliveries({
                 {order.po_number ?? order.order_id} · arriving {when(order.confirmed_delivery_at ?? order.requested_delivery_at)}
               </p>
             </div>
-            {order.status === "partially_received" && <span className="rcv-chip rcv-chip--ask">Part received</span>}
           </div>
           <ul className="rcv-order__lines">
             {order.lines.map((line) => (
@@ -201,6 +223,43 @@ function ExpectedDeliveries({
       <button className="rcv-button rcv-button--ghost" type="button" disabled={busy} onClick={() => onStart(null)}>
         Something arrived that isn't listed
       </button>
+    </div>
+  );
+}
+
+function ReceivedDeliveries({
+  received,
+  busy,
+  onOpen,
+}: {
+  received: Received[];
+  busy: boolean;
+  onOpen: (receiptId: string) => void;
+}) {
+  if (received.length === 0) return null;
+  return (
+    <div className="rcv-stack">
+      <h2 className="rcv-section-title">Received</h2>
+      {received.map((r) => (
+        <article className="rcv-card rcv-order" key={r.receipt_id}>
+          <div className="rcv-order__top">
+            <div>
+              <p className="rcv-order__supplier">{r.supplier_name ?? "Not on an order"}</p>
+              <p className="rcv-muted">
+                {[r.po_number, r.slip_number && `slip ${r.slip_number}`, r.confirmed_at && `checked in ${when(r.confirmed_at)}`]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+              {r.credit_ref && <p className="rcv-muted">Credit request {r.credit_ref}</p>}
+            </div>
+            {r.order_status === "received" && <span className="rcv-chip rcv-chip--good">Delivered</span>}
+            {r.order_status === "partially_received" && <span className="rcv-chip rcv-chip--ask">Part received</span>}
+          </div>
+          <button className="rcv-button rcv-button--ghost" type="button" disabled={busy} onClick={() => onOpen(r.receipt_id)}>
+            View check-in
+          </button>
+        </article>
+      ))}
     </div>
   );
 }

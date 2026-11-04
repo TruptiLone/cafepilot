@@ -101,12 +101,14 @@ def _tz(session: Session, cafe_id: str) -> ZoneInfo:
 
 
 PO_NUMBER_START = 122  # the first market order is PO-123 (matches the demo packing slips)
+PO_NUMBER_SEEDED = 1000  # PO-1042 and up are seeded receiving fixtures; new orders don't count from them
 
 
 def next_po_number(session: Session, cafe_id: str) -> str:
     """Human order numbers (PO-123…), unique per café."""
     numbers = session.scalars(select(PurchaseOrder.po_number).where(PurchaseOrder.cafe_id == cafe_id))
-    highest = max((int(n.split("-")[-1]) for n in numbers if n and n.split("-")[-1].isdigit()), default=PO_NUMBER_START)
+    taken = (int(n.split("-")[-1]) for n in numbers if n and n.split("-")[-1].isdigit())
+    highest = max((n for n in taken if n < PO_NUMBER_SEEDED), default=PO_NUMBER_START)
     return f"PO-{highest + 1}"
 
 

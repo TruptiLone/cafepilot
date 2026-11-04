@@ -57,3 +57,6 @@ class CafeEvent(Base):
     is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     detected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Demo only: an event waiting for the scripted "Muse found a new event" moment stays hidden until then.
+    discovery_pending: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    discovered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

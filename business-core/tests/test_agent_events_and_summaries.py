@@ -19,6 +19,7 @@ from backend.modules.agent.router import get_planner_client
 from backend.modules.agent.summaries import quantity, summarize_run
 from backend.modules.agent.events import event_staffing
 from backend.modules.agent.planner import SYSTEM_PROMPT
+from backend.modules.events.models import CafeEvent
 from scripts.seed_event_surge import apply_reset, plan_reset, seed_event_surge
 from tests.test_agent_planner import FakeClient
 
@@ -102,8 +103,10 @@ def session() -> Session:
     transaction = connection.begin()
     db = sessionmaker(bind=connection, join_transaction_mode="create_savepoint")()
     try:
-        if db.get(Cafe, "CAFE001") is None or get_event(db, MARKET) is None:
+        if db.get(Cafe, "CAFE001") is None or db.get(CafeEvent, MARKET) is None:
             pytest.skip("demo history not seeded; run scripts/seed_sales_history.py")
+        db.get(CafeEvent, MARKET).discovery_pending = False  # as if Muse already found it (rolled back after)
+        db.flush()
         yield db
     finally:
         db.close()

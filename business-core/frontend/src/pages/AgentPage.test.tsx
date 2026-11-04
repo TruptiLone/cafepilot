@@ -211,7 +211,7 @@ describe("AgentPage", () => {
       if (url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST") return jsonResponse({ planning: planning(), run });
       return jsonResponse(run);
     }, [marketEvent]);
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
 
     const events = await screen.findByRole("region", { name: "Events Muse found" });
     expect(within(events).getByRole("heading", { name: /^Good (morning|afternoon|evening)\.$/ })).toBeTruthy();
@@ -225,12 +225,12 @@ describe("AgentPage", () => {
     expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")).toBe(true);
   });
 
-  it("shows At a glance on the Plan home only, from the café's records, at the demo time", async () => {
+  it("shows At a glance on the Events home only, from the café's records, at the demo time", async () => {
     const fetchMock = stubFetch((url, init) => {
       if (url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST") return jsonResponse({ planning: planning(), run });
       return jsonResponse(run);
     }, [{ ...marketEvent, knowledge_as_of: "2026-11-05T18:00:00-08:00" }]);
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     const glance = await screen.findByRole("complementary", { name: "At a glance" });
     expect(within(within(glance).getByRole("region", { name: "Running low" })).getByText("1.25 L left")).toBeTruthy();
     const coming = within(glance).getByRole("region", { name: "Coming in" });
@@ -247,7 +247,7 @@ describe("AgentPage", () => {
 
   it("opens the existing plan for an event that was already checked", async () => {
     stubFetch(() => jsonResponse(run), [{ ...marketEvent, plan_state: "needs_ok", run_id: "RUN-1", latest_run_id: "RUN-1" }]);
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     const events = await screen.findByRole("region", { name: "Events Muse found" });
     expect(within(events).getByText("Needs your OK")).toBeTruthy();
     await userEvent.click(within(events).getByRole("button", { name: "Open plan" }));
@@ -374,7 +374,7 @@ describe("AgentPage", () => {
 
   it("sends a typed request and shows the new plan", async () => {
     const fetchMock = mockApi({ planning: planning(), run });
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     await userEvent.type(screen.getByLabelText("Ask Muse"), "Farmers market Sunday, order milk");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
@@ -387,7 +387,7 @@ describe("AgentPage", () => {
       planning: planning({}, [{ code: "missing_prerequisite", node_id: "add", message: "schedule_shift must come after coverage_report" }] as never),
       run: null,
     });
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     await userEvent.type(screen.getByLabelText("Ask Muse"), "add a barista");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText("The plan didn't pass CaféPilot's safety checks")).toBeTruthy();
@@ -396,7 +396,7 @@ describe("AgentPage", () => {
 
   it("shows the planner's clarification question", async () => {
     mockApi({ planning: planning({ status: "needs_clarification", question: "Which day is the event?" }), run: null });
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     await userEvent.type(screen.getByLabelText("Ask Muse"), "prep for the event");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText("Which day is the event?")).toBeTruthy();
@@ -408,7 +408,7 @@ describe("AgentPage", () => {
     const fetchMock = stubFetch((url, init) =>
       url === "/api/v1/agent/runs" && init?.method === "POST" ? jsonResponse(replies.shift()) : url.startsWith("/api/v1/agent/runs/RUN-1") ? jsonResponse(run) : undefined,
     );
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     await userEvent.type(screen.getByLabelText("Ask Muse"), "order one carton of whole milk");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText("When do you need it delivered by?")).toBeTruthy();
@@ -426,7 +426,7 @@ describe("AgentPage", () => {
 
   it("shows the server's reason when planning is unavailable", async () => {
     mockApi({ status: 503, detail: "MODEL_API_KEY is not set in business-core/.env" });
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     await userEvent.type(screen.getByLabelText("Ask Muse"), "anything");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("MODEL_API_KEY"));
@@ -434,7 +434,7 @@ describe("AgentPage", () => {
 
   it("says Meta Muse models before any plan, then the model that made the plan", async () => {
     stubFetch(() => undefined, [marketEvent]);
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     expect(await screen.findByText(powered("Powered by Meta Muse models"))).toBeTruthy();
     cleanup();
 
@@ -446,7 +446,7 @@ describe("AgentPage", () => {
 
   it("says how long planning took when the plan comes back", async () => {
     mockApi({ planning: { ...planning(), latency_ms: 27_400 }, run });
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     await userEvent.type(screen.getByLabelText("Ask Muse"), "Farmers market Sunday");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText(/Planned by muse-spark-1\.3 in 27 s\./)).toBeTruthy();
@@ -454,7 +454,7 @@ describe("AgentPage", () => {
 
   it("does not claim the total time when planning took two attempts", async () => {
     mockApi({ planning: { ...planning(), attempts: 2, latency_ms: 27_400 }, run: { ...run, attempts: 2 } });
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     await userEvent.type(screen.getByLabelText("Ask Muse"), "Farmers market Sunday");
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     expect(await screen.findByText(/Planned by muse-spark-1\.3 after 2 attempts; the last took 27 s\./)).toBeTruthy();
@@ -506,7 +506,7 @@ describe("AgentPage", () => {
     expect(screen.queryByText("In short")).toBeNull();
   });
 
-  it("a quick question on the Plan tab opens Ask and asks it; the chat survives switching tabs", async () => {
+  it("a quick question on the Events tab opens Ask and asks it; the chat survives switching tabs", async () => {
     const fetchMock = stubFetch((url) => {
       if (url === "/api/v1/agent/chat")
         return jsonResponse({ intent: "answer", message: "q", channel: "text", model: "muse-spark-1.3", latency_ms: 2100,
@@ -514,13 +514,13 @@ describe("AgentPage", () => {
           reply: "Yes, we have 9 banana nut muffins on hand.", reply_by: "muse", follow_ups: [], notes: [] });
       return undefined;
     }, [marketEvent]);
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     const quick = within((await screen.findByText("Or ask Muse")).parentElement as HTMLElement);
     await userEvent.click(quick.getByRole("button", { name: "Do we have banana nut muffins?" }));
     expect(await screen.findByText("Yes, we have 9 banana nut muffins on hand.")).toBeTruthy();
     const chatCall = fetchMock.mock.calls.find(([url]) => url === "/api/v1/agent/chat");
     expect(JSON.parse(String(chatCall?.[1]?.body)).message).toBe("Do we have banana nut muffins?");
-    await userEvent.click(screen.getByRole("button", { name: /^Plan/ }));
+    await userEvent.click(screen.getByRole("button", { name: /^Events/ }));
     await userEvent.click(screen.getByRole("button", { name: "Ask" }));
     expect(screen.getByText("Yes, we have 9 banana nut muffins on hand.")).toBeTruthy();
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/v1/agent/chat")).toHaveLength(1);  // asked once
@@ -545,11 +545,13 @@ describe("AgentPage", () => {
     expect(await screen.findByText("Bay Dairy Co. declined. Muse is looking for another supplier… · Muse Spark 1.3")).toBeTruthy();
   });
 
-  it("has three tabs: Plan, Ask and Posts", async () => {
+  it("opens on Ask, with three tabs: Ask, Events and Posts", async () => {
     mockApi();
     renderPage();
     const tabs = within(await screen.findByRole("navigation", { name: "Muse" }));
-    expect(tabs.getAllByRole("button").map((b) => b.textContent?.replace(/\d+$/, "").trim())).toEqual(["Plan", "Ask", "Posts"]);
+    expect(tabs.getAllByRole("button").map((b) => b.textContent?.replace(/\d+$/, "").trim())).toEqual(["Ask", "Events", "Posts"]);
+    expect(tabs.getByRole("button", { name: "Ask" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByLabelText("Ask Muse a question")).toBeTruthy();
     expect(tabs.queryByRole("link")).toBeNull();  // Deliveries is gone; Receive delivery stays in the sidebar
   });
 
@@ -559,7 +561,7 @@ describe("AgentPage", () => {
     const past = { ...marketEvent, event_id: "EVT_HALLOWEEN", title: "Halloween", starts_at: "2026-10-31T14:00:00-07:00",
       ends_at: "2026-10-31T17:00:00-07:00", knowledge_as_of: asOf };
     stubFetch((url) => (url === "/api/v1/agent/promo-posts" ? jsonResponse([]) : undefined), [upcoming, past]);
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     const cards = await screen.findAllByRole("article");
     const card = (title: string) => cards.find((c) => within(c).queryByRole("heading", { name: title }))!;
     expect(within(card("Halloween")).queryByRole("button", { name: "Make a post" })).toBeNull();
@@ -580,7 +582,7 @@ describe("AgentPage", () => {
       if (url.startsWith("/api/v1/agent/runs/RUN-1")) return jsonResponse(run);
       return undefined;
     }, [demoEvent]);
-    renderPage();
+    renderPage("/agent?tab=plan");  // the old Plan deep link opens Events
     await screen.findByText("Santa Clara Farmers Market");
     expect(screen.getByText(powered("Powered by Meta Muse models"))).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Ask" }));
@@ -650,5 +652,60 @@ describe("AgentPage", () => {
     const boxes = document.querySelectorAll(".sg-box--decision");
     const waiting = Array.from(boxes).find((b) => b.getAttribute("data-s") === "wait") as HTMLElement;
     expect(within(waiting).getByRole("button", { name: "Approve" })).toBeTruthy();
+  });
+
+  it("lists Upcoming events with their plan button and Past events read-only", async () => {
+    const halloween = { event_id: "EVT_HALLOWEEN", title: "Halloween", category: "holiday", starts_at: "2026-10-31T21:00:00Z",
+      ends_at: "2026-11-01T01:00:00Z", note: "Trick-or-treat afternoon; usually quieter" };
+    const fetchMock = stubFetch((url) => (url.startsWith("/api/v1/agent/events/past?") ? jsonResponse([halloween]) : undefined),
+      [{ ...marketEvent, knowledge_as_of: "2026-11-05T18:00:00-08:00" }]);
+    renderPage("/agent?tab=events");
+    expect(await screen.findByRole("heading", { name: "Upcoming" })).toBeTruthy();
+    const pastHeading = await screen.findByRole("heading", { name: "Past events" });
+    const cards = screen.getAllByRole("article");
+    const card = (title: string) => cards.find((c) => within(c).queryByRole("heading", { name: title }))!;
+    expect(within(card("Santa Clara Farmers Market")).getByRole("button", { name: "Let's plan" })).toBeTruthy();
+    expect(within(card("Halloween")).queryAllByRole("button")).toHaveLength(0);
+    expect(within(card("Halloween")).getByText("Trick-or-treat afternoon; usually quieter")).toBeTruthy();
+    expect(pastHeading.compareDocumentPosition(card("Halloween")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const asked = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.startsWith("/api/v1/agent/events/past?"));
+    expect(new URL(asked!, "http://x").searchParams.get("as_of")).toBe("2026-11-05T18:00:00-08:00");  // the demo clock
+  });
+
+  it("after the first answer in Ask, Muse finds the market (once) and View event shows it on Events", async () => {
+    const thanksgiving = { ...marketEvent, event_id: "EVT_TG", title: "Thanksgiving", category: "holiday",
+      starts_at: "2026-11-26T15:00:00Z", ends_at: "2026-11-26T22:00:00Z", knowledge_as_of: "2026-11-05T18:00:00-08:00" };
+    let found = false;
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith("/api/v1/agent/events?")) return jsonResponse(found ? [marketEvent, thanksgiving] : [thanksgiving]);
+      if (url.startsWith("/api/v1/agent/events/discover-demo") && init?.method === "POST") {
+        const now = found ? [] : [marketEvent];
+        found = true;
+        return jsonResponse(now);
+      }
+      if (url === "/api/v1/agent/chat")
+        return jsonResponse({ intent: "answer", message: "q", channel: "text", model: "muse-spark-1.3", latency_ms: 900,
+          as_of: "2026-11-05T18:00:00-08:00", lines: [], rows: [], lookups: [], plan_request: null,
+          reply: "Yes, 9 on hand.", reply_by: "muse", follow_ups: [], notes: [] });
+      if (url.startsWith("/api/v1/agent/glance?")) return jsonResponse(GLANCE);
+      return jsonResponse({ detail: "not found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+    expect(screen.queryByText(/Muse found a new event/)).toBeNull();
+    await userEvent.type(await screen.findByLabelText("Ask Muse a question"), "Do we have muffins?{enter}");
+    expect(await screen.findByText("Yes, 9 on hand.")).toBeTruthy();
+    expect(await screen.findByText("Muse found a new event: Santa Clara Farmers Market, Sun Nov 8")).toBeTruthy();
+    expect(screen.getByText("Found a new event")).toBeTruthy();  // the live chip
+    await userEvent.click(screen.getByRole("button", { name: "View event" }));
+    expect(screen.getByRole("button", { name: /^Events/ }).getAttribute("aria-current")).toBe("page");
+    const card = (await screen.findByRole("heading", { name: "Santa Clara Farmers Market" })).closest("article")!;
+    expect(within(card as HTMLElement).getByRole("button", { name: "Let's plan" })).toBeTruthy();
+    expect(screen.queryByText(/Muse found a new event/)).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Ask" }));
+    await userEvent.type(screen.getByLabelText("Ask Muse a question"), "And croissants?{enter}");
+    await waitFor(() => expect(fetchMock.mock.calls.filter(([u]) => u === "/api/v1/agent/chat")).toHaveLength(2));
+    expect(fetchMock.mock.calls.filter(([u]) => String(u).includes("discover-demo"))).toHaveLength(1);  // only once
   });
 });

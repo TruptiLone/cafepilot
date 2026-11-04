@@ -308,6 +308,22 @@ export function listEvents(signal?: AbortSignal): Promise<DetectedEvent[]> {
   return requestJson<DetectedEvent[]>(`/api/v1/agent/events?cafe_id=${ACTIVE_CAFE_ID}`, { signal });
 }
 
+export type PastEvent = { event_id: string; title: string; category: string; starts_at: string; ends_at: string; note: string | null };
+
+/** Events that ended before the (demo) clock, newest first: read-only on the Events tab. */
+export function listPastEvents(asOf?: string, signal?: AbortSignal): Promise<PastEvent[]> {
+  const query = new URLSearchParams({ cafe_id: ACTIVE_CAFE_ID, ...(asOf ? { as_of: asOf } : {}) });
+  return requestJson<PastEvent[]>(`/api/v1/agent/events/past?${query}`, { signal });
+}
+
+/** Demo only, scripted (not live web monitoring): reveal the event a fresh reset hid. Empty when nothing is new. */
+export function discoverDemoEvents(): Promise<DetectedEvent[]> {
+  return requestJson<DetectedEvent[]>(`/api/v1/agent/events/discover-demo?cafe_id=${ACTIVE_CAFE_ID}`, {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+}
+
 export function startEventRun(eventId: string): Promise<StartRunResponse> {
   return requestJson<StartRunResponse>(
     `/api/v1/agent/events/${encodeURIComponent(eventId)}/runs`,
@@ -324,7 +340,7 @@ export function replanStep(runId: string, nodeId: string): Promise<StartRunRespo
 
 export type GlanceRow = { name: string; text: string; detail: string | null };
 
-/** At a glance on the Plan home: below reorder point, next deliveries, who's working (all looked up). */
+/** At a glance on the Events home: below reorder point, next deliveries, who's working (all looked up). */
 export type Glance = {
   as_of: string;
   running_low: GlanceRow[];

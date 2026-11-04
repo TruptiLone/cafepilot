@@ -4,7 +4,7 @@ import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AICallRow, CafeUpdate } from "../../api/updates";
 import UpdatesBell from "./UpdatesBell";
-import { UpdatesProvider } from "./UpdatesProvider";
+import { UpdatesProvider, simulatedLabel } from "./UpdatesProvider";
 
 function update(overrides: Partial<CafeUpdate>): CafeUpdate {
   return { id: "u", kind: "order_sent", group: "orders", at: "2026-11-02T15:51:08-08:00", title: "t", detail: null,
@@ -51,8 +51,8 @@ afterEach(() => {
 });
 
 describe("Updates bell", () => {
-  it("history on load is not news; a new change toasts, badges, and is asked for with since", async () => {
-    const fetchMock = serve([[SENT], [DECLINED]]);
+  it("history on load is not news; a new change toasts and badges, found by id rather than by time", async () => {
+    const fetchMock = serve([[SENT], [{ ...DECLINED, at: "2026-01-01T09:00:00-08:00" }, SENT]]);  // stamped earlier, still news
     renderBell();
     const toast = await screen.findByRole("status");
     expect(within(toast).getByText("Bay Dairy Co. declined PO-1042")).toBeTruthy();
@@ -60,7 +60,7 @@ describe("Updates bell", () => {
     expect(screen.queryAllByRole("status")).toHaveLength(1);  // the earlier "sent" is history: no toast
     expect(screen.getByRole("button", { name: "Updates, 1 new" })).toBeTruthy();
     const second = String(fetchMock.mock.calls[1][0]);
-    expect(new URL(second, "http://x").searchParams.get("since")).toBe(SENT.at);
+    expect(new URL(second, "http://x").searchParams.get("since")).toBeNull();
   });
 
   it("the panel groups updates and clears the badge", async () => {
@@ -112,5 +112,14 @@ describe("Updates bell", () => {
     renderBell(80);
     expect(await screen.findByRole("status")).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+});
+
+describe("simulatedLabel", () => {
+  it("calls the demo's event discovery scripted, not a reply", () => {
+    const update = { id: "event:EVT:found", kind: "event_found", group: "plans", at: "2026-11-05T18:00:00-08:00",
+      title: "Muse found a new event: Santa Clara Farmers Market, Sun Nov 8", detail: null, simulated: true, run_id: null,
+      model: null } as CafeUpdate;
+    expect(simulatedLabel(update)).toBe("scripted demo");
   });
 });

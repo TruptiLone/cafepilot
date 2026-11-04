@@ -17,7 +17,7 @@ function App() {
         <Route path="receiving" element={<ReceivingPage />} />
         <Route path="sales" element={<SalesPage />} />
         <Route path="staffing" element={<StaffingPage />} />
-        <Route index element={<Navigate replace to="/dashboard" />} />
+        <Route index element={<Navigate replace to="/agent" />} />
         <Route path="*" element={<Navigate replace to="/dashboard" />} />
       </Route>
     </Routes>

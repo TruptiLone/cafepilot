@@ -1,10 +1,10 @@
-"""End-to-end glasses test with one real milk carton (test only; the demo data and plans are unchanged).
+"""End-to-end glasses test with one real half gallon of whole milk (test only; the demo data and plans are unchanged).
 
 Run from business-core/:
-    PYTHONPATH=. python scripts/glasses_test_order.py order        # 1 × 1.7 L whole milk, waits for your OK
+    PYTHONPATH=. python scripts/glasses_test_order.py order        # 1 half gallon of whole milk, waits for your OK
     PYTHONPATH=. python scripts/glasses_test_order.py slip PO-1041 # A4 packing slip (PNG + PDF) for that order
 
-`order` makes a one-step plan: send 1 carton of whole milk to "Glasses Test Dairy (test)", a simulated
+`order` makes a one-step plan: send 1 half gallon of whole milk to "Glasses Test Dairy (test)", a simulated
 supplier only this script names (see TEST_SUPPLIERS in cafe_policies.py). Muse doesn't plan it: the quantity
 is fixed here, so the validator's "quantities come from calculate_shortfall" rule is waived for this one
 test step and the run says so. You approve it in the web app like any other change; the simulated supplier
@@ -51,7 +51,7 @@ def make_order(session: Session, delivery_in_hours: int = 1) -> AgentPlanRun:
     deliver = (now + timedelta(hours=delivery_in_hours)).replace(minute=0, second=0, microsecond=0)
     plan = Plan.model_validate({
         "status": "plan",
-        "goal": "Test order: 1 carton of whole milk for the glasses check",
+        "goal": "Test order: 1 half gallon of whole milk for the glasses check",
         "assumptions": [
             "Test only: this order was made by scripts/glasses_test_order.py, not planned by Muse.",
             f"The quantity is fixed at 1 × {item['pack_name']} ({item['description']}), not worked out from stock.",
@@ -61,8 +61,8 @@ def make_order(session: Session, delivery_in_hours: int = 1) -> AgentPlanRun:
             "args": {"cafe_id": CAFE_ID, "supplier_id": SUPPLIER_ID,
                      "lines": [{"ingredient_id": "WHOLE_MILK", "quantity": item["pack_size"], "unit": "mL"}],
                      "requested_delivery_at": deliver.isoformat(),
-                     "note": "Test order for the glasses delivery check (one real carton)."},
-            "reason": "Test the glasses delivery check end to end with one real milk carton.",
+                     "note": "Test order for the glasses delivery check (one real half gallon)."},
+            "reason": "Test the glasses delivery check end to end with one real half gallon of whole milk.",
             "only_if": "You are running the glasses test (simulated supplier, nothing is really ordered).",
         }],
     })
@@ -75,7 +75,7 @@ def make_order(session: Session, delivery_in_hours: int = 1) -> AgentPlanRun:
         valid=True, nodes=checked.nodes, edges=checked.edges, levels=checked.levels,
         warnings=checked.warnings + [f"Test order: rules waived by the test script: {', '.join(waived)}."],
     )
-    run = create_run(session, query="Test: order one 1.7 L carton of whole milk (glasses test)", cafe_id=CAFE_ID,
+    run = create_run(session, query="Test: order one half gallon (1.89 L) of whole milk (glasses test)", cafe_id=CAFE_ID,
                      as_of=datetime.now(timezone.utc), plan=plan, validation=validation,
                      model="test script (no model)", attempts=0)
     run = execute(session, run.run_id)
@@ -189,7 +189,7 @@ def draw_slip(session: Session, po_number: str, out_dir: Path = OUT_DIR) -> Path
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="command", required=True)
-    order = sub.add_parser("order", help="make the 1-carton test order (waits for your OK)")
+    order = sub.add_parser("order", help="make the 1-half-gallon test order (waits for your OK)")
     order.add_argument("--delivery-in-hours", type=int, default=1)
     slip = sub.add_parser("slip", help="draw the A4 packing slip for a confirmed order")
     slip.add_argument("po_number")

@@ -1,6 +1,6 @@
 """Status changes for the Updates bell, read from records that already exist.
 
-Supplier orders (sent, confirmed, rejected, delivered) come from purchase_orders and their checked-in
+Events Muse found (the demo's scripted discovery), supplier orders (sent, confirmed, rejected, delivered) come from purchase_orders and their checked-in
 receipts; shift replies (confirmed,
 declined) from shift_offers; replans from the replan's run (finished) and its ai_calls row (started,
 when the request began). Nothing is invented: every line is built from one of those records, and
@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from backend.models.cafe import Cafe
 from backend.modules.agent.models import AICall, AgentPlanRun
 from backend.modules.agent.summaries import clock, day, quantity, span
+from backend.modules.events.models import CafeEvent
 from backend.modules.inventory.models import InventoryItem
 from backend.modules.purchasing.models import PurchaseOrder, ShiftOffer
 from backend.modules.purchasing.service import delivery_for
@@ -99,6 +100,14 @@ def updates(session: Session, cafe_id: str, since: datetime | None = None, limit
                 "Muse started looking for another way", None, False, run.parent_run_id, call.model)
         add(f"replan:{run.run_id}:finished", "replan_finished", "plans", run.created_at,
             "Muse found another way", run.goal, False, run.run_id, run.model)
+
+    # Demo only: the scripted event discovery (see events.DEMO_DISCOVERY_EVENT_IDS), so simulated.
+    found = session.scalars(select(CafeEvent).where(CafeEvent.cafe_id == cafe_id, CafeEvent.discovered_at.is_not(None)))
+    for event in found:
+        starts = event.starts_at.astimezone(tz)
+        add(f"event:{event.event_id}:found", "event_found", "plans", event.discovered_at,
+            f"Muse found a new event: {event.name}, {day(starts)}",
+            "; ".join(p for p in (event.location, event.notes) if p) or None, event.is_synthetic, None)
 
     out.sort(key=lambda u: u["at"], reverse=True)  # real instants, not strings (offsets differ across DST)
     return [{**u, "at": u["at"].astimezone(tz).isoformat()} for u in out[:limit]]

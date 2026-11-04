@@ -93,7 +93,8 @@ npm install
 npm run dev                     # http://localhost:5173/agent
 ```
 
-Open **Ask CaféPilot** and click **Let's plan** on the Santa Clara Farmers Market.
+Open **Ask CaféPilot**, ask Muse anything, then click **View event** on "Muse found a new event" and
+**Let's plan** on the Santa Clara Farmers Market.
 
 Ports: Postgres 5433, API 8001, web app 5173. The glasses photo receiver
 (`./scripts/run_local_photo_receiver.sh`, optional) listens on 8004.
@@ -131,6 +132,19 @@ PYTHONPATH=. python scripts/seed_event_surge.py --fresh --with-delivery  # plus 
 
 This removes the agent's runs and the changes they made (orders, shifts, stock counts), then reloads
 the scenario. The server can stay running; refresh the page.
+
+For a recording, one command stops old servers, resets the data (with delivery) and starts the API
+(8001), the web app (5173) and the glasses photo receiver (8004); Ctrl-C stops all three:
+
+```bash
+./scripts/start_demo.sh           # from business-core; needs .venv there
+./scripts/start_demo.sh --reset   # between takes (data and shared photos; servers keep running)
+```
+
+Event discovery in the demo is scripted, not live web monitoring: `--fresh` hides the Santa Clara
+Farmers Market, and after your first question in **Ask** the app "finds" it (one call to
+`POST /api/v1/agent/events/discover-demo`), shows "Muse found a new event" and adds it to **Events**.
+Planning it then runs the real planner, exactly like any other event.
 
 Simulated suppliers answer about 8 seconds after an order is sent. To keep "Waiting on <supplier>"
 on screen longer (for a recording), add this to `business-core/.env` and restart uvicorn (`--reload`

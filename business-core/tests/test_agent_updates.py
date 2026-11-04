@@ -88,7 +88,7 @@ def test_a_replan_started_and_finished(session: Session) -> None:
                        model="muse-wonder-1.0", latency_ms=5000, attempts=1, outcome="ok", run_id=child.run_id,
                        request_summary="q", error=None))
     session.flush()
-    finished, started = [u for u in updates(session, C) if u["group"] == "plans"]
+    finished, started = [u for u in updates(session, C) if u["kind"].startswith("replan_")]
     assert (finished["title"], finished["detail"], finished["model"]) == ("Muse found another way", "Get the milk from Willow Ridge", "muse-wonder-1.0")
     assert started["title"] == "Muse started looking for another way"
     assert datetime.fromisoformat(finished["at"]) - datetime.fromisoformat(started["at"]) == timedelta(seconds=5)

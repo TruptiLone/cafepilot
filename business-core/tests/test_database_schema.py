@@ -32,7 +32,7 @@ APPLICATION_TABLES = {
     "agent_approvals",
     "ai_calls",
 }
-REVISION = "d054261bf4c1"
+REVISION = "7c2e5a9d4b10"
 
 pytestmark = pytest.mark.database
 

@@ -45,19 +45,21 @@ AS_OF = "2026-11-05T18:00:00-08:00"  # the demo clock: Thu Nov 5, 6 PM
 
 COUNTED_AT = datetime.fromisoformat("2026-11-05T17:00:00-08:00")
 COUNT_ID = f"{PREFIX}COUNT_THU_CLOSE"
+# Sized so the Sunday market needs exactly what the demo packing slips show (PS-58216 + PS-58217):
+# 4 half gallons of whole milk, 1 bag of coffee beans and 10 croissants; oat milk is enough.
 COUNT_QUANTITIES = {
-    "WHOLE_MILK": Decimal("3000.000"),
-    "OAT_MILK": Decimal("1500.000"),
-    "COFFEE_BEANS": Decimal("6000.000"),
+    "WHOLE_MILK": Decimal("500.000"),
+    "OAT_MILK": Decimal("3500.000"),
+    "COFFEE_BEANS": Decimal("4500.000"),
     "DRIP_COFFEE": Decimal("1500.000"),
     "COLD_BREW_CONCENTRATE": Decimal("4000.000"),
-    "BUTTER_CROISSANT": Decimal("30.000"),
+    "BUTTER_CROISSANT": Decimal("11.000"),
     "BLUEBERRY_MUFFIN": Decimal("24.000"),
     "BANANA_NUT_MUFFIN": Decimal("14.000"),
     "CHOCOLATE_CHIP_MUFFIN": Decimal("16.000"),
 }
-# Reorder points for the main items ("are we low on anything"). Oat milk (1.25 L after the spill) and
-# banana nut muffins (14, enough for Sunday) are deliberately below theirs on Thursday evening; the rest are above.
+# Reorder points for the main items ("are we low on anything"). Whole milk, croissants and banana nut
+# muffins (14, enough for Sunday) are below theirs on Thursday evening; the rest are above.
 REORDER_POINTS = {
     "OAT_MILK": Decimal("3000.000"),
     "WHOLE_MILK": Decimal("2000.000"),

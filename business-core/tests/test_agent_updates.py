@@ -43,7 +43,7 @@ def since_now() -> datetime:
 
 def test_an_order_going_out_and_being_rejected(session: Session) -> None:
     start = since_now()
-    run = decide(session, _run(session, _order_plan()).run_id, "order", "approved")  # Bay Dairy, oat milk included
+    run = decide(session, _run(session, _order_plan("BAY_DAIRY")).run_id, "order", "approved")  # oat milk included
     [sent] = updates(session, C, start)
     assert (sent["kind"], sent["group"], sent["simulated"], sent["run_id"]) == ("order_sent", "orders", True, run.run_id)
     assert sent["title"].startswith("Order PO-") and sent["title"].endswith("sent to Bay Dairy Co.")

@@ -3,6 +3,7 @@
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -146,9 +147,9 @@ def test_demo_delay_holds_the_supplier_reply_back(session: Session, monkeypatch)
     assert DemoTiming(_env_file=None).demo_supplier_reply_delay_seconds == 12
 
 
-def test_usual_supplier_is_out_of_oat_milk_and_muse_replans(session: Session, tmp_path, monkeypatch, ai_call_rows) -> None:
+def test_supplier_out_of_oat_milk_rejects_and_muse_replans(session: Session, tmp_path, monkeypatch, ai_call_rows) -> None:
     monkeypatch.setattr(planner_module, "LLM_LOG_PATH", tmp_path / "llm.jsonl")
-    run = _run(session, _order_plan())  # Bay Dairy, the usual supplier
+    run = _run(session, _order_plan("BAY_DAIRY"))
     run = decide(session, run.run_id, "order", "approved")
     settle_due(session, cafe_id=C, now=LATER)
     order = session.get(PurchaseOrder, next(n for n in run.nodes if n.node_id == "order").result["order_id"])
@@ -235,8 +236,172 @@ def test_find_suppliers_prices_the_order_and_code_picks_the_supplier(session: Se
     nodes[2]["args"]["supplier_id"] = "$suppliers.recommended_supplier_id"
     run = _run(session, nodes)
     found = next(n for n in run.nodes if n.node_id == "suppliers").result
-    assert [o["name"] for o in found["suppliers"]] == ["Bay Dairy Co.", "Willow Ridge Dairy Supply"]
+    assert [o["name"] for o in found["suppliers"]] == ["Willow Ridge Dairy Supply", "Bay Dairy Co."]
     assert all(o["carries_all"] and o["can_deliver_in_time"] for o in found["suppliers"])
-    assert found["recommended_supplier_id"] == "BAY_DAIRY"  # usual supplier; its stock-out shows only when it answers
+    assert found["recommended_supplier_id"] == "WILLOW_RIDGE"  # the usual supplier
     order = next(n for n in run.nodes if n.node_id == "order")
-    assert order.status == "awaiting_approval" and order.resolved_args["supplier_id"] == "BAY_DAIRY"
+    assert order.status == "awaiting_approval" and order.resolved_args["supplier_id"] == "WILLOW_RIDGE"
+
+
+def test_a_short_delivery_is_reordered_from_another_supplier(session: Session, monkeypatch) -> None:
+    from backend.modules.agent.acknowledgements import change_statuses
+    from backend.modules.agent.registry import REGISTRY
+    from backend.modules.agent.replanning import replan_request, replan_summary
+
+    run = _run(session, _order_plan())  # Willow Ridge, the usual supplier: 4 half gallons of whole milk
+    run = decide(session, run.run_id, "order", "approved")
+    settle_due(session, cafe_id=C, now=LATER)
+    po = session.get(PurchaseOrder, next(n for n in run.nodes if n.node_id == "order").result["order_id"])
+    milk = next(l for l in po.lines if l.ingredient_id == "WHOLE_MILK")
+    assert (po.status, po.supplier_id, milk.packs, milk.pack_name) == ("confirmed", "WILLOW_RIDGE", 4, "half gallon (1.89 L)")
+
+    # The glasses counted 3 of the 4 cartons and the owner confirmed: 1 half gallon never arrived.
+    receipt = receiving_service.start_receipt(session, C, po.order_id)
+    receipt.slip_number, receipt.status, receipt.confirmed_at = "PS-58216", "confirmed", LATER
+    for line in po.lines:
+        line.received_quantity = line.quantity - (milk.pack_size if line is milk else 0)
+    po.status = "partially_received"
+    session.flush()
+
+    order = change_statuses(session, run)[0]["order"].acknowledgement
+    assert order.next_step == "find_alternative"  # the plan replans it right away
+    assert "Still missing 1.89 L whole milk" in order.details
+    text = replan_request(session, run, "order")
+    assert "Willow Ridge Dairy Supply delivered purchase order" in text and "(packing slip PS-58216)" in text
+    assert "1.89 L whole milk never arrived" in text and "another supplier than Willow Ridge Dairy Supply" in text
+    assert replan_summary(session, run, "order") == "Replan: Willow Ridge Dairy Supply delivered short, find another milk supplier"
+    # Only what is missing is re-sent: code decides the quantity, not the model.
+    again = REGISTRY["get_purchase_order"].run(session, {"cafe_id": C, "order_id": po.order_id})
+    assert [(l["ingredient_id"], l["quantity"]) for l in again["reorder_lines"]] == [("WHOLE_MILK", "1890.000")]
+
+
+def test_the_market_packing_slip_with_one_carton_missing_is_short_by_one_half_gallon(session: Session) -> None:
+    """PS-58216 as printed (pack column "4 cans × ½ gal", "10 croissants"): sizes come from the order, not the slip."""
+    from backend.modules.agent.registry import REGISTRY
+    from backend.modules.purchasing.service import OrderLineIn, send_order
+    from backend.modules.receiving.vision import PhotoItem, PhotoRead, SlipLine, SlipRead
+
+    po = send_order(session, cafe_id=C, supplier_id="WILLOW_RIDGE", order_id="PO_TEST_MARKET",
+                    requested_delivery_at=datetime.fromisoformat("2026-11-08T06:00:00-08:00"), lines=[
+                        OrderLineIn("WHOLE_MILK", Decimal("6190"), "mL"), OrderLineIn("COFFEE_BEANS", Decimal("163.8"), "g"),
+                        OrderLineIn("BUTTER_CROISSANT", Decimal("10"), "each")])
+    settle_due(session, cafe_id=C, now=LATER)
+    assert (po.po_number, po.status, [l.packs for l in po.lines]) == ("PO-123", "confirmed", [4, 1, 10])
+
+    receipt = receiving_service.start_receipt(session, C)
+    receipt = receiving_service.attach_slip(session, receipt, SlipRead(
+        supplier="Willow Ridge Dairy Supply", packing_slip_number="PS-58216", customer_po_number="PO-123", lines=[
+            SlipLine(item_number="WR-1175", description="Whole Milk, half gallon (1.89 L)", pack="4 cans × ½ gal", ordered=4, shipped=4, backordered=0),
+            SlipLine(item_number="WR-2210", description="Coffee Beans, 12 oz bag", pack="1 bag × 12 oz", ordered=1, shipped=1, backordered=0),
+            SlipLine(item_number="WR-3305", description="Butter Croissants, baked", pack="10 croissants", ordered=10, shipped=10, backordered=0)]), "m")
+    receipt = receiving_service.attach_photo(session, receipt, PhotoRead(items=[
+        PhotoItem(product="Whole Milk", visible_units=3), PhotoItem(product="Espresso Coffee Beans", visible_units=1),
+        PhotoItem(product="Butter Croissant", visible_units=10)]), "m")
+    assert receipt.order_id == po.order_id
+    assert [(l.ingredient_id, l.status) for l in receipt.lines] == [
+        ("WHOLE_MILK", "short"), ("COFFEE_BEANS", "match"), ("BUTTER_CROISSANT", "match")]
+    assert receipt.lines[0].message == "Muse can see 3 cartons (5.67 L), but the slip says 4 cartons (7.56 L): 1 carton (1.89 L) short."
+
+    receiving_service.confirm(session, receipt)
+    session.refresh(po)
+    assert po.status == "partially_received"
+    again = REGISTRY["get_purchase_order"].run(session, {"cafe_id": C, "order_id": po.order_id})
+    assert [(l["ingredient_id"], l["quantity"]) for l in again["reorder_lines"]] == [("WHOLE_MILK", "1890.000")]
+
+
+def test_a_misread_item_number_still_matches_the_order_line_by_its_description(session: Session) -> None:
+    """From a real glasses photo: Muse read WR-1175 as WR-1270 and WR-2210 as WB-2210."""
+    from backend.modules.purchasing.service import OrderLineIn, send_order
+    from backend.modules.receiving.counting import noun_for
+    from backend.modules.receiving.vision import SlipLine, SlipRead
+
+    send_order(session, cafe_id=C, supplier_id="WILLOW_RIDGE", order_id="PO_TEST_MARKET",
+               requested_delivery_at=datetime.fromisoformat("2026-11-08T06:00:00-08:00"), lines=[
+                   OrderLineIn("WHOLE_MILK", Decimal("6190"), "mL"), OrderLineIn("COFFEE_BEANS", Decimal("163.8"), "g")])
+    receipt = receiving_service.attach_slip(session, receiving_service.start_receipt(session, C), SlipRead(
+        packing_slip_number="PS-58216", customer_po_number="PO-123", lines=[
+            SlipLine(item_number="WR-1270", description="Whole Milk, half gallon (1.89 L)", pack="4 cans - 1/2 gal", shipped=4),
+            SlipLine(item_number="WB-2210", description="Coffee Beans, 12 oz bag", pack="1 bag = 12 oz", shipped=1)]), "m")
+    assert [(l.ingredient_id, l.order_line_no is not None) for l in receipt.lines] == [("WHOLE_MILK", True), ("COFFEE_BEANS", True)]
+    assert noun_for("WHOLE_MILK", "Whole Milk, half gallon (1.89 L)") == "plastic jug"  # SAM finds jugs, not cartons
+    assert noun_for("WHOLE_MILK", "Whole Milk, 1 L carton") == "milk carton"
+
+
+def test_an_unsure_count_above_the_slip_asks_the_owner_instead_of_calling_it_over(session: Session) -> None:
+    """From a real glasses photo: 10 croissants piled in a bowl, SAM found 10, Muse pointed at one more."""
+    from backend.modules.purchasing.service import OrderLineIn, send_order
+    from backend.modules.receiving.vision import PhotoItem, PhotoRead, SlipLine, SlipRead
+
+    send_order(session, cafe_id=C, supplier_id="WILLOW_RIDGE", order_id="PO_TEST_MARKET",
+               requested_delivery_at=datetime.fromisoformat("2026-11-08T06:00:00-08:00"),
+               lines=[OrderLineIn("BUTTER_CROISSANT", Decimal("10"), "each")])
+    receipt = receiving_service.attach_slip(session, receiving_service.start_receipt(session, C), SlipRead(
+        packing_slip_number="PS-58216", customer_po_number="PO-123",
+        lines=[SlipLine(item_number="WR-3305", description="Butter Croissants, baked", pack="10 croissants", shipped=10)]), "m")
+    unsure = PhotoRead(items=[PhotoItem(product="Butter Croissant", visible_units=11, possibly_hidden_units=True)])
+    [line] = receiving_service.attach_photo(session, receipt, unsure, "m").lines
+    assert (line.status, line.message) == ("needs_count", "Muse counted 11 units (11 each) of butter croissants but isn't sure; "
+                                                          "the slip says 10 units (10 each). Please count it.")
+    sure = PhotoRead(items=[PhotoItem(product="Butter Croissant", visible_units=11)])
+    [line] = receiving_service.attach_photo(session, receipt, sure, "m").lines
+    assert line.status == "over"  # a sure count above the slip is still "over"
+
+
+def test_a_fixed_link_per_po_opens_its_delivery_check(session: Session) -> None:
+    """/receiving?po=PO-123 for the demo: the checked-in delivery, else the newest glasses check."""
+    from backend.modules.purchasing.service import OrderLineIn, send_order
+    from backend.modules.receiving.vision import SlipLine, SlipRead
+
+    send_order(session, cafe_id=C, supplier_id="WILLOW_RIDGE", order_id="PO_TEST_MARKET",
+               requested_delivery_at=datetime.fromisoformat("2026-11-08T06:00:00-08:00"),
+               lines=[OrderLineIn("BUTTER_CROISSANT", Decimal("10"), "each")])
+    settle_due(session, cafe_id=C, now=LATER)
+    try:
+        api = _api(session)
+        url = "/api/v1/receiving/orders/PO-123/check"
+        assert api.get(url).json()["detail"] == "No delivery check for PO-123 yet."
+        assert api.get("/api/v1/receiving/orders/PO-999/check").status_code == 404
+        receiving_service.start_receipt(session, C, "PO_TEST_MARKET")  # started by hand, nothing read: not shown
+
+        slip = SlipRead(packing_slip_number="PS-58216", customer_po_number="PO-123",
+                        lines=[SlipLine(item_number="WR-3305", description="Butter Croissants, baked", shipped=10)])
+        checks = []
+        for minutes in (1, 2):
+            receipt = receiving_service.start_receipt(session, C)
+            receipt.started_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+            checks.append(receiving_service.attach_slip(session, receipt, slip, "m").receipt_id)
+        session.flush()
+        assert api.get(url).json()["receipt_id"] == checks[1]  # the newest check
+        assert api.get("/api/v1/receiving/orders/po-123/check").json()["receipt_id"] == checks[1]
+
+        first = session.get(receiving_service.Receipt, checks[0])
+        first.status = "confirmed"
+        session.flush()
+        assert api.get(url).json()["receipt_id"] == checks[0]  # once checked in, that one stays on the link
+    finally:
+        app.dependency_overrides.clear()
+
+
+
+def test_received_lists_checked_in_deliveries_newest_first(session: Session) -> None:
+    from backend.modules.purchasing.service import OrderLineIn, send_order
+
+    orders = [send_order(session, cafe_id=C, supplier_id=supplier, order_id=f"PO_TEST_{supplier}",
+                         requested_delivery_at=datetime.fromisoformat("2026-11-08T06:00:00-08:00"),
+                         lines=[OrderLineIn("WHOLE_MILK", Decimal("1890"), "mL")]) for supplier in ("WILLOW_RIDGE", "BAY_DAIRY")]
+    for minutes, (order, status, slip) in enumerate(zip(orders, ("partially_received", "received"), ("PS-58216", "PS-58217"))):
+        receipt = receiving_service.start_receipt(session, C, order.order_id)
+        receipt.status, receipt.slip_number = "confirmed", slip
+        receipt.confirmed_at = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+        order.status = status
+    receiving_service.start_receipt(session, C, orders[0].order_id)  # a draft: not received yet
+    session.flush()
+    try:
+        api = _api(session)
+        assert api.get("/api/v1/receiving/orders").json() == []  # neither is still expected
+        rows = api.get("/api/v1/receiving/received").json()
+        assert [(r["po_number"], r["supplier_name"], r["order_status"], r["slip_number"]) for r in rows] == [
+            ("PO-124", "Bay Dairy Co.", "received", "PS-58217"),
+            ("PO-123", "Willow Ridge Dairy Supply", "partially_received", "PS-58216")]
+    finally:
+        app.dependency_overrides.clear()

@@ -245,7 +245,9 @@ class PurchaseOrderOut(BaseModel):
     requested_delivery_at: datetime
     confirmed_delivery_at: datetime | None
     lines: list["SupplierOrderLineOut"]
-    reorder_lines: list[SupplierOrderLine] = Field(description="The same quantities, ready to send again.")
+    reorder_lines: list[SupplierOrderLine] = Field(
+        description="Ready to send again: the same quantities after a rejection, only what never arrived after a short delivery."
+    )
 
 
 class SupplierOrderResponse(BaseModel):
@@ -443,8 +445,19 @@ def _get_purchase_order(session: Session, p: GetPurchaseOrderInput) -> PurchaseO
         status=order.status, response_reason=order.response_reason,
         requested_delivery_at=order.requested_delivery_at, confirmed_delivery_at=order.confirmed_delivery_at,
         lines=out.lines,
-        reorder_lines=[SupplierOrderLine(ingredient_id=l.ingredient_id, quantity=l.quantity, unit=l.unit) for l in order.lines],
+        reorder_lines=_reorder_lines(order),
     )
+
+
+def _reorder_lines(order: Any) -> list[SupplierOrderLine]:
+    """A delivered-short order is re-sent for what is still missing; any other order for everything."""
+    if order.status != "partially_received":
+        return [SupplierOrderLine(ingredient_id=l.ingredient_id, quantity=l.quantity, unit=l.unit) for l in order.lines]
+    return [
+        SupplierOrderLine(ingredient_id=l.ingredient_id, quantity=l.quantity - (l.received_quantity or 0), unit=l.unit)
+        for l in order.lines
+        if (l.received_quantity or 0) < l.quantity
+    ]
 
 
 def _send_supplier_order(session: Session, p: SupplierOrderInput, ctx: "WriteContext") -> SupplierOrderResponse:
@@ -771,7 +784,8 @@ _ACTIONS: list[Action] = [
         name="get_purchase_order",
         description=(
             "Read a purchase order: supplier, status (sent / confirmed / rejected), the supplier's reason, and "
-            "reorder_lines with the same quantities. Use it to replan after a rejection: send "
+            "reorder_lines (the same quantities, or only what never arrived after a short delivery). Use it to replan "
+            "after a rejection or a short delivery: send "
             "\"$<this step>.reorder_lines\" to another supplier."
         ),
         domain="purchasing",

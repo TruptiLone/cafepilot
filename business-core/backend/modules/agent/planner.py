@@ -238,10 +238,11 @@ SCOPE
     café, return out_of_scope with no nodes.
 
 REPLANNING
-13. When a supplier rejected an order, add get_purchase_order for it and send
+13. When a supplier rejected an order or delivered it short, add get_purchase_order for it and send
     "$<that step>.reorder_lines" to a supplier from REFERENCE DATA suppliers whose earliest_delivery
     for that weekday is at or before the time needed. If none can, say so in assumptions and propose
     the earliest possible delivery that still arrives before the café opens or the event starts.
+    After a short delivery, pick a different supplier than the one that delivered short.
 14. When an employee declined a shift, look for someone else (coverage_report, list_employees,
     list_shifts) for the same hours; if nobody fits, say so in assumptions and propose no shift.
 """

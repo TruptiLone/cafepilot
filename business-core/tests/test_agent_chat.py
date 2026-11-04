@@ -132,11 +132,12 @@ def test_low_means_below_the_reorder_point_in_the_database(session: Session) -> 
     truth = estimates(session)
     low = sorted(e.name for i, e in truth.items()
                  if i in points and e.stock_status == "known" and e.estimated_quantity < points[i])
-    assert low == ["Banana Nut Muffin", "Oat Milk"]  # the demo seed puts these two below
+    assert low == ["Banana Nut Muffin", "Butter Croissant", "Whole Milk"]  # the demo seed puts these below
     flagged = sorted(r["name"] for r in body["rows"] if "below reorder point" in (r["detail"] or ""))
     assert flagged == low
     # The low items lead; no count of everything, and the unknown item is a note at the end.
-    assert body["lines"] == ["Below reorder point: Banana Nut Muffin (14 left, reorder at 16); Oat Milk (1.25 L left, reorder at 3 L)."]
+    assert body["lines"] == ["Below reorder point: Banana Nut Muffin (14 left, reorder at 16); "
+                             "Butter Croissant (11 left, reorder at 15); Whole Milk (500 mL left, reorder at 2 L)."]
     unsure = sorted(e.name for e in truth.values() if e.stock_status != "known")
     assert body["notes"] == [f"Not sure about {', '.join(unsure)}."]
 
@@ -348,7 +349,7 @@ def test_a_made_up_number_is_rejected_and_code_answers(session: Session) -> None
 
 
 def test_unit_conversions_code_shows_are_allowed(session: Session) -> None:
-    text = "Oat milk is down to 1.25 L, under its 3 L reorder point."
+    text = "Whole milk is down to 500 mL, under its 2 L reorder point."
     body = ask(session, "are we low on anything", Router(answer(("get_stock_estimates", {})), text))
     assert (body["reply"], body["reply_by"]) == (text, "muse")
 
@@ -375,7 +376,7 @@ def test_low_stock_follow_ups_plan_an_order_and_check_the_event_day(session: Ses
         {"label": "Plan an order for banana nut muffin", "kind": "plan", "text": "Order more banana nut muffin before we run out"},
         {"label": "Check Sunday stock", "kind": "ask", "text": "Do we have enough stock for Sunday?"},  # the market, not Thanksgiving
     ]
-    assert [r["name"] for r in body["rows"][:2]] == ["Banana Nut Muffin", "Oat Milk"]  # low items lead the table
+    assert [r["name"] for r in body["rows"][:3]] == ["Banana Nut Muffin", "Butter Croissant", "Whole Milk"]  # low items lead
 
 
 def test_no_follow_ups_for_a_change(session: Session) -> None:

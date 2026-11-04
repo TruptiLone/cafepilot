@@ -37,8 +37,9 @@ def test_panel_prepares_for_the_market_not_thanksgiving(api: TestClient) -> None
     assert body["date_label"] == "Thursday, November 5"
 
     milk = {row["ingredient_id"]: row for row in body["inventory"]}
-    assert milk["WHOLE_MILK"]["status"] == "short" and milk["OAT_MILK"]["status"] == "short"
-    assert body["kpis"]["stock"]["value"] == "2"  # whole milk and oat milk
+    short = [i for i, row in milk.items() if row["status"] == "short"]
+    assert short == ["WHOLE_MILK", "COFFEE_BEANS", "BUTTER_CROISSANT"] and milk["OAT_MILK"]["status"] == "covered"
+    assert body["kpis"]["stock"]["value"] == "3"  # what the market packing slips bring
     assert (body["kpis"]["coverage"]["value"], body["kpis"]["coverage"]["of"]) == ("2", "/ 4")
 
     sunday = body["coverage"][-1]
@@ -59,7 +60,8 @@ def test_at_a_glance_reads_low_stock_deliveries_and_shifts(api: TestClient) -> N
     body = api.get("/api/v1/agent/glance", params={"cafe_id": C, "as_of": "2026-11-05T18:00:00-08:00"}).json()
     assert body["running_low"] == [
         {"name": "Banana Nut Muffin", "text": "14 left", "detail": "reorder at 16"},
-        {"name": "Oat Milk", "text": "1.25 L left", "detail": "reorder at 3 L"},
+        {"name": "Butter Croissant", "text": "11 left", "detail": "reorder at 15"},
+        {"name": "Whole Milk", "text": "500 mL left", "detail": "reorder at 2 L"},
     ]
     assert {"name": "Whole Milk", "text": "12 L", "detail": "Fri Nov 6, 6 AM · regular delivery"} in body["coming_in"]
     assert len(body["coming_in"]) <= 4
@@ -80,3 +82,16 @@ def test_at_a_glance_puts_open_orders_before_regular_deliveries(api: TestClient)
         {"name": "Whole Milk", "text": "12 L", "detail": order},
     ]
     assert body["coming_in"][2]["detail"].endswith("regular delivery")
+
+
+def test_at_a_glance_drops_an_order_once_it_arrived_short(api: TestClient) -> None:
+    from backend.modules.purchasing.models import PurchaseOrder
+
+    db = app.dependency_overrides[get_db]()
+    seed_event_surge(db, with_delivery=True)
+    order = db.query(PurchaseOrder).filter_by(cafe_id=C, po_number="PO-1042").one()
+    order.status = "partially_received"  # checked in short; the rest is a credit request and a reorder
+    db.flush()
+    body = api.get("/api/v1/agent/glance", params={"cafe_id": C, "as_of": "2026-11-05T18:00:00-08:00"}).json()
+    assert all("PO-1042" not in row["detail"] for row in body["coming_in"])
+    assert body["coming_in"][0]["detail"].endswith("regular delivery")

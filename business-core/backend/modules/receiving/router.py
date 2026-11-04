@@ -21,7 +21,7 @@ from backend.modules.receiving import service
 from backend.modules.receiving.vision import VisionError, read_photo, read_slip
 
 router = APIRouter(tags=["receiving"])
-DEMO_ASSETS = Path("demo-assets/receiving")
+DEMO_ASSETS = service.ROOT / "demo-assets" / "receiving"
 DEMO_FILES = {"slip": ("packing-slip-PS-58213.png", "image/png"), "photo": ("delivery-photo.jpg", "image/jpeg")}
 
 
@@ -240,7 +240,9 @@ def latest_check(po_number: str, cafe_id: str = Query("CAFE001"), database_sessi
 
 @router.post("/receipts", response_model=ReceiptOut)
 def start(body: StartReceipt, database_session: Session = Depends(get_db)) -> ReceiptOut:
-    receipt = _guard(service.start_receipt, database_session, body.cafe_id, body.order_id)
+    # "Check this delivery" opens the check already under way (e.g. the glasses one) instead of a blank one.
+    existing = service.open_check(database_session, body.cafe_id, body.order_id) if body.order_id else None
+    receipt = existing or _guard(service.start_receipt, database_session, body.cafe_id, body.order_id)
     database_session.commit()
     return _out(database_session, receipt)
 
@@ -318,7 +320,7 @@ def send_credit(receipt_id: str, database_session: Session = Depends(get_db)) ->
 @router.get("/receipts/{receipt_id}/images/{kind}")
 def image(receipt_id: str, kind: Literal["slip", "photo"], database_session: Session = Depends(get_db)) -> FileResponse:
     receipt = _load(database_session, receipt_id)
-    path = receipt.slip_image_path if kind == "slip" else receipt.photo_image_path
-    if not path or not Path(path).exists():
+    path = service.image_file(receipt.slip_image_path if kind == "slip" else receipt.photo_image_path)
+    if path is None or not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No image")
     return FileResponse(path)

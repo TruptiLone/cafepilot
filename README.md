@@ -40,7 +40,7 @@ flowchart LR
 
 ## Meta models used
 
-Both through the Meta Model API (OpenAI-compatible), with one `MODEL_API_KEY`.
+All through the Meta Model API (OpenAI-compatible), with one `MODEL_API_KEY`.
 
 - **Muse Wonder** (`muse-wonder-1.0`, setting `PLANNER_MODEL`): the planner. It turns the owner's
   request or a detected event into the plan, and plans another way when a supplier rejects an order
@@ -49,6 +49,11 @@ Both through the Meta Model API (OpenAI-compatible), with one `MODEL_API_KEY`.
   reads the packing-slip photo (`POST /api/v1/receiving/receipts/{id}/slip`) and counts what it can
   see in the delivery photo (`POST /api/v1/receiving/receipts/{id}/photo`), in
   `backend/modules/receiving/vision.py`. `scripts/try_vision.py` checks this against the demo images.
+- **SAM 3.1** (`sam-3.1`): finds and counts each item in the delivery photo; Muse Spark checks the
+  count and code adds up the totals (`backend/modules/receiving/counting.py`).
+- **Muse Image** (`muse-image-1.0`, setting `IMAGE_MODEL`): the background picture for an event post
+  draft on the Posts tab; code sets the text and checks every date and number. CaféPilot never posts
+  anything (`backend/modules/agent/promo.py`).
 
 ### Spark vs Wonder for planning
 
@@ -161,8 +166,9 @@ CI runs both on every push and pull request (`.github/workflows/business-core.ym
 Built: business data core, agent registry, planner, validator, executor, approvals with
 Approve / Change / Decline, the farmers-market scenario, event trigger (Muse finds upcoming events),
 the Ask CaféPilot plan graph, supplier-rejection replanning (Muse finds another supplier), the
-supplier waiting state (Sent → Waiting for confirmation → Confirmed or Rejected), and receiving
-(delivery check with Muse Spark reading the packing slip and the delivery photo).
+supplier waiting state (Sent → Waiting for confirmation → Confirmed or Rejected), receiving
+(delivery check with Muse Spark reading the packing slip and SAM 3.1 + Muse Spark counting the delivery
+photo; a short delivery is reordered from another supplier), and event post drafts on the Posts tab.
 
 Next: equipment troubleshooting from Meta glasses photos, and a chat history view.
 

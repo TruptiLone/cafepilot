@@ -3,8 +3,8 @@
 #   1. stop whatever listens on 8001 (API), 5173 (web app) and 8004 (photo receiver)
 #   2. Postgres up (docker compose), migrations to head
 #   3. empty the receiver's shared photo folder (~/Pictures/BaristaShared) so old photo pairs don't come back
-#   4. reset the data: seed_event_surge.py --fresh --with-delivery (the Farmers Market stays hidden until
-#      the first question in Ask; the plan's first order is PO-123; PO-1042 is there for receiving)
+#   4. reset the data: seed_event_surge.py --fresh (the Farmers Market stays hidden until the first
+#      question in Ask; the plan's first order is PO-123, the only delivery on Receiving)
 #   5. start the API, the web app and the photo receiver; logs go to var/demo-logs/
 # Run from business-core/:   ./scripts/start_demo.sh            (Ctrl-C stops all three)
 # Reset between takes:       ./scripts/start_demo.sh --reset    (data and photos only; servers keep running)
@@ -57,7 +57,7 @@ empty_photos() {
 
 reset_data() {
   empty_photos
-  PYTHONPATH=. "$PYTHON_BIN" scripts/seed_event_surge.py --fresh --with-delivery
+  PYTHONPATH=. "$PYTHON_BIN" scripts/seed_event_surge.py --fresh
 }
 
 wait_for() {  # name, url

@@ -274,7 +274,7 @@ Ports: Postgres 5433 · API 8001 · web app 5173 · optional glasses photo recei
 From `business-core` (needs the `.venv` there):
 
 ```bash
-./scripts/start_demo.sh           # stop old servers, reset the data (with delivery), start API, web app and photo receiver
+./scripts/start_demo.sh           # stop old servers, reset the data (PO-123 is the only delivery), start API, web app and photo receiver
 ./scripts/start_demo.sh --reset   # between takes: reset the data and empty the shared photo folder; servers keep running
 ./scripts/start_demo.sh --stop    # stop servers started elsewhere
 ```

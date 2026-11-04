@@ -4766,8 +4766,8 @@ h1 { letter-spacing: -0.01em; }  /* page titles are display size: only a hair of
 .mz-live[data-live="found"] i { background: var(--g-sky-ink); }
 .mz-found {
   position: fixed;
+  top: calc(var(--g-edge) + 128px);  /* under the tabs, clear of Muse's answer and its buttons */
   right: var(--g-space-6);
-  bottom: calc(var(--g-edge) + 120px);
   z-index: 60;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto auto;
@@ -4788,7 +4788,7 @@ h1 { letter-spacing: -0.01em; }  /* page titles are display size: only a hair of
 .mz-found__text { margin: 2px 0 0; font-size: var(--g-fs-small); color: var(--g-ink-3); }
 .mz .mz-found__close { width: var(--g-control-h); height: var(--g-control-h); font-size: var(--g-fs-section); color: var(--g-ink-3); }
 @media (max-width: 860px) {
-  .mz-found { right: var(--g-space-4); left: var(--g-space-4); bottom: var(--g-space-4); width: auto; grid-template-columns: auto minmax(0, 1fr) auto; }
+  .mz-found { top: auto; right: var(--g-space-4); left: var(--g-space-4); bottom: var(--g-space-4); width: auto; grid-template-columns: auto minmax(0, 1fr) auto; }
   .mz-found .mz-btn { grid-column: 1 / -1; justify-content: center; }
   .mz-found__close { grid-row: 1; grid-column: 3; }
 }

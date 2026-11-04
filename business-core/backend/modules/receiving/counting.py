@@ -26,7 +26,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 from backend.modules.agent.ai_calls import call_model, is_timeout, record as record_ai_call
 from backend.modules.receiving.vision import PhotoItem, PhotoRead, VisionError
@@ -45,6 +45,7 @@ NOUNS = {
     "BLUEBERRY_MUFFIN": "muffin",
     "CHOCOLATE_CHIP_MUFFIN": "muffin",
     "BUTTER_CROISSANT": "croissant",
+    "COFFEE_BEANS": "bag of coffee",  # the bag, not the beans
     "BANANA_BREAD": "loaf of bread",
     "LEMON_LOAF": "loaf of bread",
 }
@@ -101,6 +102,10 @@ class GroupCount:
 
 def noun_for(ingredient_id: str | None, description: str) -> str:
     """Code picks SAM's phrase: the table first, else the product name ('Plain Bagels, dozen' → 'plain bagel')."""
+    if ingredient_id in NOUNS and "half gallon" in description.lower() and NOUNS[ingredient_id] == "milk carton":
+        # Half gallons come in plastic jugs. On real glasses photos SAM found 0 as "milk carton", and "milk jug" missed
+        # a single jug seen from above; "plastic jug" found 3 of 3 (0.96) and 1 of 1 (0.93).
+        return "plastic jug"
     if ingredient_id in NOUNS:
         return NOUNS[ingredient_id]
     name = description.split(",")[0].strip().lower()
@@ -121,6 +126,17 @@ def _iou(a: dict, b: dict) -> float:
     inter = ix * iy
     union = _area(a) + _area(b) - inter
     return inter / union if union else 0.0
+
+
+def upright(image: bytes) -> bytes:
+    """Turn a phone photo upright. iPhones store it sideways with an EXIF "rotate" tag; SAM applies the
+    tag, so point coordinates must use the upright size too. Photos without the tag come back unchanged."""
+    picture = Image.open(io.BytesIO(image))
+    if picture.getexif().get(0x0112, 1) == 1:  # 0x0112 = Orientation; 1 = already upright
+        return image
+    out = io.BytesIO()
+    ImageOps.exif_transpose(picture).convert("RGB").save(out, format="JPEG", quality=92)
+    return out.getvalue()
 
 
 def sam(client: Any, image: bytes, mime: str, prompt: str, summary: str) -> tuple[list[dict], float]:
@@ -238,7 +254,16 @@ def count_group(client: Any, model: str, image: bytes, mime: str, noun: str, nam
         return result  # nothing found: zero, not confident, so the owner is asked to count
 
     started = time.monotonic()
-    answer = check(client, model, numbered_image(image, boxes), boxes, noun, names)
+    try:
+        answer = check(client, model, numbered_image(image, boxes), boxes, noun, names)
+    except VisionError as error:
+        if len(names) > 1:
+            raise  # SAM can't tell the products apart; without Muse there is no split to report
+        # Muse didn't answer (e.g. timed out): keep what SAM saw, never sure, so the owner confirms it.
+        result.counts[names[0]] = len(boxes)
+        result.error = str(error)
+        result.seconds = round(seconds + time.monotonic() - started, 1)
+        return result
     seconds += time.monotonic() - started
     result.check_confidence = answer.get("confidence") if isinstance(answer.get("confidence"), str) else None
     verdicts = {v.get("n"): v for v in answer.get("boxes") or [] if isinstance(v, dict)}
@@ -303,7 +328,8 @@ def count_delivery(client: Any, model: str, image: bytes, mime: str, products: l
                 confidence="high" if group.confident else "low",
             ))
     notes = "; ".join(
-        f"{g.noun}: " + (f"couldn't count ({g.error})" if g.error else
+        f"{g.noun}: " + (f"SAM {g.sam_boxes}, not checked ({g.error}), ask owner to confirm" if g.error and g.sam_boxes else
+                         f"couldn't count ({g.error})" if g.error else
                          f"SAM {g.sam_boxes}, total {sum(g.counts.values())}, "
                          + ("confident" if g.confident else "ask owner to count"))
         for g in details

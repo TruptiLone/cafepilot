@@ -132,7 +132,10 @@ type Route = (url: string, init?: RequestInit) => Promise<Response> | undefined;
 const GLANCE = {
   as_of: "2026-11-05T18:00:00-08:00",
   running_low: [{ name: "Oat Milk", text: "1.25 L left", detail: "reorder at 3 L" }],
-  coming_in: [{ name: "Whole Milk", text: "12 L", detail: "Fri Nov 6, 6 AM · regular delivery" }],
+  coming_in: [
+    { name: "Whole Milk", text: "12 L", detail: "Fri Nov 6, 6 AM · regular delivery" },
+    { name: "Butter Croissant", text: "10", detail: "Sun Nov 8, 6 AM · Willow Ridge Dairy Supply PO-123, partially_received" },
+  ],
   working: [{ name: "Jordan Brooks", text: "7 AM–3 PM", detail: null }],
   working_label: "Working tomorrow",
   working_day: "Fri Nov 6",
@@ -216,7 +219,7 @@ describe("AgentPage", () => {
     // +35 typical extra drinks (from the event's history) reads as a crowd
     expect(within(events).getByText("Sunday's market usually brings a crowd. Want me to get ready?")).toBeTruthy();
     expect(within(events).getByText("Sun, Nov 8 · 8 AM–2 PM · 0.2 miles away")).toBeTruthy();
-    await userEvent.click(within(events).getByRole("button", { name: "Let's plan ✨" }));
+    await userEvent.click(within(events).getByRole("button", { name: "Let's plan" }));
 
     expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
     expect(fetchMock.mock.calls.some(([url, init]) => url === "/api/v1/agent/events/EVT_1/runs" && init?.method === "POST")).toBe(true);
@@ -230,12 +233,14 @@ describe("AgentPage", () => {
     renderPage();
     const glance = await screen.findByRole("complementary", { name: "At a glance" });
     expect(within(within(glance).getByRole("region", { name: "Running low" })).getByText("1.25 L left")).toBeTruthy();
-    expect(within(glance).getByRole("region", { name: "Coming in" })).toBeTruthy();
+    const coming = within(glance).getByRole("region", { name: "Coming in" });
+    expect(within(coming).getByText("Sun Nov 8, 6 AM · Willow Ridge Dairy Supply PO-123, Partly received")).toBeTruthy();
+    expect(coming.textContent).not.toContain("_");
     expect(within(within(glance).getByRole("region", { name: "Working tomorrow, Fri Nov 6" })).getByText("Jordan Brooks")).toBeTruthy();
     const asked = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.startsWith("/api/v1/agent/glance?"));
     expect(new URL(asked as string, "http://x").searchParams.get("as_of")).toBe("2026-11-05T18:00:00-08:00");
 
-    await userEvent.click(screen.getByRole("button", { name: "Let's plan ✨" }));
+    await userEvent.click(screen.getByRole("button", { name: "Let's plan" }));
     expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
     expect(screen.queryByRole("complementary", { name: "At a glance" })).toBeNull();  // not in the open plan view
   });
@@ -397,6 +402,28 @@ describe("AgentPage", () => {
     expect(await screen.findByText("Which day is the event?")).toBeTruthy();
   });
 
+  it("sends the answer to Muse's question together with the original request", async () => {
+    const question = { planning: planning({ status: "needs_clarification", question: "When do you need it delivered by?" }), run: null };
+    const replies = [question, { planning: planning(), run }];
+    const fetchMock = stubFetch((url, init) =>
+      url === "/api/v1/agent/runs" && init?.method === "POST" ? jsonResponse(replies.shift()) : url.startsWith("/api/v1/agent/runs/RUN-1") ? jsonResponse(run) : undefined,
+    );
+    renderPage();
+    await userEvent.type(screen.getByLabelText("Ask Muse"), "order one carton of whole milk");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("When do you need it delivered by?")).toBeTruthy();
+    await userEvent.type(screen.getByLabelText("Ask Muse"), "Friday by 8 AM");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
+    const queries = fetchMock.mock.calls
+      .filter(([url, init]) => url === "/api/v1/agent/runs" && init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body)).query);
+    expect(queries).toEqual([
+      "order one carton of whole milk",
+      'order one carton of whole milk\nAnswer to "When do you need it delivered by?": Friday by 8 AM',
+    ]);
+  });
+
   it("shows the server's reason when planning is unavailable", async () => {
     mockApi({ status: 503, detail: "MODEL_API_KEY is not set in business-core/.env" });
     renderPage();
@@ -518,12 +545,29 @@ describe("AgentPage", () => {
     expect(await screen.findByText("Bay Dairy Co. declined. Muse is looking for another supplier… · Muse Spark 1.3")).toBeTruthy();
   });
 
-  it("has two tabs: Plan and Ask", async () => {
+  it("has three tabs: Plan, Ask and Posts", async () => {
     mockApi();
     renderPage();
     const tabs = within(await screen.findByRole("navigation", { name: "Muse" }));
-    expect(tabs.getAllByRole("button").map((b) => b.textContent?.replace(/\d+$/, "").trim())).toEqual(["Plan", "Ask"]);
+    expect(tabs.getAllByRole("button").map((b) => b.textContent?.replace(/\d+$/, "").trim())).toEqual(["Plan", "Ask", "Posts"]);
     expect(tabs.queryByRole("link")).toBeNull();  // Deliveries is gone; Receive delivery stays in the sidebar
+  });
+
+  it("offers Make a post only for upcoming events and opens Posts with that event", async () => {
+    const asOf = "2026-11-05T18:00:00-08:00";
+    const upcoming = { ...marketEvent, knowledge_as_of: asOf };
+    const past = { ...marketEvent, event_id: "EVT_HALLOWEEN", title: "Halloween", starts_at: "2026-10-31T14:00:00-07:00",
+      ends_at: "2026-10-31T17:00:00-07:00", knowledge_as_of: asOf };
+    stubFetch((url) => (url === "/api/v1/agent/promo-posts" ? jsonResponse([]) : undefined), [upcoming, past]);
+    renderPage();
+    const cards = await screen.findAllByRole("article");
+    const card = (title: string) => cards.find((c) => within(c).queryByRole("heading", { name: title }))!;
+    expect(within(card("Halloween")).queryByRole("button", { name: "Make a post" })).toBeNull();
+    await userEvent.click(within(card(upcoming.title)).getByRole("button", { name: "Make a post" }));
+    const posts = await screen.findByRole("region", { name: "Make a post" });
+    expect((within(posts).getByRole("combobox") as HTMLSelectElement).value).toBe(upcoming.event_id);
+    expect(within(posts).queryByRole("option", { name: /Halloween/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Posts" }).getAttribute("aria-current")).toBe("page");
   });
 
   it("chat asks with the demo event's reference time, and Plan it starts a plan", async () => {

@@ -1,6 +1,23 @@
 import { useEffect, useState } from "react";
 import { type Glance, type GlanceRow, getGlance } from "../../api/agent";
 
+// Raw record statuses (e.g. "partially_received") read as plain words; the backend value is unchanged.
+const STATUS_WORDS: Record<string, string> = {
+  partially_received: "Partly received",
+  awaiting_approval: "Waiting for your OK",
+  short_shipped: "Back-ordered",
+  needs_count: "Needs a count",
+  not_on_order: "Not on the order",
+};
+
+export function friendlyStatus(text: string): string {
+  return text.replace(/\b[a-z]+(?:_[a-z]+)+\b/g, (raw) => {
+    if (STATUS_WORDS[raw]) return STATUS_WORDS[raw];
+    const words = raw.replace(/_/g, " ");
+    return words.charAt(0).toUpperCase() + words.slice(1);
+  });
+}
+
 function Card({ title, sub, rows, empty, tone }: { title: string; sub?: string; rows: GlanceRow[]; empty: string; tone?: "warn" }) {
   return (
     <section className={`mz-card mz-glance__card${tone ? ` is-${tone}` : ""}`} aria-label={sub ? `${title}, ${sub}` : title}>
@@ -15,8 +32,8 @@ function Card({ title, sub, rows, empty, tone }: { title: string; sub?: string; 
           {rows.map((row) => (
             <li key={`${row.name}-${row.text}`}>
               <span className="mz-glance__name">{row.name}</span>
-              <span className="mz-glance__text">{row.text}</span>
-              {row.detail && <span className="mz-glance__detail">{row.detail}</span>}
+              <span className="mz-glance__text">{friendlyStatus(row.text)}</span>
+              {row.detail && <span className="mz-glance__detail">{friendlyStatus(row.detail)}</span>}
             </li>
           ))}
         </ul>

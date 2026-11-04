@@ -21,6 +21,7 @@ import { employeeName } from "../components/agent/changes";
 import ChatPanel, { EXAMPLES } from "../components/muse/ChatPanel";
 import UpdatesBell from "../components/updates/UpdatesBell";
 import AtAGlance from "../components/muse/AtAGlance";
+import { type PostRequest, PostsPanel, isUpcoming } from "../components/promo/PostsPanel";
 import { demoDateLabel } from "../components/demoDate";
 import PlanMap from "../components/muse/PlanMap";
 import { type SpeechRecognitionLike, speechRecognition } from "../components/muse/speech";
@@ -114,10 +115,18 @@ function AgentPage() {
   const [planningFor, setPlanningFor] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [rejectedPlanning, setRejectedPlanning] = useState<Planning | null>(null);
+  // The typed request behind the last plan: Muse plans each message on its own, so an answer to its
+  // question goes back together with this request.
+  const [sentRequest, setSentRequest] = useState<string | null>(null);
   // How long the model took, per run: the API reports it only when the plan comes back.
   const [planTimes, setPlanTimes] = useState<Record<string, number>>({});
   const [request, setRequest] = useState("");
-  const [tab, setTab] = useState<"events" | "chat">("events");
+  const [tab, setTab] = useState<"events" | "chat" | "posts">("events");
+  const [postRequest, setPostRequest] = useState<PostRequest | null>(null);
+  const makePost = (eventId: string) => {
+    setPostRequest({ eventId, nonce: Date.now() });
+    setTab("posts");
+  };
   const [chatQuestion, setChatQuestion] = useState<{ id: number; text: string } | null>(null);
   const [view, setView] = useState<View>(() => (readPref(VIEW_KEY) === "technical" ? "technical" : "owner"));
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -232,7 +241,8 @@ function AgentPage() {
     writePref(VIEW_KEY, next);
   }
 
-  async function plan(start: () => ReturnType<typeof startRun>, forEvent: string | null) {
+  async function plan(start: () => ReturnType<typeof startRun>, forEvent: string | null, query: string | null = null) {
+    setSentRequest(query);
     setPlanningFor(forEvent ?? "request");
     setPlanError(null);
     setRejectedPlanning(null);
@@ -310,14 +320,16 @@ function AgentPage() {
   // A change asked in chat goes to the normal plan flow (it still waits for the owner's OK).
   function planFromChat(text: string) {
     setTab("events");
-    void plan(() => startRun(text), null);
+    void plan(() => startRun(text), null, text);
   }
 
   async function handleAsk(event: FormEvent) {
     event.preventDefault();
-    const query = request.trim();
-    if (!query || planningFor) return;
-    await plan(() => startRun(query), null);
+    const text = request.trim();
+    if (!text || planningFor) return;
+    const question = rejectedPlanning?.plan.status === "needs_clarification" ? rejectedPlanning.plan.question : null;
+    const query = question && sentRequest ? `${sentRequest}\nAnswer to "${question}": ${text}` : text;
+    await plan(() => startRun(query), null, query);
     setRequest("");
   }
 
@@ -414,11 +426,21 @@ function AgentPage() {
           >
             Ask
           </button>
+          <button
+            type="button"
+            className={`mz-tab${tab === "posts" ? " is-on" : ""}`}
+            aria-current={tab === "posts" ? "page" : undefined}
+            onClick={() => setTab("posts")}
+          >
+            Posts
+          </button>
         </nav>
 
         <ChatPanel hidden={tab !== "chat"} asOf={chatAsOf} onPlan={planFromChat} question={chatQuestion} />
 
-        <div className={`mz-scroll${showPlan ? "" : " mz-scroll--home"}`} hidden={tab === "chat"}>
+        <PostsPanel hidden={tab !== "posts"} events={events} request={postRequest} />
+
+        <div className={`mz-scroll${showPlan ? "" : " mz-scroll--home"}`} hidden={tab !== "events"}>
           {!showPlan && (
             <section className="mz-events" aria-label="Events Muse found">
               <header className="mz-greet">
@@ -463,11 +485,16 @@ function AgentPage() {
                           disabled={planningFor !== null}
                           onClick={() => plan(() => startEventRun(event.event_id), event.event_id)}
                         >
-                          Let's plan ✨
+                          Let's plan
                         </button>
                       ) : (
                         <button type="button" className="mz-btn mz-btn--ghost mz-btn--lg" onClick={() => openEvent(event.event_id)}>
                           Open plan
+                        </button>
+                      )}
+                      {isUpcoming(event) && (
+                        <button type="button" className="mz-btn mz-btn--text mz-ev__post" onClick={() => makePost(event.event_id)}>
+                          Make a post
                         </button>
                       )}
                     </div>
@@ -594,6 +621,14 @@ function AgentPage() {
                       <li key={line}>{line}</li>
                     ))}
                   </ul>
+                  {story.allSet && run.event && isUpcoming(run.event) && (
+                    <div className="mz-short__next">
+                      <span>Spread the word for the {run.event.title.replace(/^Santa Clara /, "").toLowerCase()}?</span>
+                      <button type="button" className="mz-btn mz-btn--ghost" onClick={() => makePost(run.event!.event_id)}>
+                        Make a post
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -606,7 +641,7 @@ function AgentPage() {
           )}
         </div>
 
-        <form className="mz-cmd" onSubmit={handleAsk} hidden={tab === "chat"}>
+        <form className="mz-cmd" onSubmit={handleAsk} hidden={tab !== "events"}>
           <div className="mz-cmd__bar">
             <input
               type="text"
@@ -697,7 +732,7 @@ function PlanningNotice({ planning }: { planning: Planning }) {
       <div className="mz-notice" role="status">
         <h3>One question first</h3>
         <p>{plan.question}</p>
-        <p className="mz-muted">Add the answer to your request and ask again.</p>
+        <p className="mz-muted">Type your answer below. Muse gets it together with your request.</p>
       </div>
     );
   }

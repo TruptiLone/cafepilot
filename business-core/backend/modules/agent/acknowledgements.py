@@ -205,6 +205,7 @@ def _order_status(session: Session, node: Any, ctx: RunContext) -> ChangeStatus:
                 details=[*details, f"Checked in{slip}", f"Still missing {', '.join(missing)}"],
                 caveat="Stock went up only by what arrived; a credit request covers the rest.",
                 tone="problem",
+                next_step="find_alternative",
             ),
         )
     return ChangeStatus(

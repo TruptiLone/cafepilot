@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.config import ENV_FILE
 from backend.models.cafe import Cafe
-from backend.modules.agent.cafe_policies import policies_for
+from backend.modules.agent.cafe_policies import TEST_SUPPLIERS, policies_for
 from backend.modules.purchasing.models import PurchaseOrder, PurchaseOrderLine, Receipt, ShiftOffer
 
 
@@ -64,7 +64,7 @@ def get_supplier(cafe_id: str, supplier_id: str | None) -> dict[str, Any]:
     if not configured and supplier_id in (None, "SIM_SUPPLIER"):
         return GENERIC_SUPPLIER
     supplier_id = supplier_id or policies_for(cafe_id).get("ordering", {}).get("default_supplier_id")
-    for supplier in configured:
+    for supplier in configured + TEST_SUPPLIERS.get(cafe_id, []):  # test suppliers only when named
         if supplier["supplier_id"] == supplier_id:
             return supplier
     raise SupplierNotFoundError(f"unknown supplier: {supplier_id}")
@@ -100,11 +100,11 @@ def _tz(session: Session, cafe_id: str) -> ZoneInfo:
     return ZoneInfo(cafe.timezone if cafe else "UTC")
 
 
-PO_NUMBER_START = 1040
+PO_NUMBER_START = 122  # the first market order is PO-123 (matches the demo packing slips)
 
 
 def next_po_number(session: Session, cafe_id: str) -> str:
-    """Human order numbers (PO-1043…), unique per café."""
+    """Human order numbers (PO-123…), unique per café."""
     numbers = session.scalars(select(PurchaseOrder.po_number).where(PurchaseOrder.cafe_id == cafe_id))
     highest = max((int(n.split("-")[-1]) for n in numbers if n and n.split("-")[-1].isdigit()), default=PO_NUMBER_START)
     return f"PO-{highest + 1}"
@@ -345,7 +345,9 @@ def offer_for(session: Session, shift_id: str) -> ShiftOffer | None:
     return session.get(ShiftOffer, shift_id)
 
 
-OPEN_ORDER_STATUSES = ("sent", "confirmed", "partially_received")
+# Orders still on their way. A partly received order already arrived: what it lacked gets a credit request
+# and is reordered (often from another supplier), so it isn't listed as coming too.
+OPEN_ORDER_STATUSES = ("sent", "confirmed")
 
 
 def upcoming_deliveries(

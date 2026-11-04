@@ -22,6 +22,16 @@ export type OpenOrder = {
   lines: OrderLine[];
 };
 
+export type Received = {
+  receipt_id: string;
+  po_number: string | null;
+  supplier_name: string | null;
+  order_status: string | null;
+  slip_number: string | null;
+  confirmed_at: string | null;
+  credit_ref: string | null;
+};
+
 export type LineStatus =
   | "match"
   | "needs_count"
@@ -115,8 +125,17 @@ export function listOpenOrders(cafeId = ACTIVE_CAFE_ID): Promise<OpenOrder[]> {
   return request(`/orders?cafe_id=${encodeURIComponent(cafeId)}`);
 }
 
+export function listReceived(cafeId = ACTIVE_CAFE_ID): Promise<Received[]> {
+  return request(`/received?cafe_id=${encodeURIComponent(cafeId)}`);
+}
+
 export function getReceipt(receiptId: string): Promise<Receipt> {
   return request(`/receipts/${encodeURIComponent(receiptId)}`);
+}
+
+/** The delivery check for a PO (checked in, else the newest glasses check): the fixed link /receiving?po=PO-123. */
+export function getCheckForPo(poNumber: string, cafeId = ACTIVE_CAFE_ID): Promise<Receipt> {
+  return request(`/orders/${encodeURIComponent(poNumber)}/check?cafe_id=${encodeURIComponent(cafeId)}`);
 }
 
 export function startReceipt(orderId: string | null, cafeId = ACTIVE_CAFE_ID): Promise<Receipt> {

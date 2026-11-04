@@ -4,6 +4,7 @@ from typing import Any
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -22,6 +23,7 @@ from backend.models.cafe import Cafe
 from backend.modules.agent.ai_calls import link_run, recent as recent_ai_calls
 from backend.modules.agent.updates import updates as cafe_updates
 from backend.modules.agent.glance import glance as cafe_glance
+from backend.modules.agent import promo
 from backend.modules.agent.chat import ChatTimeoutError, answer as chat_answer, create_chat_client
 from backend.modules.agent.events import DetectedEvent, detected_events, get_event
 from backend.modules.agent.status import CafeStatus, cafe_status, event_id_for_run, event_plan
@@ -587,3 +589,55 @@ def replan_step(
     return _start(request, database_session, client, parent_run_id=run_id, parent_node_id=node_id,
                   summary=replan_summary(database_session, run, node_id),
                   event_id=event_id_for_run(database_session, run))
+
+
+# ---------------------------------------------------------------------------
+# Promote this event: post drafts only. Nothing is ever posted anywhere.
+# ---------------------------------------------------------------------------
+
+
+class PromoRequest(BaseModel):
+    event_id: str
+    offer_text: str | None = Field(
+        default=None, description=f"The owner's offer, plain text, at most {promo.OFFER_MAX} characters. "
+                                  f'Empty: "{promo.DEFAULT_OFFER}".')
+
+
+class PromoResponse(BaseModel):
+    event_id: str
+    offer_text: str
+    suggested_offer: str = promo.DEFAULT_OFFER
+    posted: Literal[False] = Field(default=False, description="Drafts are never posted; the owner shares them.")
+    variants: list[dict[str, Any]]
+
+
+@router.post("/promo-posts", response_model=PromoResponse)
+def create_promo_posts(
+    body: PromoRequest,
+    database_session: Session = Depends(get_db),
+    client: Any = Depends(get_planner_client),
+) -> PromoResponse:
+    """Two post drafts for an upcoming event: Muse writes the caption and paints the background, code
+    checks the caption and sets every word on the image. Drafts only."""
+    try:
+        offer = promo.clean_offer(body.offer_text)
+        facts = promo.facts_for(database_session, body.event_id, offer)
+    except promo.OfferError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(error)) from error
+    except promo.EventNotPromotable as error:
+        raise HTTPException(status_code=error.status, detail=str(error)) from error
+    return PromoResponse(event_id=facts.event_id, offer_text=offer, variants=promo.create_drafts(client, facts))
+
+
+@router.get("/promo-posts")
+def list_promo_posts() -> list[dict[str, Any]]:
+    """The owner's drafts (newest first), then the demo samples. Every one is a draft."""
+    return promo.list_drafts()
+
+
+@router.get("/promo-posts/{draft_id}/image")
+def promo_post_image(draft_id: str) -> FileResponse:
+    path = promo.image_path(draft_id)
+    if path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Draft not found")
+    return FileResponse(path, media_type="image/jpeg")

@@ -102,7 +102,8 @@ def _fmt(quantity: Decimal | None, unit: str | None, unit_size: Decimal | None) 
     if unit_size:
         units = quantity / unit_size
         if units == units.to_integral_value():
-            return f"{int(units)} cartons ({text})" if unit == "mL" else f"{int(units)} units ({text})"
+            noun = {"mL": "carton", "g": "bag"}.get(unit or "", "unit")
+            return f"{int(units)} {noun}{'' if units == 1 else 's'} ({text})"
     return text
 
 
@@ -146,6 +147,7 @@ def build_drafts(session: Session, receipt: Receipt, order: PurchaseOrder | None
     drafts: list[_Draft] = []
     by_item: dict[str, _Draft] = {}
     by_ingredient: dict[str, _Draft] = {}
+    by_description: dict[str, _Draft] = {}  # when Muse misreads an item number, the order's own wording still matches
 
     if order is not None:
         for line in order.lines:
@@ -156,6 +158,8 @@ def build_drafts(session: Session, receipt: Receipt, order: PurchaseOrder | None
                 item_number=line.supplier_item_number,
                 unit=line.unit,
                 pack_size=line.pack_size,
+                # One carton / bag of the order's pack ("half gallon (1.89 L)" -> 1890 mL); the slip only fills a gap.
+                unit_size=parse_pack(line.pack_name)[1],
                 # What is still due: a second delivery against the same order is compared with the rest.
                 ordered=max(line.quantity - (line.received_quantity or ZERO), ZERO),
             )
@@ -163,12 +167,16 @@ def build_drafts(session: Session, receipt: Receipt, order: PurchaseOrder | None
             if line.supplier_item_number:
                 by_item[line.supplier_item_number.upper()] = draft
             by_ingredient[line.ingredient_id] = draft
+            if line.description:
+                by_description[line.description.strip().lower()] = draft
 
     slip = SlipRead.model_validate(receipt.slip_read) if receipt.slip_read else None
     for slip_line in slip.lines if slip else []:
         pack_size, unit_size, unit = parse_pack(slip_line.pack or slip_line.description)
         ingredient = match_ingredient(slip_line.description, catalog)
-        draft = by_item.get((slip_line.item_number or "").upper()) or (by_ingredient.get(ingredient) if ingredient else None)
+        draft = (by_item.get((slip_line.item_number or "").upper())
+                 or by_description.get((slip_line.description or "").strip().lower())
+                 or (by_ingredient.get(ingredient) if ingredient else None))
         if draft is None:
             draft = _Draft(ingredient_id=ingredient, description=slip_line.description or "Unknown item",
                            item_number=slip_line.item_number, unit=unit)
@@ -176,7 +184,7 @@ def build_drafts(session: Session, receipt: Receipt, order: PurchaseOrder | None
             if ingredient:
                 by_ingredient[ingredient] = draft
         draft.pack_size = draft.pack_size or pack_size
-        draft.unit_size = unit_size or draft.unit_size
+        draft.unit_size = draft.unit_size or unit_size
         draft.unit = draft.unit or unit
         size = draft.pack_size or pack_size
         if size is not None:
@@ -222,10 +230,15 @@ def evaluate(draft: _Draft, counted: Decimal | None, rejected: Decimal, has_slip
     if counted is not None:
         arrived = counted
         source = "you counted"
-    elif draft.seen is not None and not (draft.may_hide_more and expected is not None and draft.seen < expected):
+    elif draft.seen is not None and not (draft.may_hide_more and expected is not None and draft.seen != expected):
         arrived = draft.seen
         source = "Muse can see"
     else:
+        if draft.seen is not None and expected is not None and draft.seen > expected:
+            return "needs_count", None, (  # an unsure count above the slip: count before calling it "over"
+                f"Muse counted {f(draft.seen)} of {_product(draft.description)} but isn't sure; the "
+                f"{'slip says' if draft.shipped is not None else 'order is for'} {f(expected)}. Please count it."
+            )
         if draft.seen is not None:
             return "needs_count", None, (
                 f"Muse can see {f(draft.seen)} of {_product(draft.description)}, but the "
@@ -488,12 +501,34 @@ def send_credit_request(session: Session, receipt: Receipt) -> Receipt:
     return receipt
 
 
+def latest_check(session: Session, cafe_id: str, po_number: str) -> Receipt:
+    """The delivery check to show for a PO (fixed demo links): the checked-in one, else the newest with a slip read."""
+    order = session.scalar(select(PurchaseOrder).where(PurchaseOrder.cafe_id == cafe_id,
+                                                       PurchaseOrder.po_number == po_number.strip().upper()))
+    if order is None:
+        raise LookupError(f"{po_number} isn't in the system.")
+    receipts = session.scalars(select(Receipt).where(Receipt.order_id == order.order_id, Receipt.slip_read.is_not(None))
+                               .order_by(Receipt.started_at.desc())).all()
+    receipt = next((r for r in receipts if r.status == "confirmed"), None) or next(iter(receipts), None)
+    if receipt is None:
+        raise LookupError(f"No delivery check for {order.po_number} yet.")
+    return receipt
+
+
+def received(session: Session, cafe_id: str) -> list[tuple[Receipt, PurchaseOrder | None]]:
+    """Checked-in deliveries, newest first, with the order each one was for."""
+    receipts = session.scalars(select(Receipt).where(Receipt.cafe_id == cafe_id, Receipt.status == "confirmed")
+                               .order_by(Receipt.confirmed_at.desc())).all()
+    return [(r, session.get(PurchaseOrder, r.order_id) if r.order_id else None) for r in receipts]
+
+
 def open_orders(session: Session, cafe_id: str) -> list[PurchaseOrder]:
     settle_due(session, cafe_id=cafe_id)
     return list(
         session.scalars(
             select(PurchaseOrder)
-            .where(PurchaseOrder.cafe_id == cafe_id, PurchaseOrder.status.in_(("confirmed", "partially_received")))
+            # A partly received order is listed under Received: its credit request (or a reorder) covers the rest.
+            .where(PurchaseOrder.cafe_id == cafe_id, PurchaseOrder.status == "confirmed")
             .order_by(PurchaseOrder.requested_delivery_at)
         )
     )

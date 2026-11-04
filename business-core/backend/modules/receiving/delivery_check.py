@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from backend.modules.purchasing.models import PurchaseOrder, Receipt
 from backend.modules.receiving import service
-from backend.modules.receiving.counting import Product, count_delivery, noun_for
+from backend.modules.receiving.counting import Product, count_delivery, noun_for, upright
 from backend.modules.receiving.vision import read_photo, read_slip
 
 logger = logging.getLogger("cafepilot.receiving.delivery_check")
@@ -70,6 +70,7 @@ def _glasses_line(receipt: Receipt, outcome: str, po: str | None) -> str:
 def check_delivery(session: Session, client: Any, model: str, receipt: Receipt,
                    slip_image: bytes, photo_image: bytes, mime: str = "image/jpeg") -> dict[str, Any]:
     """Run the whole check on a draft receipt. Raises ReceivingError / VisionError when it can't go on."""
+    slip_image, photo_image = upright(slip_image), upright(photo_image)
     slip, _ = read_slip(client, model, slip_image, mime)
     receipt = service.attach_slip(session, receipt, slip, model, slip_image, mime)
 

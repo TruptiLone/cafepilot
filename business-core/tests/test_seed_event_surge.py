@@ -56,7 +56,7 @@ def test_seed_is_idempotent(session: Session) -> None:
     assert (again.counts, again.count_lines, again.movements, again.shifts, again.reorder_points) == (0, 0, 0, 0, 0)
 
 
-def test_reorder_points_put_oat_milk_and_banana_nut_muffins_below(session: Session) -> None:
+def test_reorder_points_put_whole_milk_croissants_and_banana_nut_muffins_below(session: Session) -> None:
     from backend.modules.inventory.models import InventoryItem
 
     seed_event_surge(session)
@@ -66,7 +66,7 @@ def test_reorder_points_put_oat_milk_and_banana_nut_muffins_below(session: Sessi
     assert set(points) == {"OAT_MILK", "WHOLE_MILK", "COFFEE_BEANS", "BLUEBERRY_MUFFIN", "BANANA_NUT_MUFFIN",
                            "CHOCOLATE_CHIP_MUFFIN", "BUTTER_CROISSANT"}
     below = {i for i, p in points.items() if Decimal(stock[i]["estimated_quantity"]) < p}
-    assert below == {"OAT_MILK", "BANANA_NUT_MUFFIN"}
+    assert below == {"WHOLE_MILK", "BUTTER_CROISSANT", "BANANA_NUT_MUFFIN"}
     for muffin in ("BANANA_NUT_MUFFIN", "CHOCOLATE_CHIP_MUFFIN"):  # Thursday's close count, not January's
         assert stock[muffin]["latest_verified_count_id"] == "AF_EVENT_SURGE_20261108_COUNT_THU_CLOSE"
 
@@ -77,8 +77,8 @@ def test_scenario_tells_the_event_story(session: Session) -> None:
         row["ingredient_id"]: row["estimated_quantity"]
         for row in REGISTRY["get_stock_estimates"].run(session, {"cafe_id": "CAFE001", "as_of": AS_OF})
     }
-    assert stock["WHOLE_MILK"] == "3000.000"  # low at close, before the next morning's delivery
-    assert stock["OAT_MILK"] == "1250.000"  # 1,500 counted, 250 spilled after the count
+    assert stock["WHOLE_MILK"] == "500.000"  # low at close, before the next morning's delivery
+    assert stock["OAT_MILK"] == "3250.000"  # 3,500 counted, 250 spilled after the count
     coverage = REGISTRY["coverage_report"].run(
         session,
         {

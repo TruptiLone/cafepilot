@@ -1,4 +1,4 @@
-"""When a supplier rejects an order or an employee declines a shift, Muse plans again.
+"""When a supplier rejects an order, a delivery comes up short or an employee declines a shift, Muse plans again.
 
 The new request is written by code from what actually went wrong (who said no, why, what is
 still needed and by when), so the model starts from facts, not from a summary it wrote itself.
@@ -17,7 +17,7 @@ from backend.models.cafe import Cafe
 from backend.modules.agent.models import AgentPlanRun
 from backend.modules.agent.summaries import RunContext, clock, day, local_time, quantity, span
 from backend.modules.purchasing.models import PurchaseOrder
-from backend.modules.purchasing.service import offer_for, order_for, settle_due
+from backend.modules.purchasing.service import delivery_for, offer_for, order_for, settle_due
 
 
 class NothingToReplanError(ValueError):
@@ -30,8 +30,11 @@ def replan_summary(session: Session, run: AgentPlanRun, node_id: str) -> str:
     if node is not None and node.action == "propose_supplier_order":
         order = order_for(session, run.run_id, node_id)
         if order is not None:
-            milk = all(l.ingredient_id.endswith("_MILK") for l in order.lines)
-            return f"Replan: {order.supplier_name} declined, find another {'milk ' if milk else ''}supplier"
+            short = order.status == "partially_received"
+            lines = [l for l in order.lines if not short or (l.received_quantity or 0) < l.quantity]
+            milk = all(l.ingredient_id.endswith("_MILK") for l in lines)
+            what = "delivered short" if short else "declined"
+            return f"Replan: {order.supplier_name} {what}, find another {'milk ' if milk else ''}supplier"
     if node is not None and node.action == "schedule_shift" and isinstance(node.result, dict):
         cafe = session.get(Cafe, run.cafe_id)
         ctx = RunContext(list(run.nodes), run.cafe_id, cafe.timezone if cafe else "UTC")
@@ -52,9 +55,24 @@ def replan_request(session: Session, run: AgentPlanRun, node_id: str) -> str:
 
     if node.action == "propose_supplier_order" and node.status == "done":
         order: PurchaseOrder | None = order_for(session, run.run_id, node_id)
-        if order is None or order.status != "rejected":
-            raise NothingToReplanError("this order was not rejected")
+        if order is None or order.status not in ("rejected", "partially_received"):
+            raise NothingToReplanError("this order was not rejected or delivered short")
         when = order.requested_delivery_at.astimezone(tz)
+        if order.status == "partially_received":
+            receipt = delivery_for(session, order.order_id)
+            slip = f" (packing slip {receipt.slip_number})" if receipt and receipt.slip_number else ""
+            missing = ", ".join(
+                f"{quantity(l.quantity - (l.received_quantity or 0), l.unit)} {ctx.ingredient(l.ingredient_id).lower()}"
+                for l in order.lines
+                if (l.received_quantity or 0) < l.quantity
+            )
+            return (
+                f"{order.supplier_name} delivered purchase order {order.order_id} short{slip}: {missing} never arrived. "
+                f"We still need it for the same need, by {day(when)} {clock(when)} "
+                f"({order.requested_delivery_at.astimezone(tz).isoformat()}) or as soon as possible after. "
+                f"Order only what is missing (use get_purchase_order for {order.order_id} and its reorder_lines) from "
+                f"another supplier than {order.supplier_name}. Do not change staffing."
+            )
         items = ", ".join(
             f"{quantity(l.quantity, l.unit)} {ctx.ingredient(l.ingredient_id).lower()}" for l in order.lines
         )
@@ -88,7 +106,7 @@ def replan_request(session: Session, run: AgentPlanRun, node_id: str) -> str:
             f"{exact}.{target} Find someone else "
             f"who can cover those hours, or tell me nobody is available. Do not order anything."
         )
-    raise NothingToReplanError("only rejected orders and declined shifts can be replanned")
+    raise NothingToReplanError("only rejected or short orders and declined shifts can be replanned")
 
 
 def replans_of(session: Session, run_id: str) -> dict[str, str]:

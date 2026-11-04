@@ -1,4 +1,5 @@
-"""Every model call goes through call_model(); record() keeps one row per request in ai_calls.
+"""Every model call goes through call_model() (call_image() for Muse Image); record() keeps one row per
+request in ai_calls.
 
 A row is what the owner would count as one request: a plan that needed a second try is one row with
 attempts 2 and outcome "retried". Rows keep a short request summary only (no prompts, nothing that
@@ -35,6 +36,17 @@ def call_model(client: Any, *, model: str, messages: list[dict[str, Any]], **kwa
     started = time.monotonic()
     try:
         response = client.chat.completions.create(model=model, messages=messages, **kwargs)
+    except Exception as error:
+        error.latency_ms = int((time.monotonic() - started) * 1000)  # type: ignore[attr-defined]
+        raise
+    return response, int((time.monotonic() - started) * 1000)
+
+
+def call_image(client: Any, *, model: str, prompt: str, **kwargs: Any) -> tuple[Any, int]:
+    """call_model for an image model (Muse Image): returns (response, latency_ms); a failure carries latency_ms."""
+    started = time.monotonic()
+    try:
+        response = client.images.generate(model=model, prompt=prompt, **kwargs)
     except Exception as error:
         error.latency_ms = int((time.monotonic() - started) * 1000)  # type: ignore[attr-defined]
         raise

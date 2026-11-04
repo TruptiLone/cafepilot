@@ -113,7 +113,7 @@ export class AgentApiError extends Error {
   }
 }
 
-async function requestJson<T>(path: string, options: RequestInit = {}): Promise<T> {
+export async function requestJson<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
     response = await fetch(path, {

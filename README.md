@@ -5,7 +5,7 @@ Muse spots busy days before they happen, plans stock and staff, checks deliverie
 glasses, and answers the owner's questions, and nothing in the business changes until the owner
 approves.
 
-▶ [Watch the 3-minute demo](https://www.youtube.com/watch?v=ArJZKeY1H1Q) · [How it works](#how-it-works) · [Meta models](#meta-ai-used) · [Run it](#run-it-locally) · [Built during the hackathon](#built-during-the-hackathon)
+▶ [Watch the 3-minute demo](https://www.youtube.com/watch?v=7MMuKQn-kCE) · [How it works](#how-it-works) · [Meta models](#meta-ai-used) · [Run it](#run-it-locally) · [Built during the hackathon](#built-during-the-hackathon)
 
 ## Documentation
 

@@ -4,14 +4,17 @@ import {
   ACTIVE_CAFE_NAME,
   type AgentRun,
   type DetectedEvent,
+  type PastEvent,
   type PlanState,
   type Planning,
   type RunStep,
   AgentApiError,
   decideAll,
   decideStep,
+  discoverDemoEvents,
   getRun,
   listEvents,
+  listPastEvents,
   replanStep,
   startEventRun,
   startRun,
@@ -66,7 +69,7 @@ function writePref(key: string, value: string) {
 const fmt = (value: string, options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat("en-US", { ...options, timeZone: "America/Los_Angeles" }).format(new Date(value));
 
-function eventChip(event: DetectedEvent) {
+function eventChip(event: Pick<DetectedEvent, "starts_at">) {
   return fmt(event.starts_at, { month: "short", day: "numeric" }).toUpperCase();
 }
 
@@ -89,9 +92,20 @@ function eventPitch(event: DetectedEvent): [string, string] {
 }
 
 /** When and where: "Sun, Nov 8 · 8 AM–2 PM · 0.2 miles away" (how busy it gets is in eventPitch). */
-function eventLine(event: DetectedEvent) {
+function eventLine(event: Pick<DetectedEvent, "starts_at" | "ends_at"> & { distance_m?: number | null }) {
   const miles = event.distance_m ? ` · ${(event.distance_m / 1609).toFixed(1)} miles away` : "";
   return `${fmt(event.starts_at, { weekday: "short", month: "short", day: "numeric" })} · ${fmt(event.starts_at, { hour: "numeric" })}–${fmt(event.ends_at, { hour: "numeric" })}${miles}`;
+}
+
+type Tab = "events" | "chat" | "posts";
+
+/** Ask is home. ?tab= still opens a tab (plan → Events); a plan in the address opens Events. */
+function tabFromAddress(params: URLSearchParams): Tab {
+  const tab = params.get("tab");
+  if (tab === "plan" || tab === "events") return "events";
+  if (tab === "posts") return "posts";
+  if (tab === "ask" || tab === "chat") return "chat";
+  return params.get("run") || params.get("event") ? "events" : "chat";
 }
 
 /** Everything that can change an event's plan state or what a box says. */
@@ -121,7 +135,17 @@ function AgentPage() {
   // How long the model took, per run: the API reports it only when the plan comes back.
   const [planTimes, setPlanTimes] = useState<Record<string, number>>({});
   const [request, setRequest] = useState("");
-  const [tab, setTab] = useState<"events" | "chat" | "posts">("events");
+  const [tab, setTab] = useState<Tab>(() => tabFromAddress(searchParams));
+  // A plan opened from elsewhere (Updates, a link) shows on the Events tab.
+  useEffect(() => {
+    if (runId) setTab("events");
+  }, [runId]);
+  const [pastEvents, setPastEvents] = useState<PastEvent[]>([]);
+  // The demo's scripted discovery (not live web monitoring): after the first answer in Ask, the app asks
+  // the server to "find" the event a fresh reset hid. The server reveals it once per reset.
+  const [found, setFound] = useState<DetectedEvent | null>(null);
+  const [freshEvent, setFreshEvent] = useState<string | null>(null);
+  const discoveryTried = useRef(false);
   const [postRequest, setPostRequest] = useState<PostRequest | null>(null);
   const makePost = (eventId: string) => {
     setPostRequest({ eventId, nonce: Date.now() });
@@ -145,6 +169,19 @@ function AgentPage() {
   }, []);
 
   useEffect(refreshEvents, [refreshEvents]);
+
+  const onAnswered = useCallback(() => {
+    if (discoveryTried.current) return;
+    discoveryTried.current = true;
+    discoverDemoEvents()
+      .then((list) => {
+        if (list.length) {
+          setFound(list[0]);
+          refreshEvents();
+        }
+      })
+      .catch(() => undefined);
+  }, [refreshEvents]);
 
   // Load the run named in the address (only when the address changes: a plan Muse just
   // returned is already in state while the address catches up).
@@ -366,6 +403,23 @@ function AgentPage() {
   // Chat uses the same reference time as the demo event's plan ("today" = its knowledge time).
   const chatAsOf = events.find((e) => e.is_demo && e.knowledge_as_of)?.knowledge_as_of;
 
+  useEffect(() => {
+    if (!eventsLoaded) return;
+    const controller = new AbortController();
+    listPastEvents(chatAsOf, controller.signal)
+      .then(setPastEvents)
+      .catch(() => setPastEvents([]));
+    return () => controller.abort();
+  }, [chatAsOf, eventsLoaded]);
+
+  function viewFound() {
+    if (!found) return;
+    setFreshEvent(found.event_id);
+    setFound(null);
+    backToEvents();
+    setTab("events");
+  }
+
   const anyWaiting = run?.status === "awaiting_approval" || waitingChild;
   // Suppliers and staff we're waiting on, in the plan and in any replan that took over.
   const waitingOn = [...new Set([run, ...childIds.map((id) => children[id])].flatMap((r) => r?.waiting_on ?? []))];
@@ -375,7 +429,9 @@ function AgentPage() {
       ? ["waiting", "Waiting for you"]
       : waitingOn.length > 0
         ? ["waiting", `Waiting on ${waitingOn.join(" and ")}`]
-        : ["watching", "Watching for events"];
+        : found
+          ? ["found", "Found a new event"]
+          : ["watching", "Watching for events"];
   const showPlan = !!run || !!planningFor || !!rejectedPlanning;
   const replanningStep = replanning ? run?.nodes.find((n) => n.node_id === replanning) : undefined;
   const replanBanner =
@@ -409,6 +465,14 @@ function AgentPage() {
         <nav className="mz-tabs" aria-label="Muse">
           <button
             type="button"
+            className={`mz-tab${tab === "chat" ? " is-on" : ""}`}
+            aria-current={tab === "chat" ? "page" : undefined}
+            onClick={() => setTab("chat")}
+          >
+            Ask
+          </button>
+          <button
+            type="button"
             className={`mz-tab${tab === "events" ? " is-on" : ""}`}
             aria-current={tab === "events" ? "page" : undefined}
             onClick={() => {
@@ -416,15 +480,7 @@ function AgentPage() {
               backToEvents();
             }}
           >
-            Plan <span className="mz-tab__n">{events.length}</span>
-          </button>
-          <button
-            type="button"
-            className={`mz-tab${tab === "chat" ? " is-on" : ""}`}
-            aria-current={tab === "chat" ? "page" : undefined}
-            onClick={() => setTab("chat")}
-          >
-            Ask
+            Events <span className="mz-tab__n">{events.length}</span>
           </button>
           <button
             type="button"
@@ -436,7 +492,31 @@ function AgentPage() {
           </button>
         </nav>
 
-        <ChatPanel hidden={tab !== "chat"} asOf={chatAsOf} onPlan={planFromChat} question={chatQuestion} />
+        {found && (
+          <div className="mz-found" role="status">
+            <span className="mz-found__mark" aria-hidden="true">
+              <svg viewBox="0 0 24 24">
+                <rect x="4" y="5" width="16" height="15" rx="2.5" />
+                <path d="M4 10h16M9 3v4M15 3v4M12 13v4M10 15h4" />
+              </svg>
+            </span>
+            <div className="mz-found__body">
+              <p className="mz-found__title">
+                Muse found a new event: {found.title}, {fmt(found.starts_at, { weekday: "short" })}{" "}
+                {fmt(found.starts_at, { month: "short", day: "numeric" })}
+              </p>
+              <p className="mz-found__text">{eventLine(found)}</p>
+            </div>
+            <button type="button" className="mz-btn mz-btn--primary" onClick={viewFound}>
+              View event
+            </button>
+            <button type="button" className="mz-found__close" aria-label="Dismiss" onClick={() => setFound(null)}>
+              ×
+            </button>
+          </div>
+        )}
+
+        <ChatPanel hidden={tab !== "chat"} asOf={chatAsOf} onPlan={planFromChat} question={chatQuestion} onAnswered={onAnswered} />
 
         <PostsPanel hidden={tab !== "posts"} events={events} request={postRequest} />
 
@@ -456,14 +536,15 @@ function AgentPage() {
                   <p className="mz-greet__sub">Here's what's coming up for {ACTIVE_CAFE_NAME}. Nothing changes without your OK.</p>
                 </div>
               </header>
-              <p className="mz-label">
-                {events.length} {events.length === 1 ? "event" : "events"} coming up
-              </p>
+              <h3 className="mz-label">Upcoming</h3>
               {events.map((event) => {
                 const state = event.plan_state ?? "new";
                 const [expect, question] = eventPitch(event);
                 return (
-                  <article key={event.event_id} className={`mz-ev${selectedEvent?.event_id === event.event_id ? " is-sel" : ""}`}>
+                  <article
+                    key={event.event_id}
+                    className={`mz-ev${selectedEvent?.event_id === event.event_id ? " is-sel" : ""}${freshEvent === event.event_id ? " is-new" : ""}`}
+                  >
                     <span className="mz-ev__chip" aria-hidden="true">
                       <b>{fmt(event.starts_at, { weekday: "short" }).toUpperCase()}</b>
                       {eventChip(event)}
@@ -501,7 +582,25 @@ function AgentPage() {
                   </article>
                 );
               })}
-              {events.length === 0 && <p className="mz-empty">No events coming up. Ask Muse anything below.</p>}
+              {events.length === 0 && <p className="mz-empty">No upcoming events yet. Muse lets you know when it finds one.</p>}
+              {pastEvents.length > 0 && (
+                <>
+                  <h3 className="mz-label mz-label--section">Past events</h3>
+                  {pastEvents.map((event) => (
+                    <article key={event.event_id} className="mz-ev mz-ev--past">
+                      <span className="mz-ev__chip" aria-hidden="true">
+                        <b>{fmt(event.starts_at, { weekday: "short" }).toUpperCase()}</b>
+                        {eventChip(event)}
+                      </span>
+                      <div className="mz-ev__main">
+                        <h3 className="mz-ev__title">{event.title}</h3>
+                        {event.note && <p className="mz-ev__pitch">{event.note}</p>}
+                        <p className="mz-ev__meta">{eventLine(event)}</p>
+                      </div>
+                    </article>
+                  ))}
+                </>
+              )}
               <div className="mz-quick">
                 <p className="mz-label">Or ask Muse</p>
                 <div className="mz-chat__ex">

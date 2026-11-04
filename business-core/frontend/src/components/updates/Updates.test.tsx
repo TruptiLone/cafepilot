@@ -51,8 +51,8 @@ afterEach(() => {
 });
 
 describe("Updates bell", () => {
-  it("history on load is not news; a new change toasts, badges, and is asked for with since", async () => {
-    const fetchMock = serve([[SENT], [DECLINED]]);
+  it("history on load is not news; a new change toasts and badges, found by id rather than by time", async () => {
+    const fetchMock = serve([[SENT], [{ ...DECLINED, at: "2026-01-01T09:00:00-08:00" }, SENT]]);  // stamped earlier, still news
     renderBell();
     const toast = await screen.findByRole("status");
     expect(within(toast).getByText("Bay Dairy Co. declined PO-1042")).toBeTruthy();
@@ -60,7 +60,7 @@ describe("Updates bell", () => {
     expect(screen.queryAllByRole("status")).toHaveLength(1);  // the earlier "sent" is history: no toast
     expect(screen.getByRole("button", { name: "Updates, 1 new" })).toBeTruthy();
     const second = String(fetchMock.mock.calls[1][0]);
-    expect(new URL(second, "http://x").searchParams.get("since")).toBe(SENT.at);
+    expect(new URL(second, "http://x").searchParams.get("since")).toBeNull();
   });
 
   it("the panel groups updates and clears the badge", async () => {

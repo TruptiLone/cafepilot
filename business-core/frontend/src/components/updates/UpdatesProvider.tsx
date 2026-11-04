@@ -48,7 +48,9 @@ export function UpdatesProvider({
   const [unseen, setUnseen] = useState(0);
   const [toasts, setToasts] = useState<CafeUpdate[]>([]);
   const [panelOpen, setPanelOpen] = useState(false);
-  const latest = useRef<string | undefined>(undefined);
+  // News is any update whose id we haven't seen, not "newer than the last one": demo records are
+  // stamped with the demo clock, which can be ahead of the real one.
+  const known = useRef(new Set<string>());
 
   useEffect(() => {
     // Local to this poll loop: an effect that React runs twice in development must not mistake the
@@ -58,10 +60,11 @@ export function UpdatesProvider({
     let timer: number | undefined;
     async function tick() {
       try {
-        const fresh = await getUpdates(latest.current);
+        const all = await getUpdates();
         if (stopped) return;
+        const fresh = all.filter((u) => !known.current.has(u.id));
+        for (const u of fresh) known.current.add(u.id);
         if (fresh.length) {
-          latest.current = fresh[0].at; // newest first
           setUpdates((current) => {
             const known = new Set(current.map((u) => u.id));
             return [...fresh.filter((u) => !known.has(u.id)), ...current].slice(0, 100);

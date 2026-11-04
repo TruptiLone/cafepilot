@@ -74,7 +74,7 @@ cp .env.example .env            # set POSTGRES_PASSWORD and MODEL_API_KEY
 docker compose up -d            # Postgres on 127.0.0.1:5433
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-./scripts/seed_all.sh           # migrations + demo café data
+./scripts/seed_all.sh           # alembic upgrade head, then the demo café data
 PYTHONPATH=. python scripts/seed_event_surge.py --fresh   # Sunday farmers-market scenario
 # add --with-delivery for the receiving demo (PO-1042 from Willow Ridge, arriving Sun 5:30 AM)
 uvicorn backend.main:app --port 8001 --reload
@@ -88,7 +88,10 @@ npm install
 npm run dev                     # http://localhost:5173/agent
 ```
 
-Open **Ask CaféPilot** and click **Let's plan ✨** on the Santa Clara Farmers Market.
+Open **Ask CaféPilot** and click **Let's plan** on the Santa Clara Farmers Market.
+
+Ports: Postgres 5433, API 8001, web app 5173. The glasses photo receiver
+(`./scripts/run_local_photo_receiver.sh`, optional) listens on 8004.
 
 ### After pulling
 
@@ -136,7 +139,7 @@ DEMO_SUPPLIER_REPLY_DELAY_SECONDS=30   # extra seconds before a simulated suppli
 
 ```bash
 cd business-core && python -m pytest -q          # needs the Postgres container
-cd business-core/frontend && npm test && npx tsc --noEmit
+cd business-core/frontend && npm test && npx tsc --noEmit && npm run build
 ```
 
 CI runs both on every push and pull request (`.github/workflows/business-core.yml`).

@@ -74,7 +74,7 @@ CAFE_POLICIES: dict[str, dict[str, Any]] = {
 }
 
 
-# Test only: a supplier for the end-to-end glasses test (one real 1.7 L carton). It is kept out of
+# Test only: a supplier for the end-to-end glasses test (one real half-gallon bottle). It is kept out of
 # CAFE_POLICIES, so the planner and find_suppliers never see it and the demo plans are unchanged;
 # only an order that names it (scripts/glasses_test_order.py) reaches it.
 TEST_SUPPLIERS: dict[str, list[dict[str, Any]]] = {
@@ -85,7 +85,7 @@ TEST_SUPPLIERS: dict[str, list[dict[str, Any]]] = {
             "respond_after_seconds": 8,
             "earliest_delivery": {d: "00:00" for d in range(7)},
             "items": {
-                "WHOLE_MILK": {"item_number": "GT-1700", "description": "Whole Milk, 1.7 L carton", "pack_size": "1700", "pack_name": "carton of 1 × 1.7 L", "pack_price_cents": 499},
+                "WHOLE_MILK": {"item_number": "GT-1890", "description": "Whole Milk, half gallon (1.89 L)", "pack_size": "1890", "pack_name": "half gallon (1.89 L)", "pack_price_cents": 449},
             },
         },
     ],

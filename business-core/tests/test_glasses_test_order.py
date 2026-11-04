@@ -1,4 +1,4 @@
-"""The 1-carton glasses test order: test-only supplier, never offered to Muse or find_suppliers."""
+"""The 1-half-gallon glasses test order: test-only supplier, never offered to Muse or find_suppliers."""
 
 import json
 import sys
@@ -38,15 +38,15 @@ def session() -> Session:
 
 
 def test_the_test_supplier_is_never_offered_for_planning(session: Session) -> None:
-    lines = [OrderLineIn("WHOLE_MILK", Decimal("1700"), "mL")]
+    lines = [OrderLineIn("WHOLE_MILK", Decimal("1890"), "mL")]
     options = supplier_options(session, C, lines, datetime.now(timezone.utc) + timedelta(days=1))
     assert "GLASSES_TEST" not in [o["supplier_id"] for o in options["suppliers"]]
     context = build_planning_context(session, C)
     assert "GLASSES_TEST" not in json.dumps(context.reference, default=str)
-    assert get_supplier(C, "GLASSES_TEST")["items"]["WHOLE_MILK"]["pack_size"] == "1700"  # only when named
+    assert get_supplier(C, "GLASSES_TEST")["items"]["WHOLE_MILK"]["pack_size"] == "1890"  # only when named
 
 
-def test_the_test_order_is_one_carton_and_waits_for_the_owner(session: Session, tmp_path) -> None:
+def test_the_test_order_is_one_half_gallon_and_waits_for_the_owner(session: Session, tmp_path) -> None:
     run = glasses_test_order.make_order(session)
     node = run.nodes[0]
     assert run.status == "awaiting_approval" and node.status == "awaiting_approval"
@@ -58,7 +58,7 @@ def test_the_test_order_is_one_carton_and_waits_for_the_owner(session: Session, 
     session.refresh(order)
     line = order.lines[0]
     assert (order.status, order.supplier_id, line.packs, line.quantity, line.pack_name) == (
-        "confirmed", "GLASSES_TEST", 1, Decimal("1700"), "carton of 1 × 1.7 L")
+        "confirmed", "GLASSES_TEST", 1, Decimal("1890"), "half gallon (1.89 L)")
 
     png = glasses_test_order.draw_slip(session, order.po_number, tmp_path)
     assert png.exists() and png.with_suffix(".pdf").exists()

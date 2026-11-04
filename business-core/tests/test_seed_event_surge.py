@@ -12,6 +12,7 @@ from backend.modules.agent.planner import Plan, build_planning_context
 from backend.modules.agent.registry import REGISTRY
 from backend.modules.agent.validator import validate_plan
 from backend.modules.inventory.models import InventoryMovement, StockCount
+from backend.modules.purchasing.service import next_po_number
 from backend.modules.staffing.models import Employee, Shift
 from scripts.seed_demo_operations import DemoSeedError
 from scripts.seed_event_surge import (
@@ -54,6 +55,12 @@ def test_seed_is_idempotent(session: Session) -> None:
     assert (first.counts, first.count_lines, first.movements, first.shifts) == (1, 9, 1, 11)  # 3 Sunday + 8 roster
     again = seed_event_surge(session)
     assert (again.counts, again.count_lines, again.movements, again.shifts, again.reorder_points) == (0, 0, 0, 0, 0)
+
+
+def test_with_delivery_keeps_the_first_market_order_at_po_123(session: Session) -> None:
+    """The seeded PO-1042 (receiving fixture) doesn't push the plan's first order to PO-1043."""
+    assert seed_event_surge(session, with_delivery=True).orders == 1
+    assert next_po_number(session, "CAFE001") == "PO-123"
 
 
 def test_reorder_points_put_whole_milk_croissants_and_banana_nut_muffins_below(session: Session) -> None:

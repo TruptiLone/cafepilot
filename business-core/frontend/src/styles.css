@@ -28,7 +28,8 @@
   --g-glance-gap: 110px;
   --g-glance-col: 320px;
   --g-control-h: 44px;
-  --g-edge: 96px;        /* space above the header and below the footer (desktop) */
+  --g-edge-top: 24px;    /* space above the header (desktop) */
+  --g-edge-bottom: 48px; /* space below the footer (desktop) */
   color: #191918;
   background: #f5f5f3;
   font-family: var(--g-font-ui);
@@ -4744,15 +4745,15 @@ h1 { letter-spacing: -0.01em; }  /* page titles are display size: only a hair of
 
 /* ---------- Room at the screen edges: nothing touches the top or bottom ---------- */
 @media (min-width: 861px) {
-  .app-frame { padding-block: var(--g-edge); min-height: 100vh; }
-  .app-body { min-height: calc(100vh - 2 * var(--g-edge)); }
-  .sidebar { top: var(--g-edge); height: calc(100vh - 2 * var(--g-edge)); }
-  .page--muse { height: calc(100vh - 2 * var(--g-edge)); }
-  .mz-toasts { top: calc(var(--g-edge) + 72px); }
+  .app-frame { padding: var(--g-edge-top) 0 var(--g-edge-bottom); min-height: 100vh; }
+  .app-body { min-height: calc(100vh - var(--g-edge-top) - var(--g-edge-bottom)); }
+  .sidebar { top: var(--g-edge-top); height: calc(100vh - var(--g-edge-top) - var(--g-edge-bottom)); }
+  .page--muse { height: calc(100vh - var(--g-edge-top) - var(--g-edge-bottom)); }
+  .mz-toasts { top: calc(var(--g-edge-top) + 72px); }
 }
 @media (max-width: 860px) {
-  :root { --g-edge: 48px; }
-  .app-frame { padding-block: var(--g-edge); }
+  :root { --g-edge-top: 12px; --g-edge-bottom: 24px; }
+  .app-frame { padding: var(--g-edge-top) 0 var(--g-edge-bottom); }
 }
 
 /* ---------- Events tab: Upcoming, then Past events (read-only) ---------- */
@@ -4766,7 +4767,7 @@ h1 { letter-spacing: -0.01em; }  /* page titles are display size: only a hair of
 .mz-live[data-live="found"] i { background: var(--g-sky-ink); }
 .mz-found {
   position: fixed;
-  top: calc(var(--g-edge) + 128px);  /* under the tabs, clear of Muse's answer and its buttons */
+  top: calc(var(--g-edge-top) + 128px);  /* under the tabs, clear of Muse's answer and its buttons */
   right: var(--g-space-6);
   z-index: 60;
   display: grid;

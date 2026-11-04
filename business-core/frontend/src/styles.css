@@ -4473,11 +4473,13 @@ body { background: var(--g-bg); }
 .mz-short { padding: 18px 22px; }
 
 /* Plan home: events, and "At a glance" on the right (below the events on narrower screens) */
-.mz-scroll--home { display: grid; grid-template-columns: minmax(0, 1fr) 280px; column-gap: 28px; row-gap: 14px; align-content: start; }
+.mz-scroll--home { display: grid; grid-template-columns: minmax(0, 1fr) 280px; column-gap: 84px; row-gap: 14px; align-content: start; }
+/* On Plan home the header, tabs and content share a wider column (events about 3.3× "At a glance") */
+.mz:has(.mz-scroll--home:not([hidden])) { --mz-col: 1300px; }
 .mz-scroll--home > * { grid-column: 1 / -1; align-self: start; }
 .mz-scroll--home > .mz-events { grid-column: 1; }
 .mz-scroll--home > .mz-glance { grid-column: 2; grid-row: 1; }
-.mz-glance { display: flex; flex-direction: column; gap: 12px; padding-top: 6px; }
+.mz-glance { display: flex; flex-direction: column; gap: 24px; padding-top: 6px; }
 .mz-glance__card { padding: 16px 18px; border-radius: 16px; background: #fff; }
 .mz-glance__card.is-warn { border-color: #ebd3a6; background: #fffbf3; }
 .mz-glance__title { font-size: 18px; font-weight: 600; margin-bottom: 8px !important; }

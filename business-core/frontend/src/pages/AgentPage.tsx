@@ -115,6 +115,9 @@ function AgentPage() {
   const [planningFor, setPlanningFor] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [rejectedPlanning, setRejectedPlanning] = useState<Planning | null>(null);
+  // The typed request behind the last plan: Muse plans each message on its own, so an answer to its
+  // question goes back together with this request.
+  const [sentRequest, setSentRequest] = useState<string | null>(null);
   // How long the model took, per run: the API reports it only when the plan comes back.
   const [planTimes, setPlanTimes] = useState<Record<string, number>>({});
   const [request, setRequest] = useState("");
@@ -238,7 +241,8 @@ function AgentPage() {
     writePref(VIEW_KEY, next);
   }
 
-  async function plan(start: () => ReturnType<typeof startRun>, forEvent: string | null) {
+  async function plan(start: () => ReturnType<typeof startRun>, forEvent: string | null, query: string | null = null) {
+    setSentRequest(query);
     setPlanningFor(forEvent ?? "request");
     setPlanError(null);
     setRejectedPlanning(null);
@@ -316,14 +320,16 @@ function AgentPage() {
   // A change asked in chat goes to the normal plan flow (it still waits for the owner's OK).
   function planFromChat(text: string) {
     setTab("events");
-    void plan(() => startRun(text), null);
+    void plan(() => startRun(text), null, text);
   }
 
   async function handleAsk(event: FormEvent) {
     event.preventDefault();
-    const query = request.trim();
-    if (!query || planningFor) return;
-    await plan(() => startRun(query), null);
+    const text = request.trim();
+    if (!text || planningFor) return;
+    const question = rejectedPlanning?.plan.status === "needs_clarification" ? rejectedPlanning.plan.question : null;
+    const query = question && sentRequest ? `${sentRequest}\nAnswer to "${question}": ${text}` : text;
+    await plan(() => startRun(query), null, query);
     setRequest("");
   }
 
@@ -726,7 +732,7 @@ function PlanningNotice({ planning }: { planning: Planning }) {
       <div className="mz-notice" role="status">
         <h3>One question first</h3>
         <p>{plan.question}</p>
-        <p className="mz-muted">Add the answer to your request and ask again.</p>
+        <p className="mz-muted">Type your answer below. Muse gets it together with your request.</p>
       </div>
     );
   }

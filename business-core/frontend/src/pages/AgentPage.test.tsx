@@ -397,6 +397,28 @@ describe("AgentPage", () => {
     expect(await screen.findByText("Which day is the event?")).toBeTruthy();
   });
 
+  it("sends the answer to Muse's question together with the original request", async () => {
+    const question = { planning: planning({ status: "needs_clarification", question: "When do you need it delivered by?" }), run: null };
+    const replies = [question, { planning: planning(), run }];
+    const fetchMock = stubFetch((url, init) =>
+      url === "/api/v1/agent/runs" && init?.method === "POST" ? jsonResponse(replies.shift()) : url.startsWith("/api/v1/agent/runs/RUN-1") ? jsonResponse(run) : undefined,
+    );
+    renderPage();
+    await userEvent.type(screen.getByLabelText("Ask Muse"), "order one carton of whole milk");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("When do you need it delivered by?")).toBeTruthy();
+    await userEvent.type(screen.getByLabelText("Ask Muse"), "Friday by 8 AM");
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByRole("heading", { name: /Muse's plan/ })).toBeTruthy();
+    const queries = fetchMock.mock.calls
+      .filter(([url, init]) => url === "/api/v1/agent/runs" && init?.method === "POST")
+      .map(([, init]) => JSON.parse(String(init?.body)).query);
+    expect(queries).toEqual([
+      "order one carton of whole milk",
+      'order one carton of whole milk\nAnswer to "When do you need it delivered by?": Friday by 8 AM',
+    ]);
+  });
+
   it("shows the server's reason when planning is unavailable", async () => {
     mockApi({ status: 503, detail: "MODEL_API_KEY is not set in business-core/.env" });
     renderPage();

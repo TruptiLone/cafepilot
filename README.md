@@ -5,7 +5,7 @@ Muse spots busy days before they happen, plans stock and staff, checks deliverie
 glasses, and answers the owner's questions, and nothing in the business changes until the owner
 approves.
 
-▶ [Watch the 3-minute demo]([DEMO VIDEO LINK]) · [How it works](#how-it-works) · [Meta models](#meta-ai-used) · [Run it](#run-it-locally) · [Built during the hackathon](#built-during-the-hackathon)
+▶ [Watch the 3-minute demo](https://www.youtube.com/watch?v=ArJZKeY1H1Q) · [How it works](#how-it-works) · [Meta models](#meta-ai-used) · [Run it](#run-it-locally) · [Built during the hackathon](#built-during-the-hackathon)
 
 Meta Global AI Developer Hackathon · Indie Developer track · Built Oct 26 – Nov 4, 2026 ·
 Example business: an independent café · All demo data is synthetic
@@ -150,6 +150,16 @@ flowchart LR
 More detail: [`business-core/docs/agentic/`](business-core/docs/agentic/) and the module references
 in [`business-core/docs/`](business-core/docs/).
 
+### How demand is estimated
+
+Code estimates an event's extra demand from the sales history (`demand.py`). A normal day is the
+average of up to 8 recent same-weekday days without events, for the same hours. Each comparable past
+event (for the farmers market, its 6 past editions) is compared with a normal day at its own hours,
+which gives one estimate of the extra demand; the middle one is the typical case (about +28 drinks),
+and the lowest and highest give the low and high cases. The plan shows the source ("estimate from the
+last 6 events"), and with fewer than 3 past events the estimate is marked as a rough guide. It is a
+transparent estimate from comparable past days, not a trained forecasting model.
+
 ### Delivery check with Meta glasses
 
 ```mermaid
@@ -195,7 +205,7 @@ Every call is recorded in the `ai_calls` table (outcome, attempts, timing; no pr
 | **Muse Spark 1.3** (`muse-spark-1.3`) | Reads packing-slip photos; verifies SAM's item boxes; picks read-only lookups for chat; writes post captions. | `receiving/vision.py`, `receiving/counting.py`, `agent/chat.py`, `agent/promo.py` |
 | **SAM 3.1** (`sam-3.1`) | Finds and segments each item in the delivery photo so it can be counted. | `backend/modules/receiving/counting.py` |
 | **Muse Image 1.0** (`muse-image-1.0`) | Background image for event post drafts (code sets all text). | `backend/modules/agent/promo.py` |
-| **Meta Wearables Device Access Toolkit** (iOS) | Glasses session, camera preview and photo capture in the Barista companion app. | [`BaristaGlassesAgent/`](BaristaGlassesAgent/) |
+| **Meta Wearables Device Access Toolkit** (iOS) ([docs](https://wearables.developer.meta.com/docs/getting-started-toolkit), [iOS SDK](https://github.com/facebook/meta-wearables-dat-ios)) | Glasses session, camera preview and photo capture in the Barista companion app. | [`BaristaGlassesAgent/`](BaristaGlassesAgent/) |
 
 Code paths are under `business-core/`. Voice in Ask uses the browser's speech recognition and
 text-to-speech, not a Meta model.
@@ -216,9 +226,9 @@ validator, not that it was the best plan.
 
 ## Screenshots
 
-| Ask: Muse found a new event | Plan with approvals |
+| Ask: Muse found a new event | Events: Muse's plan, waiting for your OK |
 |---|---|
-| ![Ask tab: an answer with a stock table and the "Muse found a new event" card](docs/images/screenshot-ask-found-event.png) | ![Plan graph for the farmers market with Approve all](docs/images/screenshot-plan-graph.png) |
+| ![Ask tab: an answer with a stock table and the "Muse found a new event" card](docs/images/screenshot-ask-found-event.png) | ![Events tab: Muse's plan for the farmers market (owner view) with Approve all](docs/images/screenshot-plan-graph.png) |
 | **Delivery check** | **Posts** |
 | ![Delivery check: slip read, Muse saw 3 of 12, please count](docs/images/screenshot-delivery-check.png) | ![Posts tab: make a post and four drafts](docs/images/screenshot-posts.png) |
 
@@ -228,7 +238,8 @@ validator, not that it was the best plan.
 - **Frontend:** React + TypeScript (Vite), Inter font bundled locally
 - **AI:** Meta Model API: Muse Wonder, Muse Spark, SAM 3.1, Muse Image
 - **Voice:** the browser's speech recognition and text-to-speech
-- **Glasses:** Swift iOS app with Meta's Wearables Device Access Toolkit; photos sent over local
+- **Glasses:** Swift iOS app with Meta's Wearables Device Access Toolkit
+  ([docs](https://wearables.developer.meta.com/docs/getting-started-toolkit)); photos sent over local
   Wi-Fi to a Mac receiver
 - **Infra:** Docker Compose (Postgres), GitHub Actions CI
 

@@ -1,0 +1,13 @@
+/* Fonts are bundled with the app: no request to a font CDN during the demo. */
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+
+/* Newsreader (SIL Open Font License, see assets/fonts/Newsreader-OFL.txt): the "Good evening" greeting only. */
+@font-face {
+  font-family: "Newsreader";
+  font-style: normal;
+  font-weight: 400 500;
+  font-display: swap;
+  src: url("./assets/fonts/newsreader-latin.woff2") format("woff2");
+}

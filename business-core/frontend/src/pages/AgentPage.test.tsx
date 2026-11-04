@@ -234,7 +234,7 @@ describe("AgentPage", () => {
     const glance = await screen.findByRole("complementary", { name: "At a glance" });
     expect(within(within(glance).getByRole("region", { name: "Running low" })).getByText("1.25 L left")).toBeTruthy();
     const coming = within(glance).getByRole("region", { name: "Coming in" });
-    expect(within(coming).getByText("Sun Nov 8, 6 AM · Willow Ridge Dairy Supply PO-123, Partly received")).toBeTruthy();
+    expect(within(coming).getByText("Sun Nov 8, 6 AM · Willow Ridge Dairy · PO-123 · Partly received")).toBeTruthy();
     expect(coming.textContent).not.toContain("_");
     expect(within(within(glance).getByRole("region", { name: "Working tomorrow, Fri Nov 6" })).getByText("Jordan Brooks")).toBeTruthy();
     const asked = fetchMock.mock.calls.map(([u]) => String(u)).find((u) => u.startsWith("/api/v1/agent/glance?"));

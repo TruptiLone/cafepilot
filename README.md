@@ -7,6 +7,15 @@ approves.
 
 ▶ [Watch the 3-minute demo](https://www.youtube.com/watch?v=ArJZKeY1H1Q) · [How it works](#how-it-works) · [Meta models](#meta-ai-used) · [Run it](#run-it-locally) · [Built during the hackathon](#built-during-the-hackathon)
 
+## Documentation
+
+- [docs/README.md](docs/README.md): start here, with the reading order for all pages
+- [Architecture](docs/architecture.md): the big picture, the layers and one request end to end
+- [Agentic planning](docs/agentic-planning.md): why a plan graph (DAG), and how the registry, validator, executor and approvals work
+- [Forecasting and math](docs/forecasting-and-math.md): every calculation, from demand estimate to pack rounding and delivery counting
+- [Mobile app](docs/mobile-app.md): the Barista iPhone app for Meta glasses
+- [Limitations and decisions](docs/limitations-and-decisions.md): planned vs built, what is simulated, known limits
+
 Meta Global AI Developer Hackathon · Indie Developer track · Built Oct 26 – Nov 4, 2026 ·
 Example business: an independent café · All demo data is synthetic
 
@@ -147,8 +156,7 @@ flowchart LR
 - **Honest uncertainty.** If SAM and Spark don't agree on a count, the result is "please count it",
   not "short delivery".
 
-More detail: [`business-core/docs/agentic/`](business-core/docs/agentic/) and the module references
-in [`business-core/docs/`](business-core/docs/).
+More detail: [docs/agentic-planning.md](docs/agentic-planning.md).
 
 ### How demand is estimated
 

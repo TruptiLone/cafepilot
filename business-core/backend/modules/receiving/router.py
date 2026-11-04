@@ -47,6 +47,16 @@ class OpenOrderOut(BaseModel):
     lines: list[OrderLineOut]
 
 
+class ReceivedOut(BaseModel):
+    receipt_id: str
+    po_number: str | None
+    supplier_name: str | None
+    order_status: str | None = Field(description="received or partially_received; None when it wasn't on an order")
+    slip_number: str | None
+    confirmed_at: datetime | None
+    credit_ref: str | None
+
+
 class ReceiptLineOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -208,6 +218,24 @@ def list_open_orders(cafe_id: str = Query("CAFE001"), database_session: Session 
     orders = service.open_orders(database_session, cafe_id)
     database_session.commit()
     return [_order_out(o) for o in orders]
+
+
+@router.get("/received", response_model=list[ReceivedOut])
+def list_received(cafe_id: str = Query("CAFE001"), database_session: Session = Depends(get_db)) -> list[ReceivedOut]:
+    """Deliveries already checked in, newest first."""
+    return [
+        ReceivedOut(receipt_id=r.receipt_id, po_number=o.po_number if o else r.slip_po_number,
+                    supplier_name=o.supplier_name if o else r.slip_supplier, order_status=o.status if o else None,
+                    slip_number=r.slip_number, confirmed_at=r.confirmed_at,
+                    credit_ref=(r.credit_request or {}).get("credit_ref"))
+        for r, o in service.received(database_session, cafe_id)
+    ]
+
+
+@router.get("/orders/{po_number}/check", response_model=ReceiptOut)
+def latest_check(po_number: str, cafe_id: str = Query("CAFE001"), database_session: Session = Depends(get_db)) -> ReceiptOut:
+    """The delivery check for a PO (e.g. a glasses check), for a fixed link: /receiving?po=PO-123."""
+    return _out(database_session, _guard(service.latest_check, database_session, cafe_id, po_number))
 
 
 @router.post("/receipts", response_model=ReceiptOut)

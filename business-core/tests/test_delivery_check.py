@@ -22,7 +22,7 @@ from backend.modules.agent import planner as planner_module
 from backend.modules.inventory.models import InventoryMovement
 from backend.modules.purchasing.models import PurchaseOrder
 from backend.modules.receiving import service
-from backend.modules.receiving.counting import Product, count_delivery, noun_for
+from backend.modules.receiving.counting import Product, count_delivery, noun_for, upright
 from backend.modules.receiving.delivery_check import check_delivery
 from scripts.seed_event_surge import DEMO_ORDER_ID, apply_reset, plan_reset, seed_event_surge
 
@@ -125,7 +125,7 @@ def test_a_short_count_waits_for_the_owner_and_changes_nothing(session: Session)
     assert (check["outcome"], check["receipt_status"], check["order_status"]) == ("needs_owner", "draft", "confirmed")
     receipt = service.recompare(session, session.get(service.Receipt, check["receipt_id"]))
     whole = next(l for l in receipt.lines if l.ingredient_id == "WHOLE_MILK")
-    assert whole.status == "short" and "1 cartons (1 L) short" in whole.message
+    assert whole.status == "short" and "1 carton (1 L) short" in whole.message
     assert check["glasses_line"] == "PO-1042 needs your OK. whole milk: short."
     assert _movements(session) == []
 
@@ -201,3 +201,37 @@ def test_spark_throwing_out_a_box_sam_was_sure_of_is_a_disagreement() -> None:
     _, groups = count_delivery(client, "muse-spark-1.3", _jpeg(), "image/jpeg",
                                [Product("Whole Milk", "milk carton"), Product("Oat Milk", "milk carton")])
     assert groups[0].counts == {"Whole Milk": 5, "Oat Milk": 6} and not groups[0].confident
+
+
+def test_a_sideways_phone_photo_is_turned_upright_before_anyone_reads_it() -> None:
+    # iPhone JPEGs are stored 1440×1080 with "rotate 90°" (EXIF Orientation 6); SAM sees them 1080×1440.
+    out = io.BytesIO()
+    exif = Image.Exif()
+    exif[0x0112] = 6
+    Image.new("RGB", (1440, 1080), "white").save(out, format="JPEG", exif=exif)
+    turned = Image.open(io.BytesIO(upright(out.getvalue())))
+    assert turned.size == (1080, 1440) and turned.getexif().get(0x0112, 1) == 1
+    plain = _jpeg()
+    assert upright(plain) is plain  # no tag: untouched
+
+
+class SlowSpark(Glasses):
+    """Muse doesn't answer the count check in time (seen live: 137 s for 10 croissants against a 60 s limit)."""
+
+    def _spark(self, **kwargs):
+        if kwargs["messages"][-1]["content"][0]["text"].startswith("Read this packing slip"):
+            return super()._spark(**kwargs)
+        raise type("APITimeoutError", (Exception,), {})("Request timed out.")
+
+
+def test_when_muse_doesnt_answer_the_check_sams_count_stays_but_isnt_sure() -> None:
+    client = SlowSpark(slip=SLIP, sam={"croissant": _boxes(10)})
+    photo, [group] = count_delivery(client, "muse-spark-1.3", _jpeg(), "image/jpeg", [Product("Butter Croissant", "croissant")])
+    assert group.counts == {"Butter Croissant": 10} and not group.confident and "timed out" in group.error
+    assert photo.items[0].visible_units == 10 and photo.items[0].possibly_hidden_units
+    assert "croissant: SAM 10, not checked (Muse couldn't check the count: Request timed out.), ask owner to confirm" in photo.notes
+    # Two products under one phrase can't be split without Muse: nothing is counted, the owner counts.
+    client = SlowSpark(slip=SLIP, sam={"milk carton": _boxes(12)})
+    _, [group] = count_delivery(client, "muse-spark-1.3", _jpeg(), "image/jpeg",
+                                [Product("Whole Milk", "milk carton"), Product("Oat Milk", "milk carton")])
+    assert group.counts == {"Whole Milk": 0, "Oat Milk": 0} and group.error

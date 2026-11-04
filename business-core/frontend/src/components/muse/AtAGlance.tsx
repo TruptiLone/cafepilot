@@ -52,7 +52,7 @@ function Card({ title, sub, rows, empty, tone }: { title: string; sub?: string; 
   );
 }
 
-/** Plan home, right column: three small cards from the café's records (nothing estimated here). */
+/** Events home, right column: three small cards from the café's records (nothing estimated here). */
 function AtAGlance({ asOf, ready }: { asOf?: string; ready: boolean }) {
   const [glance, setGlance] = useState<Glance | null>(null);
 

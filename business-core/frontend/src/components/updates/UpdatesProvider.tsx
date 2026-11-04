@@ -24,6 +24,7 @@ const WHO: Record<CafeUpdate["group"], string> = { staff: "Staff", orders: "Supp
 
 /** Sending is not a reply: a sent order is from a simulated supplier; answers are simulated replies. */
 export function simulatedLabel(update: CafeUpdate): string {
+  if (update.kind === "event_found") return "scripted demo";
   return update.kind === "order_sent" ? "simulated supplier" : "simulated reply";
 }
 
@@ -68,8 +69,10 @@ export function UpdatesProvider({
           // What happened before the page opened is history, not news.
           if (primed) {
             setUnseen((n) => n + fresh.length);
-            setToasts((t) => [...t, ...[...fresh].reverse()]);
-            for (const u of fresh) window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== u.id)), toastMs);
+            // A found event gets its own card with "View event" on the Ask page, not a second toast.
+            const news = fresh.filter((u) => u.kind !== "event_found");
+            setToasts((t) => [...t, ...[...news].reverse()]);
+            for (const u of news) window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== u.id)), toastMs);
           }
         }
         primed = true;

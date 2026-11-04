@@ -63,11 +63,13 @@ type ChatPanelProps = {
   onPlan: (request: string) => void;
   /** Kept mounted while another tab shows, so the conversation survives switching tabs. */
   hidden?: boolean;
-  /** A question asked from elsewhere (the Plan tab's quick questions); a new id asks it. */
+  /** A question asked from elsewhere (the Events tab's quick questions); a new id asks it. */
   question?: { id: number; text: string } | null;
+  /** Called after Muse's answer is on screen. */
+  onAnswered?: () => void;
 };
 
-function ChatPanel({ asOf, onPlan, hidden = false, question = null }: ChatPanelProps) {
+function ChatPanel({ asOf, onPlan, hidden = false, question = null, onAnswered }: ChatPanelProps) {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [text, setText] = useState("");
   const [speakOn, setSpeakOn] = useState(readPref);
@@ -99,6 +101,7 @@ function ChatPanel({ asOf, onPlan, hidden = false, question = null }: ChatPanelP
       const answer = await askMuse(q, channel, asOf);
       setTurns((t) => t.map((x) => (x.id === id ? { ...x, state: "done", answer } : x)));
       if (speakOn) speak(replyText(answer)); // the reply only, never the table
+      onAnswered?.();
     } catch (error) {
       const timeout = error instanceof AgentApiError && error.status === 504;
       const message = error instanceof AgentApiError ? error.message : "Something went wrong. Try again.";

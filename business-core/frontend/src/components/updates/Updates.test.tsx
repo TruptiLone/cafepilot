@@ -4,7 +4,7 @@ import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AICallRow, CafeUpdate } from "../../api/updates";
 import UpdatesBell from "./UpdatesBell";
-import { UpdatesProvider } from "./UpdatesProvider";
+import { UpdatesProvider, simulatedLabel } from "./UpdatesProvider";
 
 function update(overrides: Partial<CafeUpdate>): CafeUpdate {
   return { id: "u", kind: "order_sent", group: "orders", at: "2026-11-02T15:51:08-08:00", title: "t", detail: null,
@@ -112,5 +112,14 @@ describe("Updates bell", () => {
     renderBell(80);
     expect(await screen.findByRole("status")).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+});
+
+describe("simulatedLabel", () => {
+  it("calls the demo's event discovery scripted, not a reply", () => {
+    const update = { id: "event:EVT:found", kind: "event_found", group: "plans", at: "2026-11-05T18:00:00-08:00",
+      title: "Muse found a new event: Santa Clara Farmers Market, Sun Nov 8", detail: null, simulated: true, run_id: null,
+      model: null } as CafeUpdate;
+    expect(simulatedLabel(update)).toBe("scripted demo");
   });
 });

@@ -1,6 +1,7 @@
 #!/bin/bash
 # One command for a recording take: stop old servers, reset the demo, start everything.
-#   1. stop whatever listens on 8001 (API), 5173 (web app) and 8004 (photo receiver)
+#   1. stop whatever listens on 8001 (API), 5173 (web app), 8004 (photo receiver) and 8003 (older media server,
+#      which also watches the photo folder), and warn about CaféPilot servers still running from other folders
 #   2. Postgres up (docker compose), migrations to head
 #   3. empty the receiver's shared photo folder (~/Pictures/BaristaShared) so old photo pairs don't come back
 #   4. reset the data: seed_event_surge.py --fresh (the Farmers Market stays hidden until the first
@@ -17,7 +18,7 @@ PYTHON_BIN="${CAFEPILOT_PYTHON:-$ROOT/.venv/bin/python}"
 SHARED="${BARISTA_SHARED_PHOTOS_DIR:-$HOME/Pictures/BaristaShared}"
 SHARED="${SHARED/#\~/$HOME}"
 LOGS="$ROOT/var/demo-logs"
-PORTS=(8001 5173 8004)
+PORTS=(8001 5173 8004 8003)
 
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "No Python at $PYTHON_BIN. Make the venv (python3 -m venv .venv && .venv/bin/pip install -r requirements.txt)" >&2
@@ -39,6 +40,16 @@ stop_servers() {
     done
     for _ in $(seq 20); do lsof -ti ":$port" -sTCP:LISTEN >/dev/null 2>&1 || break; sleep 0.25; done
     echo "Stopped the server on port $port."
+  done
+}
+
+# Servers from another checkout share the database but save photos under their own var/: warn, don't kill.
+warn_other_folders() {
+  local pid cwd
+  for pid in $(pgrep -f "uvicorn backend\.|run_local_photo_receiver|vite" 2>/dev/null || true); do
+    cwd=$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
+    [[ -z "$cwd" || "$cwd" == "$ROOT"* ]] && continue
+    case "$cwd" in *cafepilot*) echo "Warning: a CaféPilot server (pid $pid) is running from $cwd. Stop it: kill $pid" >&2 ;; esac
   done
 }
 
@@ -77,6 +88,7 @@ case "${1:-}" in
 esac
 
 stop_servers
+warn_other_folders
 docker compose up -d --wait >/dev/null
 "$PYTHON_BIN" -m alembic upgrade head
 reset_data

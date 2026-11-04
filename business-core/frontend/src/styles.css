@@ -4607,3 +4607,136 @@ body { background: var(--g-bg); }
   .mz-draft__acts .mz-btn { flex: 1 1 auto; justify-content: center; }
 }
 
+/* =====================================================================
+   Type and spacing system: one UI font, one scale, one spacing rhythm.
+   Every value comes from the tokens at the top of this file.
+   ===================================================================== */
+html,
+body {
+  font-family: var(--g-font-ui);
+  font-size: var(--g-fs-body);
+  line-height: var(--g-lh-body);
+  letter-spacing: var(--g-ls-body);
+  font-variant-numeric: tabular-nums;  /* quantities, times, prices and counts line up */
+}
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  letter-spacing: inherit;
+}
+h1 { letter-spacing: -0.01em; }  /* page titles are display size: only a hair of tightening */
+.mz-muted,
+.mz-ev__meta,
+.mz-glance__detail,
+.page__description,
+.rcv-muted { line-height: var(--g-lh-small); }
+
+/* Navigation: sidebar links and every row of tabs share one size, weight and height */
+.navigation__link,
+.mz .mz-tab,
+.inventory-tab,
+.updates-tabs button {
+  min-height: var(--g-control-h);
+  font-size: var(--g-fs-body);
+  font-weight: var(--g-fw-medium);
+  letter-spacing: var(--g-ls-body);
+}
+.navigation__link.is-active,
+.mz .mz-tab.is-on,
+.inventory-tab.is-active,
+.updates-tabs button[aria-selected="true"] { font-weight: var(--g-fw-semibold); }
+.mz .mz-tab,
+.inventory-tab { padding: 0 var(--g-space-4); }
+.mz .mz-tab:first-child { padding-left: 0; }
+.mz-tabs { gap: var(--g-space-3); }
+.inventory-tabs { gap: var(--g-space-2); padding: var(--g-space-3) var(--g-space-4) 0; }
+.inventory-tab::after { right: var(--g-space-4); left: var(--g-space-4); }
+.updates-tabs button { padding: 0 var(--g-space-3); }
+.mz-pane-head { align-items: center; }
+.mz-live { min-height: 32px; display: inline-flex; align-items: center; }
+
+/* Labels and eyebrows */
+.mz-label,
+.page__eyebrow,
+.rcv-eyebrow,
+.rcv-section-title,
+.rcv-muse__name {
+  font-size: var(--g-fs-label);
+  font-weight: var(--g-fw-semibold);
+  letter-spacing: var(--g-ls-label);
+  text-transform: uppercase;
+}
+
+/* Buttons and chips: at least 44px to tap */
+.mz .mz-btn,
+.mz .mz-chip-btn,
+.rcv-button,
+.rcv-button--small,
+.primary-button,
+.secondary-button,
+.danger-button,
+.text-button,
+.icon-button {
+  min-height: var(--g-control-h);
+}
+.mz .mz-chip-btn { padding: 0 var(--g-space-4); }
+.rcv-button--small { padding: 0 var(--g-space-4); font-size: var(--g-fs-small); }
+.rcv-stepper button,
+.rcv-stepper output { height: var(--g-control-h); }
+.rcv-stepper button { width: var(--g-control-h); }
+
+/* Stat numbers: one size everywhere */
+.sales-metric strong,
+.staffing-metric strong,
+.dashboard-kpi > strong,
+.dashboard-mini-metric strong,
+.rcv-tally__item dd,
+.rcv-row__nums dd {
+  font-size: var(--g-fs-stat);
+  font-weight: var(--g-fw-semibold);
+  letter-spacing: 0;
+  line-height: 1.2;
+}
+
+/* Cards and sections: roomier padding and gaps */
+.mz-ev { padding: var(--g-card-pad) 28px; }
+.mz-events { gap: var(--g-card-gap); }
+.mz-quick { margin-top: var(--g-section-gap); gap: var(--g-space-3); }
+.mz-chat__ex { gap: var(--g-space-3); }
+.mz-ev__title { font-size: var(--g-fs-lead); font-weight: var(--g-fw-semibold); letter-spacing: 0; }
+.mz-ev__pitch { font-size: var(--g-fs-body); }
+.mz-ev__meta { font-size: var(--g-fs-small); }
+.rcv-card { padding: var(--g-card-pad); }
+.rcv-photos,
+.rcv-arrived,
+.rcv-stack { gap: var(--g-card-gap); }
+.rcv-check,
+.rcv { gap: var(--g-space-5); }
+.inventory-panel__body { padding: var(--g-card-pad); }
+.page__heading { padding-bottom: var(--g-section-gap); }
+.updates-item { padding: var(--g-space-3) 0 var(--g-space-3) var(--g-space-3); }
+
+/* Plan home: "At a glance" sits about 110px from the events on desktop */
+.mz-scroll--home { column-gap: var(--g-glance-gap); grid-template-columns: minmax(0, 1fr) var(--g-glance-col); }
+.mz:has(.mz-scroll--home:not([hidden])) { --mz-col: 1370px; }
+
+/* "At a glance": roomier cards, readable rows, numbers right-aligned */
+.mz-glance { gap: var(--g-space-5); }
+.mz-glance__card { padding: 28px; }
+.mz-glance__title { font-size: var(--g-fs-lead); font-weight: var(--g-fw-semibold); margin-bottom: var(--g-space-4) !important; }
+.mz-glance__card ul { gap: var(--g-space-4); }
+.mz-glance__card li { column-gap: var(--g-space-3); row-gap: 2px; line-height: 1.35; }
+.mz-glance__name { font-size: 17px; font-weight: var(--g-fw-medium); }
+.mz-glance__text { font-size: 17px; font-weight: var(--g-fw-semibold); text-align: right; }
+.mz-glance__detail { font-size: var(--g-fs-small); line-height: var(--g-lh-small); }
+.mz-glance__sub { font-size: var(--g-fs-small); }
+@media (max-width: 1100px) {
+  .mz-scroll--home { grid-template-columns: minmax(0, 1fr); column-gap: 0; row-gap: var(--g-section-gap); }
+}
+@media (max-width: 860px) {
+  .mz-ev { padding: var(--g-space-4) var(--g-space-4); }
+  .mz-glance__card { padding: var(--g-card-pad); }
+  .rcv-card { padding: var(--g-space-4); }
+}

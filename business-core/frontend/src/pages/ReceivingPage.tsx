@@ -9,6 +9,7 @@ import {
   listReceived,
   imageUrl,
   listOpenOrders,
+  listSamples,
   readPhoto,
   readSlip,
   sendCreditRequest,
@@ -18,6 +19,7 @@ import {
   type Received,
   type Receipt,
   type ReceiptLine,
+  type SamplePhoto,
 } from "../api/receiving";
 import { lineView, seenSummary, tally } from "./receivingView";
 
@@ -272,6 +274,18 @@ function DeliveryCheck({ receipt, busy, run, onDone }: { receipt: Receipt; busy:
   const hasSlip = receipt.slip_number != null || receipt.has_slip_image;
   const step = confirmed ? 4 : !hasSlip ? 0 : !receipt.has_photo_image ? 1 : receipt.summary.needs_count ? 2 : 3;
   const needsCount = receipt.summary.needs_count;
+  const [samples, setSamples] = useState<SamplePhoto[]>([]);
+  useEffect(() => {
+    listSamples()
+      .then((rows) => setSamples(Array.isArray(rows) ? rows : []))
+      .catch(() => setSamples([]));
+  }, []);
+  // This order's samples first, so the visitor's PO-123 shows its own slip and delivery first.
+  const po = receipt.order?.po_number ?? receipt.slip_po_number;
+  const samplesFor = (kind: SamplePhoto["kind"]) =>
+    samples
+      .filter((sample) => sample.kind === kind)
+      .sort((a, b) => Number(b.po_number === po) - Number(a.po_number === po));
 
   return (
     <div className="rcv-check">
@@ -320,9 +334,11 @@ function DeliveryCheck({ receipt, busy, run, onDone }: { receipt: Receipt; busy:
                   </p>
                 </>
               ) : (
-                <p>Point your glasses or phone at the slip.</p>
+                <p>Pick a sample slip, or upload a photo of one.</p>
               )
             }
+            samples={samplesFor("slip")}
+            matchPo={po}
             onCapture={(source) => run("slip", () => readSlip(id, source))}
           />
           <PhotoCard
@@ -351,9 +367,11 @@ function DeliveryCheck({ receipt, busy, run, onDone }: { receipt: Receipt; busy:
                   {receipt.lines.length > 0 && <p>{seenSummary(receipt.lines)}</p>}
                 </>
               ) : (
-                <p>{hasSlip ? "Now look at the cases and crates that came in." : "After the slip."}</p>
+                <p>{hasSlip ? "Now a photo of what came in: pick a sample or upload one." : "After the slip."}</p>
               )
             }
+            samples={samplesFor("photo")}
+            matchPo={po}
             onCapture={(source) => run("photo", () => readPhoto(id, source))}
           />
         </div>
@@ -466,6 +484,8 @@ function PhotoCard({
   locked,
   image,
   facts,
+  samples,
+  matchPo,
   onCapture,
 }: {
   title: string;
@@ -477,15 +497,17 @@ function PhotoCard({
   locked: boolean;
   image: string | null;
   facts: React.ReactNode;
+  samples: SamplePhoto[];
+  matchPo: string | null;
   onCapture: (source: ImageSource) => void;
 }) {
+  const [picking, setPicking] = useState(false);
   const upload = (label: string) => (
     <label className={`rcv-button rcv-button--small rcv-button--ghost${disabled ? " is-disabled" : ""}`}>
       {label}
       <input
         type="file"
-        accept="image/*"
-        capture="environment"
+        accept="image/jpeg,image/png,image/webp"
         disabled={disabled}
         onChange={(event) => {
           const file = event.target.files?.[0];
@@ -505,18 +527,30 @@ function PhotoCard({
         {image ? <img src={image} alt={title} style={{ objectFit: fit }} /> : <span>{placeholder}</span>}
       </div>
       <div className="rcv-photo__facts">{facts}</div>
+      {picking && !locked && (
+        <SamplePicker
+          samples={samples}
+          matchPo={matchPo}
+          disabled={disabled}
+          onPick={(sampleId) => {
+            setPicking(false);
+            onCapture({ sample: sampleId });
+          }}
+        />
+      )}
       <div className="rcv-photo__actions">
-        {!locked &&
-          (done ? (
-            upload("Retake")
-          ) : (
-            <>
-              <button className="rcv-button rcv-button--small" type="button" disabled={disabled} onClick={() => onCapture({ demo: true })}>
-                Use demo photo
-              </button>
-              {upload("Take or upload")}
-            </>
-          ))}
+        {!locked && samples.length > 0 && (
+          <button
+            className={`rcv-button rcv-button--small${done ? " rcv-button--ghost" : ""}`}
+            type="button"
+            disabled={disabled}
+            aria-expanded={picking}
+            onClick={() => setPicking((open) => !open)}
+          >
+            {picking ? "Hide samples" : done ? "Pick another sample" : "Pick a sample"}
+          </button>
+        )}
+        {!locked && upload(done ? "Upload another" : "Upload a photo")}
         {image && (
           <a className="rcv-button rcv-button--small rcv-button--ghost" href={image} target="_blank" rel="noreferrer">
             View full size
@@ -524,6 +558,33 @@ function PhotoCard({
         )}
       </div>
     </article>
+  );
+}
+
+/** Sample photos to tap: each goes to Muse exactly like an uploaded one. */
+function SamplePicker({
+  samples,
+  matchPo,
+  disabled,
+  onPick,
+}: {
+  samples: SamplePhoto[];
+  matchPo: string | null;
+  disabled: boolean;
+  onPick: (sampleId: string) => void;
+}) {
+  return (
+    <ul className="rcv-samples" aria-label="Sample photos">
+      {samples.map((sample) => (
+        <li key={sample.sample_id}>
+          <button className="rcv-sample" type="button" disabled={disabled} onClick={() => onPick(sample.sample_id)}>
+            <img src={sample.image_url} alt="" loading="lazy" />
+            <span className="rcv-sample__title">{sample.title}</span>
+            {sample.po_number === matchPo && <span className="rcv-chip rcv-chip--good">This order</span>}
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

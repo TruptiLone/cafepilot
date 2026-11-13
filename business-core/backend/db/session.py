@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from typing import Any
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -10,7 +11,21 @@ engine = create_engine(
     connect_args=get_database_connect_args(),
     pool_pre_ping=True,
 )
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+class RoutingSession(Session):
+    """Binds to the visitor's own copy when the request has one (backend/db/visitors.py), else the main database."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        from backend.db.visitors import current_database, visitors
+
+        name = current_database.get()
+        if name is not None:
+            kwargs["bind"] = visitors.engine(name)
+        super().__init__(*args, **kwargs)
+
+
+SessionLocal = sessionmaker(bind=engine, class_=RoutingSession, autoflush=False, autocommit=False)
 
 
 def get_db() -> Generator[Session, None, None]:

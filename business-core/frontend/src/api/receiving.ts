@@ -94,7 +94,10 @@ export type Receipt = {
   muse_message: string;
 };
 
-export type ImageSource = { demo: true } | { file: File };
+export type ImageSource = { demo: true } | { sample: string } | { file: File };
+
+/** A sample slip or delivery photo the visitor can pick instead of their own. */
+export type SamplePhoto = { sample_id: string; kind: "slip" | "photo"; po_number: string; title: string; image_url: string };
 
 const BASE = "/api/v1/receiving";
 
@@ -151,10 +154,39 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+const MAX_SIDE = 1600;
+
+/** Phone photos can be 5–10 MB: shrink to 1600 px on the long side (JPEG) before sending. Falls back to the original. */
+async function shrink(file: File): Promise<{ data: string; mime: string } | null> {
+  try {
+    if (typeof createImageBitmap !== "function") return null;
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_SIDE / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size < 2_000_000) return null;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    const context = canvas.getContext("2d");
+    if (!context) return null;
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const url = canvas.toDataURL("image/jpeg", 0.85);
+    return { data: url.split(",")[1] ?? "", mime: "image/jpeg" };
+  } catch {
+    return null;
+  }
+}
+
 async function imageBody(source: ImageSource) {
   if ("demo" in source) return { use_demo_image: true };
+  if ("sample" in source) return { sample_id: source.sample };
+  const small = await shrink(source.file);
+  if (small) return { image_base64: small.data, mime: small.mime };
   const mime = ["image/png", "image/webp"].includes(source.file.type) ? source.file.type : "image/jpeg";
   return { image_base64: await fileToBase64(source.file), mime };
+}
+
+export function listSamples(): Promise<SamplePhoto[]> {
+  return request("/samples");
 }
 
 export async function readSlip(receiptId: string, source: ImageSource): Promise<Receipt> {

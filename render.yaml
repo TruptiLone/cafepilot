@@ -1,0 +1,46 @@
+# Render Blueprint for the public CaféPilot demo (see business-core/docs/public-demo.md).
+# Render reads this file when you create a Blueprint from the repo: one web service + one Postgres.
+# Secrets (MODEL_API_KEY, DEMO_ACCESS_CODE) are never in git: Render asks for them on first setup.
+
+services:
+  - type: web
+    name: cafepilot-demo
+    runtime: docker
+    plan: starter            # stays awake; the free plan sleeps after ~15 idle minutes
+    region: oregon
+    dockerfilePath: ./business-core/Dockerfile
+    dockerContext: .         # repo root: the seeds read data/*.json
+    healthCheckPath: /health
+    numInstances: 1          # ONE server: visitor cafés and the daily Muse count live in its memory
+    autoDeployTrigger: checksPass   # deploy a push only after CI is green
+    envVars:
+      - key: POSTGRES_HOST
+        fromDatabase: { name: cafepilot-db, property: host }
+      - key: POSTGRES_PORT
+        fromDatabase: { name: cafepilot-db, property: port }
+      - key: POSTGRES_DB
+        fromDatabase: { name: cafepilot-db, property: database }
+      - key: POSTGRES_USER
+        fromDatabase: { name: cafepilot-db, property: user }
+      - key: POSTGRES_PASSWORD
+        fromDatabase: { name: cafepilot-db, property: password }
+      - key: MODEL_API_KEY
+        sync: false          # you type it in Render
+      - key: DEMO_ACCESS_CODE
+        sync: false          # you type it in Render; share it with hiring managers
+      - key: MUSE_DAILY_LIMIT
+        value: "200"
+      - key: MAX_VISITOR_DATABASES
+        value: "15"
+      - key: VISITOR_IDLE_MINUTES
+        value: "120"
+
+databases:
+  - name: cafepilot-db
+    plan: basic-256mb
+    region: oregon
+    postgresMajorVersion: "17"
+    diskSizeGB: 5            # template (~35 MB) + up to 15 visitor copies, with room to spare
+    databaseName: cafepilot
+    user: cafepilot
+    ipAllowList: []          # only the web service can reach it (no public access)

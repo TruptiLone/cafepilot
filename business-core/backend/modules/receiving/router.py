@@ -18,6 +18,7 @@ from backend.db.session import get_db
 from backend.modules.agent.router import get_planner_client
 from backend.modules.purchasing.models import PurchaseOrder, Receipt
 from backend.modules.receiving import service
+from backend.modules.receiving.samples import SAMPLES, get_sample
 from backend.modules.receiving.vision import VisionError, read_photo, read_slip
 
 router = APIRouter(tags=["receiving"])
@@ -170,11 +171,24 @@ class StartReceipt(BaseModel):
     order_id: str | None = Field(default=None, description="Omit to match by the PO number on the slip.")
 
 
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+
+
 class ImageIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    image_base64: str | None = Field(default=None, description="The photo (from glasses or a phone), base64.")
+    image_base64: str | None = Field(default=None, max_length=(MAX_IMAGE_BYTES * 4) // 3 + 1024,
+                                     description="The photo (from glasses or a phone), base64; up to 8 MB.")
     mime: Literal["image/jpeg", "image/png", "image/webp"] = "image/jpeg"
     use_demo_image: bool = Field(default=False, description="Use the demo photo in demo-assets/receiving.")
+    sample_id: str | None = Field(default=None, max_length=40, description="A sample photo from GET /samples.")
+
+
+class SampleOut(BaseModel):
+    sample_id: str
+    kind: Literal["slip", "photo"]
+    po_number: str
+    title: str
+    image_url: str
 
 
 class CountIn(BaseModel):
@@ -192,15 +206,26 @@ class ConfirmIn(BaseModel):
 
 
 def _image(body: ImageIn, kind: str) -> tuple[bytes, str]:
+    if body.sample_id:
+        sample = get_sample(body.sample_id)
+        if sample is None:
+            raise HTTPException(status_code=422, detail="That sample photo doesn't exist.")
+        if sample.kind != kind:
+            wanted = "a packing slip" if kind == "slip" else "a delivery photo"
+            raise HTTPException(status_code=422, detail=f"That sample isn't {wanted}. Pick {wanted}.")
+        return sample.path.read_bytes(), sample.mime
     if body.use_demo_image:
         name, mime = DEMO_FILES[kind]
         return (DEMO_ASSETS / name).read_bytes(), mime
     if not body.image_base64:
         raise HTTPException(status_code=422, detail="Send image_base64, or use_demo_image: true.")
     try:
-        return base64.b64decode(body.image_base64.split(",")[-1], validate=True), body.mime
+        image = base64.b64decode(body.image_base64.split(",")[-1], validate=True)
     except ValueError as error:
         raise HTTPException(status_code=422, detail="image_base64 is not valid base64.") from error
+    if len(image) > MAX_IMAGE_BYTES:
+        raise HTTPException(status_code=413, detail="That photo is too large (8 MB at most).")
+    return image, body.mime
 
 
 def _guard(fn, *args, **kwargs):
@@ -210,6 +235,21 @@ def _guard(fn, *args, **kwargs):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
     except service.ReceivingError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+
+@router.get("/samples", response_model=list[SampleOut])
+def list_samples() -> list[SampleOut]:
+    """Sample slip and delivery photos to pick from, in story order."""
+    return [SampleOut(sample_id=s.sample_id, kind=s.kind, po_number=s.po_number, title=s.title,
+                      image_url=f"/api/v1/receiving/samples/{s.sample_id}/image") for s in SAMPLES]
+
+
+@router.get("/samples/{sample_id}/image")
+def sample_image(sample_id: str) -> FileResponse:
+    sample = get_sample(sample_id)
+    if sample is None or not sample.path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No such sample")
+    return FileResponse(sample.path, media_type=sample.mime, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/orders", response_model=list[OpenOrderOut])

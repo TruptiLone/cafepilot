@@ -36,6 +36,17 @@ class Settings(BaseSettings):
     ffprobe_bin: str = "ffprobe"
     barista_shared_photos_dir: Path = Path.home() / "Pictures" / "BaristaShared"
     barista_photo_port: int = 8004
+    # Public demo (see backend/modules/demo): PUBLIC_DEMO=1 hides the API docs and needs DEMO_ACCESS_CODE.
+    public_demo: bool = False
+    demo_access_code: SecretStr | None = None
+    muse_daily_limit: int | None = None
+    # A private copy of the demo café per visitor (backend/db/visitors.py, scripts/build_template.py).
+    per_visitor_databases: bool = False
+    template_database: str = "cafepilot_template"
+    max_visitor_databases: int = 15
+    visitor_idle_minutes: int = 120
+    # The built React app (frontend/dist), served by FastAPI in the container; unset locally (Vite serves it).
+    frontend_dist: Path | None = None
 
     @property
     def database_url(self) -> URL:

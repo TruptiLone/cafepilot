@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.modules.demo import muse_limit
 from backend.db.config import get_settings
 from backend.models.cafe import Cafe
 from backend.modules.agent.cafe_policies import policies_for
@@ -321,6 +322,7 @@ class PlannerResult:
 
 
 def create_planner_client() -> Any:
+    muse_limit.check()  # the public demo's daily allowance: a friendly 429 before any work starts
     settings = get_settings()
     key = settings.model_api_key.get_secret_value().strip() if settings.model_api_key else ""
     if not key:

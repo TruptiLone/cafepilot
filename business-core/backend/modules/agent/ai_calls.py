@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from backend.db.session import SessionLocal
 from backend.modules.agent.models import AICall
+from backend.modules.demo import muse_limit
 
 # Tests point this at a rolled-back connection.
 SESSION_FACTORY = SessionLocal
@@ -33,6 +34,7 @@ _INTERNAL_ID = re.compile(r"\b(?:[A-Za-z]+_)+[A-Za-z0-9_]*\d\w*\b|\b(?:RUN|AIC)-
 
 def call_model(client: Any, *, model: str, messages: list[dict[str, Any]], **kwargs: Any) -> tuple[Any, int]:
     """The one way to call a model: returns (response, latency_ms). A failure carries latency_ms too."""
+    muse_limit.take()  # counts toward the public demo's daily Muse limit
     started = time.monotonic()
     try:
         response = client.chat.completions.create(model=model, messages=messages, **kwargs)
@@ -44,6 +46,7 @@ def call_model(client: Any, *, model: str, messages: list[dict[str, Any]], **kwa
 
 def call_image(client: Any, *, model: str, prompt: str, **kwargs: Any) -> tuple[Any, int]:
     """call_model for an image model (Muse Image): returns (response, latency_ms); a failure carries latency_ms."""
+    muse_limit.take()
     started = time.monotonic()
     try:
         response = client.images.generate(model=model, prompt=prompt, **kwargs)

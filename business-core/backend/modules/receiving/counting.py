@@ -24,6 +24,7 @@ import re
 import statistics
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps
@@ -32,7 +33,8 @@ from backend.modules.agent.ai_calls import call_model, is_timeout, record as rec
 from backend.modules.receiving.vision import PhotoItem, PhotoRead, VisionError
 
 SAM_MODEL = "sam-3.1"
-FONT = "/System/Library/Fonts/Supplemental/Arial Bold.ttf"
+# Bundled (SIL Open Font License), so box numbers are readable on any server, not only on a Mac.
+FONT = str(Path(__file__).resolve().parents[3] / "assets" / "fonts" / "Lato-Bold.ttf")
 
 # What SAM looks for, per ingredient: a short noun phrase, one concept per request. Items that
 # look alike share a phrase (one SAM call); Spark then says which product each box is.

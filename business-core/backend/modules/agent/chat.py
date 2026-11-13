@@ -23,6 +23,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from backend.modules.demo import muse_limit
 from backend.db.config import ENV_FILE, get_settings
 from backend.modules.agent.ai_calls import call_model, is_timeout, record as record_ai_call
 from backend.modules.agent.planner import (
@@ -62,6 +63,7 @@ class ChatTimeoutError(RuntimeError):
 
 
 def create_chat_client() -> Any:
+    muse_limit.check()  # the public demo's daily allowance: a friendly 429 before any work starts
     settings = get_settings()
     key = settings.model_api_key.get_secret_value().strip() if settings.model_api_key else ""
     if not key:

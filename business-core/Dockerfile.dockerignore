@@ -1,0 +1,21 @@
+# Used for `docker build -f business-core/Dockerfile .` (context = repository root): send only what the image needs.
+*
+!data/
+!business-core/requirements.txt
+!business-core/alembic.ini
+!business-core/alembic/
+!business-core/backend/
+!business-core/scripts/
+!business-core/assets/
+!business-core/demo-assets/receiving/
+!business-core/demo-assets/promo-samples/
+!business-core/frontend/package.json
+!business-core/frontend/package-lock.json
+!business-core/frontend/index.html
+!business-core/frontend/tsconfig.json
+!business-core/frontend/vite.config.ts
+!business-core/frontend/src/
+**/__pycache__
+**/.DS_Store
+**/.env
+**/.env.*

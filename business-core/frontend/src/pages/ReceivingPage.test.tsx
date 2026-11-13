@@ -144,8 +144,40 @@ describe("ReceivingPage", () => {
     expect(await screen.findByText("PO-1042 · Willow Ridge Dairy Supply")).toBeTruthy();
     expect(screen.getByText("1 · Slip").closest("li")?.getAttribute("aria-current")).toBe("step");
     expect(screen.getByText("On the order")).toBeTruthy();
-    expect(screen.getAllByText("Use demo photo").length).toBe(2);
+    expect(screen.getAllByText("Upload a photo").length).toBe(2);
     expect(screen.queryByLabelText("Items by what they need")).toBeNull(); // no counters before there are lines
+  });
+
+  it("offers sample photos, this order's first, and sends the one picked to Muse", async () => {
+    const start = { ...receipt, slip_number: null, slip_supplier: null, slip_po_number: null, has_slip_image: false,
+      has_photo_image: false, lines: [], summary: { lines: 0, match: 0, needs_count: 0, problems: 0 }, muse_message: "Show me the slip." };
+    const samples = [
+      { sample_id: "slip-po-123", kind: "slip", po_number: "PO-123", title: "Willow Ridge slip for PO-123", image_url: "/s1" },
+      { sample_id: "photo-po-123", kind: "photo", po_number: "PO-123", title: "What arrived for PO-123", image_url: "/s2" },
+      { sample_id: "slip-po-1042", kind: "slip", po_number: "PO-1042", title: "Slip for PO-1042", image_url: "/s3" },
+    ];
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+      const url = String(input);
+      if (url.endsWith("/samples")) return reply(samples);
+      if (url.includes("/received?")) return reply([]);
+      if (url.includes("/orders?")) return reply([order]);
+      return reply(start);
+    });
+    render(<MemoryRouter initialEntries={["/receiving?receipt=RCV1"]}><ReceivingPage /></MemoryRouter>);
+
+    const pick = await screen.findAllByText("Pick a sample");
+    expect(pick.length).toBe(2);
+    fireEvent.click(pick[0]);
+    const list = screen.getByLabelText("Sample photos");
+    const titles = within(list).getAllByRole("button").map((b) => b.textContent);
+    expect(titles[0]).toContain("Slip for PO-1042"); // this order's slip first
+    expect(titles[0]).toContain("This order");
+    expect(titles).toHaveLength(2); // slips only on the slip card
+    fireEvent.click(within(list).getByText("Willow Ridge slip for PO-123"));
+
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([u]) => String(u).endsWith("/receipts/RCV1/slip"))).toBe(true));
+    const [, options] = fetchMock.mock.calls.find(([u]) => String(u).endsWith("/receipts/RCV1/slip"))!;
+    expect(JSON.parse(String((options as RequestInit).body))).toEqual({ sample_id: "slip-po-123" });
   });
 });
 

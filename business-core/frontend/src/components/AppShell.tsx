@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import Brand from "./Brand";
+import StartOver from "./StartOver";
 import { useDemoDate } from "./demoDate";
 import UpdatesBell from "./updates/UpdatesBell";
 import { UpdatesProvider } from "./updates/UpdatesProvider";
@@ -99,6 +100,7 @@ function AppShell() {
             <strong>CafePilot Demo Cafe</strong>
             <span>Santa Clara, CA</span>
             {demoDate && <span className="sidebar__demo-date">Demo date: {demoDate}</span>}
+            <StartOver />
           </div>
         </aside>
 

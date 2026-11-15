@@ -7,6 +7,7 @@ Tries two image requests (glasses and phones produce images) and prints what wor
   1. packing slip photo   (OpenAI-style "image_url" with a base64 data URL)
   2. delivery photo       (count what is visible)
 Results are saved to tests/fixtures/receiving/vision_live.json so we can build on the real output.
+With MODEL_PROVIDER=openai they go to var/vision_live_openai.json instead (the fixture holds Muse's answers).
 """
 
 from __future__ import annotations
@@ -17,10 +18,12 @@ import time
 from pathlib import Path
 
 from backend.db.config import get_settings
+from backend.modules.agent.ai_calls import chat_options
 from backend.modules.agent.planner import PlannerUnavailableError, create_planner_client
 
 ASSETS = Path("demo-assets/receiving")
 OUT = Path("tests/fixtures/receiving/vision_live.json")
+OUT_OTHER_PROVIDER = Path("var/vision_live_openai.json")
 
 SLIP_PROMPT = """Read this packing slip. Return ONLY a JSON object, no prose:
 {"supplier": str, "packing_slip_number": str, "customer_po_number": str, "delivery_date": str,
@@ -45,7 +48,8 @@ def ask(client, model: str, name: str, content: list) -> dict:
     started = time.monotonic()
     try:
         response = client.chat.completions.create(
-            model=model, messages=[{"role": "user", "content": content}], temperature=0
+            model=model, messages=[{"role": "user", "content": content}],
+            **chat_options(get_settings().model_provider, {"temperature": 0}),
         )
         text = response.choices[0].message.content or ""
         ms = round((time.monotonic() - started) * 1000)
@@ -82,10 +86,11 @@ def main() -> None:
             {"type": "image_url", "image_url": {"url": data_url(ASSETS / "delivery-photo.jpg", "image/jpeg")}},
         ]),
     }
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(results, indent=2))
+    out = OUT if get_settings().model_provider == "meta" else OUT_OTHER_PROVIDER
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(results, indent=2))
     worked = [k for k, v in results.items() if isinstance(v, dict) and v.get("ok")]
-    print(f"\nSaved to {OUT}. Worked: {', '.join(worked) or 'none'}")
+    print(f"\nSaved to {out}. Worked: {', '.join(worked) or 'none'}")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,7 @@ class AccessOut(BaseModel):
     required: bool = Field(description="True when the site asks for an access code.")
     granted: bool
     muse_calls_left: int | None = Field(description="Muse calls left today; None when there is no limit.")
+    model_provider: str = Field(description='Which models run the café: "meta" (Muse) or "openai"; the screens name them.')
 
 
 class AccessIn(BaseModel):
@@ -45,7 +46,8 @@ def _status(request: Request, response: Response, granted: bool | None = None) -
     if granted:
         _ensure_cafe(request, response)
     return AccessOut(required=access.access_code() is not None, granted=granted,
-                     muse_calls_left=muse_limit.usage()["left"])  # type: ignore[arg-type]
+                     muse_calls_left=muse_limit.usage()["left"],  # type: ignore[arg-type]
+                     model_provider=get_settings().model_provider)
 
 
 @router.get("/access", response_model=AccessOut)

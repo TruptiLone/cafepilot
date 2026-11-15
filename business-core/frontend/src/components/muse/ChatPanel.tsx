@@ -3,6 +3,7 @@ import { type ChatAnswer, AgentApiError, askMuse } from "../../api/agent";
 import { formatQuantity } from "../agent/changes";
 import { type SpeechRecognitionLike, canSpeak, speak, speechRecognition } from "./speech";
 import { modelName } from "./story";
+import { assistant } from "../../utils/brand";
 
 const SPEAK_KEY = "cafepilot-chat-speak";
 export const ROW_LIMIT = 5;
@@ -150,12 +151,12 @@ function ChatPanel({ asOf, onPlan, hidden = false, question = null, onAnswered }
 
   return (
     <>
-      <div className="mz-scroll mz-chat" aria-label="Chat with Muse" hidden={hidden}>
+      <div className="mz-scroll mz-chat" aria-label={`Chat with ${assistant()}`} hidden={hidden}>
         <div className="mz-chat__col">
           <div className="mz-chat__intro">
-            <p className="mz-label">Ask Muse</p>
+            <p className="mz-label">Ask {assistant()}</p>
             <p className="mz-purpose">
-              Questions about stock, sales, staff and deliveries. Muse looks it up; every number comes from the café's
+              Questions about stock, sales, staff and deliveries. {assistant()} looks it up; every number comes from the café's
               data. Changes go to a plan you approve.
             </p>
             <div className="mz-chat__ex" aria-label="Example questions">
@@ -194,7 +195,7 @@ function ChatPanel({ asOf, onPlan, hidden = false, question = null, onAnswered }
               value={text}
               onChange={(e) => setText(e.target.value)}
               placeholder="Ask about stock, sales, staff or deliveries…"
-              aria-label="Ask Muse a question"
+              aria-label={`Ask ${assistant()} a question`}
               disabled={busy}
             />
             {speechRecognition() && (
@@ -255,13 +256,13 @@ function Reply({ turn, busy, onAsk, onPlan, onRetry }: ReplyProps) {
   if (turn.state === "loading")
     return (
       <div className="mz-a is-loading" role="status">
-        Muse is looking it up…
+        {assistant()} is looking it up…
       </div>
     );
   if (turn.state === "error" || !turn.answer)
     return (
       <div className="mz-a is-error" role="alert">
-        <p>{turn.error?.timeout ? "Muse took more than 10 seconds to answer." : turn.error?.text}</p>
+        <p>{turn.error?.timeout ? `${assistant()} took more than 10 seconds to answer.` : turn.error?.text}</p>
         <button type="button" className="mz-btn mz-btn--ghost" onClick={onRetry}>
           Try again
         </button>

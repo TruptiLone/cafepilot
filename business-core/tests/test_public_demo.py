@@ -63,7 +63,8 @@ def test_api_needs_the_code_but_health_and_the_gate_do_not(clean_state) -> None:
     assert locked.status_code == 401
     assert locked.headers[access.LOCKED_HEADER] == "required"
     assert api.get("/health").status_code == 200
-    assert api.get("/api/v1/demo/access").json() == {"required": True, "granted": False, "muse_calls_left": None}
+    assert api.get("/api/v1/demo/access").json() == {"required": True, "granted": False, "muse_calls_left": None,
+                                                         "model_provider": "meta"}
 
 
 def test_the_right_code_sets_a_cookie_that_opens_the_api(clean_state) -> None:

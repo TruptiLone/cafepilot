@@ -365,3 +365,20 @@ def test_model_calls_endpoint_lists_calls_newest_first_without_raw_text(no_log_f
 
 def test_model_calls_endpoint_is_empty_without_a_log(no_log_files) -> None:
     assert TestClient(app).get("/api/v1/agent/model-calls").json() == []
+
+
+def test_the_demo_date_is_now_for_the_model_and_the_real_clock_is_never_sent() -> None:
+    from zoneinfo import ZoneInfo
+
+    from backend.modules.agent.planner import PlanningContext, build_messages
+
+    tz = ZoneInfo("America/Los_Angeles")
+    demo = datetime(2026, 11, 5, 18, tzinfo=tz)  # Thu 6 PM, the demo's "as of"
+    real = datetime(2026, 11, 15, 10, tzinfo=tz)  # the real clock, ten days later
+    context = PlanningContext("CAFE001", "America/Los_Angeles", demo, real, {})
+    sent = json.loads(build_messages("Plan for the market", context)[1]["content"])["context"]
+
+    assert sent["today"] == "Thursday, November 5, 2026"
+    assert sent["current_time"] == sent["knowledge_as_of"] == demo.isoformat()
+    assert sent["utc_offset_by_date"]["2026-11-08"] == "-08:00"  # the market day is in the list
+    assert real.isoformat() not in json.dumps(sent)

@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { LOCKED_EVENT, watchForLockedApi } from "../api/demo";
+import { assistant, setModelProvider } from "../utils/brand";
 import AccessGate from "./AccessGate";
 import StartOver from "./StartOver";
 
@@ -10,6 +11,7 @@ const json = (body: unknown, status = 200, headers: Record<string, string> = {})
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  setModelProvider("meta");
 });
 
 describe("AccessGate", () => {
@@ -17,6 +19,14 @@ describe("AccessGate", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(() => json({ required: false, granted: false, muse_calls_left: null }));
     render(<AccessGate><p>The café</p></AccessGate>);
     expect(await screen.findByText("The café")).toBeTruthy();
+  });
+
+  it("names the assistant for the models the API says run the café", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(() =>
+      json({ required: false, granted: false, muse_calls_left: null, model_provider: "openai" }));
+    const Name = () => <p>{assistant()} is ready</p>;
+    render(<AccessGate><Name /></AccessGate>);
+    expect(await screen.findByText("CaféPilot is ready")).toBeTruthy();
   });
 
   it("asks for the code, shows a wrong one, and opens on the right one", async () => {

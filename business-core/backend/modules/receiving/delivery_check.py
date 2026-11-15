@@ -2,6 +2,8 @@
 
   1. Muse Spark reads the slip; code finds the order by its PO number.
   2. SAM 3.1 + Muse Spark count the delivery photo (``counting.py``); code adds up the totals.
+     SAM is a Meta model: with MODEL_PROVIDER=openai the model's own photo count is used instead,
+     and it is never sure enough to confirm on its own, so the owner always checks it.
   3. Code compares the order, the slip and the count (``service.recompare``).
   4. Code decides the outcome:
        received          every line matches and every count is confident: confirmed, stock added,
@@ -22,12 +24,18 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
+from backend.db.config import get_settings
 from backend.modules.purchasing.models import PurchaseOrder, Receipt
 from backend.modules.receiving import service
 from backend.modules.receiving.counting import Product, count_delivery, noun_for, upright
 from backend.modules.receiving.vision import read_photo, read_slip
 
 logger = logging.getLogger("cafepilot.receiving.delivery_check")
+
+
+def sam_available() -> bool:
+    """SAM 3.1 is only on the Meta Model API."""
+    return get_settings().model_provider == "meta"
 
 AUTO_CONFIRMED_BY = "glasses check (all matched)"
 _WORDS = {
@@ -75,12 +83,12 @@ def check_delivery(session: Session, client: Any, model: str, receipt: Receipt,
     receipt = service.attach_slip(session, receipt, slip, model, slip_image, mime)
 
     products = products_to_count(session, receipt)
-    if products:
+    if products and sam_available():
         photo, groups = count_delivery(client, model, photo_image, mime, products)
         method = "sam+spark"
-    else:  # the slip had no lines we could read: Spark's own photo read
+    else:  # no SAM (another provider), or the slip had no lines we could read: the model's own photo read
         photo, _ = read_photo(client, model, photo_image, mime)
-        groups, method = [], "spark"
+        groups, method = [], "spark" if sam_available() else "model"
     receipt = service.attach_photo(session, receipt, photo, model, photo_image, mime)
 
     order = session.get(PurchaseOrder, receipt.order_id) if receipt.order_id else None

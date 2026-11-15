@@ -12,18 +12,18 @@ import threading
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from backend.db.config import get_settings
+from backend.db.config import assistant_name, get_settings
 
 CAFE_TIME = ZoneInfo("America/Los_Angeles")
 LIMIT_MESSAGE = (
-    "The demo has used today's Muse allowance. It resets at midnight Pacific time. "
+    "The demo has used today's {assistant} allowance. It resets at midnight Pacific time. "
     "Until then you can still look around: plans, approvals, stock and deliveries already made all work."
 )
 
 
 class MuseLimitReached(RuntimeError):
     def __init__(self) -> None:
-        super().__init__(LIMIT_MESSAGE)
+        super().__init__(LIMIT_MESSAGE.format(assistant=assistant_name()))
 
 
 _lock = threading.Lock()

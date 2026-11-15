@@ -39,6 +39,7 @@ from backend.models.cafe import Cafe
 from backend.modules.agent.ai_calls import call_image, call_model, is_timeout, record as record_ai_call
 from backend.modules.agent.summaries import clock
 from backend.modules.events.models import CafeEvent
+from backend.db.config import assistant_name
 
 ROOT = Path(__file__).resolve().parents[3]  # business-core/
 DRAFT_DIR = ROOT / "var" / "promo-posts"
@@ -262,7 +263,7 @@ def write_caption(client: Any, model: str, facts: Facts, variant: int) -> Captio
         record_ai_call(cafe_id=facts.cafe_id, purpose="other", model=model, latency_ms=latency, request=summary,
                        outcome="timeout" if is_timeout(error) else "failed", error=f"{type(error).__name__}: {error}")
         caption, tags = code_caption(facts)
-        return CaptionResult(caption, tags, "code", f"Muse didn't answer ({type(error).__name__})", None, latency)
+        return CaptionResult(caption, tags, "code", f"{assistant_name()} didn't answer ({type(error).__name__})", None, latency)
     record_ai_call(cafe_id=facts.cafe_id, purpose="other", model=model, latency_ms=latency, request=summary, outcome="ok")
     text = response.choices[0].message.content or ""
     match = _FENCE.match(text)
@@ -275,7 +276,7 @@ def write_caption(client: Any, model: str, facts: Facts, variant: int) -> Captio
     problems = check_caption(caption, tags, facts) if caption else ["unreadable answer"]
     if problems:
         code, code_tags = code_caption(facts)
-        return CaptionResult(code, code_tags, "code", "Muse's caption was replaced: " + "; ".join(problems[:3]),
+        return CaptionResult(code, code_tags, "code", f"{assistant_name()}'s caption was replaced: " + "; ".join(problems[:3]),
                              model, latency)
     return CaptionResult(caption, tags, "muse", None, model, latency)
 
@@ -329,7 +330,7 @@ def muse_background(client: Any, model: str, facts: Facts, variant: int) -> Back
     record_ai_call(cafe_id=facts.cafe_id, purpose="other", model=model, latency_ms=total, request=summary,
                    outcome="timeout" if last_error is not None and is_timeout(last_error) else "failed",
                    attempts=IMAGE_TRIES, error=f"{type(last_error).__name__}: {last_error}")
-    note = f"Muse Image didn't deliver after {IMAGE_TRIES} tries ({type(last_error).__name__}); drawn by code"
+    note = f"{'Muse Image' if assistant_name() == 'Muse' else 'The image model'} didn't deliver after {IMAGE_TRIES} tries ({type(last_error).__name__}); drawn by code"
     return BackgroundResult(drawn_background(facts, variant), "code-drawn", note, None, total, IMAGE_TRIES)
 
 

@@ -23,6 +23,7 @@ from backend.modules.inventory.models import InventoryMovement
 from backend.modules.purchasing.models import PurchaseOrder
 from backend.modules.receiving import service
 from backend.modules.receiving.counting import Product, count_delivery, noun_for, upright
+from backend.modules.receiving import delivery_check
 from backend.modules.receiving.delivery_check import check_delivery
 from scripts.seed_event_surge import DEMO_ORDER_ID, apply_reset, plan_reset, seed_event_surge
 
@@ -138,6 +139,24 @@ def test_an_unsure_count_asks_the_owner_to_count(session: Session) -> None:
     assert check["outcome"] == "needs_owner" and not check["counts"][0]["confident"]
     assert check["glasses_line"] == "PO-1042 needs your OK. whole milk: please count."
     assert session.get(PurchaseOrder, DEMO_ORDER_ID).status == "confirmed"
+
+
+def test_without_sam_the_models_own_count_is_used_and_the_owner_always_checks(session: Session, monkeypatch) -> None:
+    # MODEL_PROVIDER=openai: SAM isn't there, so the model counts the photo itself (read_photo).
+    monkeypatch.setattr(delivery_check, "sam_available", lambda: False)
+    seen = {"items": [
+        {"product": "Whole Milk", "visible_units": 12, "possibly_hidden_units": False, "confidence": "high"},
+        {"product": "Oat Milk", "visible_units": 6, "possibly_hidden_units": False, "confidence": "high"},
+    ]}
+    client = Glasses(slip=SLIP, sam={"milk carton": _boxes(18)}, check=seen)
+    check = _run(session, client)
+
+    assert client.sam_prompts == []
+    assert client.spark_prompts[1].startswith("This photo shows a delivery")
+    assert check["count_method"] == "model" and check["counts"] == []
+    # Even a full, sure count is never confirmed on its own: the owner checks it, stock waits.
+    assert (check["outcome"], check["receipt_status"], check["order_status"]) == ("needs_owner", "draft", "confirmed")
+    assert _movements(session) == []
 
 
 def test_an_unknown_order_is_read_and_counted_then_logged(session: Session, caplog) -> None:

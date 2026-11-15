@@ -9,6 +9,7 @@ import {
   type PromoDraft,
 } from "../../api/promo";
 import { modelName } from "../muse/story";
+import { assistant, imageModel } from "../../utils/brand";
 
 export type PostRequest = { eventId: string; nonce: number };
 
@@ -76,7 +77,7 @@ export function DraftPreview({ draft }: { draft: PromoDraft }) {
           <p className="mz-draft__note">Caption written by code. {draft.caption_note}.</p>
         )}
         {draft.image_source === "code-drawn" && (
-          <p className="mz-draft__note">Background drawn by code: Muse Image didn't deliver in time.</p>
+          <p className="mz-draft__note">Background drawn by code: {imageModel()} didn't deliver in time.</p>
         )}
         <div className="mz-draft__acts">
           <a className="mz-btn mz-btn--primary" href={draft.image_url} download={file}>
@@ -157,7 +158,7 @@ export function PostsPanel({ hidden, events, request }: Props) {
       setSelected(result.variants[0] ?? null);
       load();
     } catch (problem) {
-      setError(problem instanceof Error ? problem.message : "Muse couldn't make drafts right now.");
+      setError(problem instanceof Error ? problem.message : `${assistant()} couldn't make drafts right now.`);
     } finally {
       setMaking(false);
     }
@@ -174,7 +175,7 @@ export function PostsPanel({ hidden, events, request }: Props) {
       <header className="mz-posts__head">
         <h2 className="mz-plan__goal">Posts</h2>
         <p className="mz-muted">
-          Muse drafts a post for an upcoming event. You check it, then download, copy or share it yourself: CaféPilot never
+          {assistant()} drafts a post for an upcoming event. You check it, then download, copy or share it yourself: CaféPilot never
           posts anything.
         </p>
       </header>
@@ -232,8 +233,8 @@ export function PostsPanel({ hidden, events, request }: Props) {
               </button>
               <span className="mz-muted">
                 {making
-                  ? `Muse is writing captions and painting backgrounds for ${event?.title ?? "the event"}. About 30 seconds.`
-                  : "Muse writes the caption and paints the background; code checks every date and number and sets the text."}
+                  ? `${assistant()} is writing captions and painting backgrounds for ${event?.title ?? "the event"}. About 30 seconds.`
+                  : `${assistant()} writes the caption and paints the background; code checks every date and number and sets the text.`}
               </span>
             </div>
           </>

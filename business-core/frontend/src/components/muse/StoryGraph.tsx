@@ -4,6 +4,7 @@ import ChangeForm, { canChange } from "../agent/ChangeForm";
 import { evidenceFor } from "../agent/changes";
 import { conditionText } from "../agent/labels";
 import { type Box, type Story, modelName } from "./story";
+import { assistant } from "../../utils/brand";
 
 type Decide = (runId: string, step: RunStep, decision: "approved" | "rejected", edited?: Record<string, unknown>) => Promise<void>;
 
@@ -90,7 +91,7 @@ function DetailCard({ box, run }: { box: Box; run: AgentRun | undefined }) {
     const facts = evidenceFor(step, run);
     return (
       <div className="sg-tip" role="tooltip">
-        <h4>Why Muse suggests this</h4>
+        <h4>Why {assistant()} suggests this</h4>
         <p>{step.reason}</p>
         {step.only_if && <p className="sg-tip__muted">Approve only if {conditionText(step.only_if)}</p>}
         {step.acknowledgement?.details.map((d) => (
@@ -266,7 +267,7 @@ function StoryGraph({ story, runs, busy, reveal, onDecide, onOpenRun }: StoryGra
             {box.kind === "decision" && run && <DecisionBody box={box} run={run} busy={busy} onDecide={onDecide} />}
             {replanned && runs[replanned] === undefined && (
               <button type="button" className="mz-link sg-open" onClick={() => onOpenRun(replanned)}>
-                Open Muse's new plan →
+                Open {assistant()}'s new plan →
               </button>
             )}
             {isOpen && hasDetail && <DetailCard box={box} run={run} />}

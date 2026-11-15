@@ -1,5 +1,6 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { type CafeUpdate, getUpdates } from "../../api/updates";
+import { assistant } from "../../utils/brand";
 
 export const POLL_MS = 2500;
 export const TOAST_MS = 6000;
@@ -20,7 +21,7 @@ export function useUpdates(): UpdatesState {
   return useContext(UpdatesContext);
 }
 
-const WHO: Record<CafeUpdate["group"], string> = { staff: "Staff", orders: "Supplier", plans: "Muse" };
+const WHO: Record<CafeUpdate["group"], string> = { staff: "Staff", orders: "Supplier", get plans() { return assistant(); } };
 
 /** Sending is not a reply: a sent order is from a simulated supplier; answers are simulated replies. */
 export function simulatedLabel(update: CafeUpdate): string {

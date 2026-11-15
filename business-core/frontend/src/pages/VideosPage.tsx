@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { listVideos, retryVideo, videoRequest, VideoApiError, type FrameResult, type VideoRecord } from "../api/videos";
+import { assistant } from "../utils/brand";
 
 const TOKEN_KEY = "cafepilot-video-token";
-const STATUS = { queued: "Queued", extracting: "Extracting frames", processing: "Muse is reading frames", complete: "Processed", partial: "Partly processed", failed: "Processing failed" };
+const STATUS = { queued: "Queued", extracting: "Extracting frames", get processing() { return `${assistant()} is reading frames`; }, complete: "Processed", partial: "Partly processed", failed: "Processing failed" };
 const SOURCE = { "meta-glasses": "Meta glasses", "mock-glasses": "Mock glasses", test: "Test clip · not from glasses" };
 const message = (error: unknown) => error instanceof Error ? error.message : "The service could not be reached.";
 
@@ -51,7 +52,7 @@ export default function VideosPage() {
         <div>
           <p className="page__eyebrow">Glasses capture</p>
           <h1 id="page-title">Barista clips</h1>
-          <p className="page__description">Your recordings, read by Muse. New clips and results appear here automatically.</p>
+          <p className="page__description">Your recordings, read by {assistant()}. New clips and results appear here automatically.</p>
         </div>
         {token && <div className="videos-actions">
           <span className={`videos-live${error ? " is-offline" : ""}`}>{error ? "Reconnecting" : syncing ? "Updating…" : "Live · every 2 seconds"}</span>

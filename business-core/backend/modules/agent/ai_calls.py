@@ -5,6 +5,9 @@ A row is what the owner would count as one request: a plan that needed a second 
 attempts 2 and outcome "retried". Rows keep a short request summary only (no prompts, nothing that
 looks like a key) and are saved in their own session, so a request that fails or rolls back is still
 recorded. The jsonl log (planner._log_call) is unchanged.
+
+Both providers (MODEL_PROVIDER=meta|openai) take the same OpenAI-library calls; the few options that
+differ are adjusted here, so callers write one request for either.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from uuid import uuid4
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
+from backend.db.config import get_settings
 from backend.db.session import SessionLocal
 from backend.modules.agent.models import AICall
 from backend.modules.demo import muse_limit
@@ -32,9 +36,29 @@ _KEYLIKE = re.compile(r"\bsk-[A-Za-z0-9_\-]{6,}|\bBearer\s+\S+|\b[A-Za-z0-9_\-]{
 _INTERNAL_ID = re.compile(r"\b(?:[A-Za-z]+_)+[A-Za-z0-9_]*\d\w*\b|\b(?:RUN|AIC)-[0-9A-F]{6,}\b")
 
 
+def chat_options(provider: str, options: dict[str, Any]) -> dict[str, Any]:
+    """Chat options for this provider. Muse takes them as written; OpenAI's reasoning models refuse
+    `temperature`, want `max_completion_tokens` for `max_tokens`, and don't know Meta's `extra_body`."""
+    if provider != "openai":
+        return options
+    adjusted = {k: v for k, v in options.items() if k not in ("temperature", "extra_body")}
+    if "max_tokens" in adjusted:
+        adjusted["max_completion_tokens"] = adjusted.pop("max_tokens")
+    return adjusted
+
+
+def image_options(provider: str, options: dict[str, Any]) -> dict[str, Any]:
+    """Image options for this provider. OpenAI's image models always return base64 and refuse
+    `response_format`; `extra_body` (Muse Image's tool switches) is Meta-only."""
+    if provider != "openai":
+        return options
+    return {k: v for k, v in options.items() if k not in ("response_format", "extra_body")}
+
+
 def call_model(client: Any, *, model: str, messages: list[dict[str, Any]], **kwargs: Any) -> tuple[Any, int]:
     """The one way to call a model: returns (response, latency_ms). A failure carries latency_ms too."""
     muse_limit.take()  # counts toward the public demo's daily Muse limit
+    kwargs = chat_options(get_settings().model_provider, kwargs)
     started = time.monotonic()
     try:
         response = client.chat.completions.create(model=model, messages=messages, **kwargs)
@@ -47,6 +71,7 @@ def call_model(client: Any, *, model: str, messages: list[dict[str, Any]], **kwa
 def call_image(client: Any, *, model: str, prompt: str, **kwargs: Any) -> tuple[Any, int]:
     """call_model for an image model (Muse Image): returns (response, latency_ms); a failure carries latency_ms."""
     muse_limit.take()
+    kwargs = image_options(get_settings().model_provider, kwargs)
     started = time.monotonic()
     try:
         response = client.images.generate(model=model, prompt=prompt, **kwargs)

@@ -15,7 +15,8 @@ from backend.db.session import engine, get_db
 from backend.main import app
 from backend.models.cafe import Cafe
 from backend.modules.agent import planner as planner_module
-from backend.modules.agent.ai_calls import summarize
+from backend.modules.agent import ai_calls
+from backend.modules.agent.ai_calls import chat_options, image_options, summarize
 from backend.modules.agent.models import AICall
 from backend.modules.agent.planner import SYSTEM_PROMPT
 from backend.modules.agent.router import get_chat_client, get_planner_client
@@ -169,3 +170,27 @@ def test_ai_calls_endpoint_lists_newest_first(session: Session, ai_call_rows) ->
     assert [c["id"] for c in two] == ["AIC-T2", "AIC-T1"]
     assert set(listed[0]) == {"id", "cafe_id", "created_at", "purpose", "model", "latency_ms", "attempts", "outcome",
                               "run_id", "request_summary", "error"}
+
+
+PLANNER_OPTIONS = {"temperature": 0, "reasoning_effort": "high", "max_tokens": 16384}
+IMAGE_OPTIONS = {"n": 1, "size": "1024x1024", "output_format": "png", "response_format": "b64_json",
+                 "extra_body": {"tool_enablement": {"enable_web_search": False}}}
+
+
+def test_muse_gets_the_options_as_written() -> None:
+    assert chat_options("meta", PLANNER_OPTIONS) == PLANNER_OPTIONS
+    assert image_options("meta", IMAGE_OPTIONS) == IMAGE_OPTIONS
+
+
+def test_openai_gets_options_its_models_accept() -> None:
+    assert chat_options("openai", PLANNER_OPTIONS) == {"reasoning_effort": "high", "max_completion_tokens": 16384}
+    assert chat_options("openai", {"temperature": 0.7}) == {}
+    assert image_options("openai", IMAGE_OPTIONS) == {"n": 1, "size": "1024x1024", "output_format": "png"}
+
+
+def test_call_model_sends_the_providers_options(monkeypatch) -> None:
+    sent: dict = {}
+    client = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=lambda **kw: sent.update(kw))))
+    monkeypatch.setattr(ai_calls, "get_settings", lambda: SimpleNamespace(model_provider="openai"))
+    ai_calls.call_model(client, model="o-plan", messages=[], **PLANNER_OPTIONS)
+    assert sent == {"model": "o-plan", "messages": [], "reasoning_effort": "high", "max_completion_tokens": 16384}

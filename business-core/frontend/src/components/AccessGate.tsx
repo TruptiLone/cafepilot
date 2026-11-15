@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { AgentApiError } from "../api/agent";
 import { enterAccessCode, getAccess, LOCKED_EVENT } from "../api/demo";
 import Brand from "./Brand";
+import { poweredBy, setModelProvider } from "../utils/brand";
 
 type Gate = "checking" | "open" | "locked";
 
@@ -26,7 +27,10 @@ function AccessGate({ children }: { children: ReactNode }) {
       }
     };
     getAccess()
-      .then((status) => setGate(!status.required || status.granted ? "open" : "locked"))
+      .then((status) => {
+        setModelProvider(status.model_provider);
+        setGate(!status.required || status.granted ? "open" : "locked");
+      })
       .catch(failed);
     // An API call came back locked: the code expired, or the visitor's café was closed after sitting unused.
     // Asking again makes a fresh café when the code is still good; only otherwise does the code page come back.
@@ -65,7 +69,7 @@ function AccessGate({ children }: { children: ReactNode }) {
     setSending(true);
     setError(null);
     try {
-      await enterAccessCode(code.trim());
+      setModelProvider((await enterAccessCode(code.trim())).model_provider);
       setGate("open");
     } catch (e) {
       setError(e instanceof Error ? e.message : "That didn't work. Try again.");
@@ -83,7 +87,7 @@ function AccessGate({ children }: { children: ReactNode }) {
         <Brand compact />
         <h1 className="gate__title">Welcome to the CaféPilot demo</h1>
         <p className="gate__text">
-          An AI operations assistant for a small café, powered by Meta's Muse models. Enter the access code you were
+          An AI operations assistant for a small café, powered by {poweredBy()}. Enter the access code you were
           given to try it.
         </p>
         <label className="gate__label" htmlFor="access-code">

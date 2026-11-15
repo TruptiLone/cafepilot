@@ -26,6 +26,7 @@ from backend.modules.inventory.service import InventoryService
 from backend.modules.purchasing.models import PurchaseOrder
 from backend.modules.sales.service import SalesService
 from backend.modules.staffing.service import StaffingService
+from backend.db.config import assistant_name
 
 PlanState = Literal["new", "checking", "needs_ok", "waiting", "planned", "issues"]
 
@@ -360,7 +361,7 @@ def cafe_status(session: Session, cafe_id: str) -> CafeStatus:
         .where(AgentPlanRun.cafe_id == cafe_id, AgentNodeRun.status == "awaiting_approval")
     ) or 0
     kpis["approvals"] = Kpi(label="Pending approvals", value=str(waiting),
-                            note="From Muse" if waiting else "Nothing waiting", tone="warn" if waiting else "neutral")
+                            note=f"From {assistant_name()}" if waiting else "Nothing waiting", tone="warn" if waiting else "neutral")
     kpis["sales"] = _sales_kpi(session, cafe_id, as_of, tz)
 
     part = "morning" if local.hour < 12 else "afternoon" if local.hour < 17 else "evening"

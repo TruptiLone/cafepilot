@@ -32,6 +32,7 @@ from backend.models.cafe import Cafe
 from backend.modules.purchasing.models import PurchaseOrder, Receipt, ReceiptLine
 from backend.modules.purchasing.service import settle_due
 from backend.modules.receiving.vision import PhotoRead, SlipRead
+from backend.db.config import assistant_name
 
 ROOT = Path(__file__).resolve().parents[3]  # business-core/
 # Saved with full paths, so the API finds photos a receiver from another folder saved (and vice versa).
@@ -234,16 +235,16 @@ def evaluate(draft: _Draft, counted: Decimal | None, rejected: Decimal, has_slip
         source = "you counted"
     elif draft.seen is not None and not (draft.may_hide_more and expected is not None and draft.seen != expected):
         arrived = draft.seen
-        source = "Muse can see"
+        source = f"{assistant_name()} can see"
     else:
         if draft.seen is not None and expected is not None and draft.seen > expected:
             return "needs_count", None, (  # an unsure count above the slip: count before calling it "over"
-                f"Muse counted {f(draft.seen)} of {_product(draft.description)} but isn't sure; the "
+                f"{assistant_name()} counted {f(draft.seen)} of {_product(draft.description)} but isn't sure; the "
                 f"{'slip says' if draft.shipped is not None else 'order is for'} {f(expected)}. Please count it."
             )
         if draft.seen is not None:
             return "needs_count", None, (
-                f"Muse can see {f(draft.seen)} of {_product(draft.description)}, but the "
+                f"{assistant_name()} can see {f(draft.seen)} of {_product(draft.description)}, but the "
                 f"{'slip says' if draft.shipped is not None else 'order is for'} {f(expected)}"
                 f" and the crate or case may hide more. Please count it."
             )

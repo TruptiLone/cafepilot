@@ -2,11 +2,12 @@ import { useEffect, useRef, useState } from "react";
 import { type AICallRow, type CafeUpdate, getAICalls } from "../../api/updates";
 import { modelName } from "../muse/story";
 import { simulatedLabel, useUpdates } from "./UpdatesProvider";
+import { assistant } from "../../utils/brand";
 
 const GROUPS: { group: CafeUpdate["group"]; label: string }[] = [
   { group: "staff", label: "Staff covered" },
   { group: "orders", label: "Orders placed" },
-  { group: "plans", label: "Muse's plans" },
+  { group: "plans", get label() { return `${assistant()}'s plans`; } },
 ];
 
 const PURPOSE: Record<AICallRow["purpose"], string> = { plan: "Plan", replan: "Replan", chat: "Ask", other: "Photo read" };

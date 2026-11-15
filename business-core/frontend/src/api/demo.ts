@@ -1,7 +1,13 @@
 import { AgentApiError } from "./agent";
 
 /** The public demo: access code, today's Muse allowance and "Start over". */
-export type AccessStatus = { required: boolean; granted: boolean; muse_calls_left: number | null };
+export type AccessStatus = {
+  required: boolean;
+  granted: boolean;
+  muse_calls_left: number | null;
+  /** Which models run the café: "meta" (Muse) or "openai". Missing on older APIs: Muse. */
+  model_provider?: "meta" | "openai";
+};
 
 /** Sent when any API call comes back locked (the access cookie expired or the code changed). */
 export const LOCKED_EVENT = "cafepilot:locked";

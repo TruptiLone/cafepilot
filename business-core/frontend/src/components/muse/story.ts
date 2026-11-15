@@ -6,6 +6,7 @@
 import type { AgentRun, RunStep } from "../../api/agent";
 import { describeChange, employeeName, formatClock, formatDay, timeRange } from "../agent/changes";
 import { policyRoles } from "./roles";
+import { assistant } from "../../utils/brand";
 
 type Row = Record<string, unknown>;
 
@@ -69,12 +70,14 @@ const GROUP_OF: Record<string, BoxKind> = {
 
 const KIND_ORDER: BoxKind[] = ["event", "demand", "ingredients", "suppliers", "sales", "other", "staff", "decision"];
 
-/** "muse-wonder-1.0" -> "Muse Wonder 1.0": a model id recorded on a run, made readable. */
+/** "muse-wonder-1.0" -> "Muse Wonder 1.0", "gpt-6-sol" -> "GPT-6 Sol": a model id recorded on a run, made readable. */
 export function modelName(model: string): string {
-  return model
-    .split("-")
-    .map((part) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1)))
-    .join(" ");
+  const parts = model.split("-");
+  const word = (part: string) => (/^\d/.test(part) ? part : part.charAt(0).toUpperCase() + part.slice(1));
+  if (parts[0].toLowerCase() === "gpt" && parts.length > 1) {
+    return [`GPT-${word(parts[1])}`, ...parts.slice(2).map(word)].join(" ");
+  }
+  return parts.map(word).join(" ");
 }
 
 const resultOf = (steps: RunStep[], action: string): unknown =>
@@ -501,13 +504,13 @@ export function buildStory(run: AgentRun, children: Record<string, AgentRun> = {
           state: decisionState(write), steps: [write], detail: null, level: decisionLevel + 1, lane: 0, col: 0, runId: child.run_id,
           model: child.model,
         });
-        edges.push({ from: parentId, to: id, label: "Muse found another way" });
+        edges.push({ from: parentId, to: id, label: `${assistant()} found another way` });
       }
     } else if (replanning === step.node_id || (step.replanned_in && !child)) {
       const id = `r:${step.node_id}`;
       boxes.push({
         id, kind: "decision", title: step.action === "schedule_shift" ? "Finding someone else" : "Finding another supplier",
-        subtitle: "Muse is planning…", state: "running", steps: [], detail: null, level: decisionLevel + 1, lane: 0, col: 0, runId: run.run_id,
+        subtitle: `${assistant()} is planning…`, state: "running", steps: [], detail: null, level: decisionLevel + 1, lane: 0, col: 0, runId: run.run_id,
       });
       edges.push({ from: parentId, to: id });
     }

@@ -26,6 +26,8 @@ services:
         fromDatabase: { name: cafepilot-db, property: password }
       - key: MODEL_API_KEY
         sync: false          # you type it in Render
+      # Muse is the default. To run on OpenAI, set MODEL_PROVIDER=openai and PLANNER_MODEL / VISION_MODEL /
+      # IMAGE_MODEL in the Environment tab (kept out of this file so a sync never switches them back).
       - key: DEMO_ACCESS_CODE
         sync: false          # you type it in Render; share it with hiring managers
       - key: MUSE_DAILY_LIMIT

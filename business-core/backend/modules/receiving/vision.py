@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from backend.modules.agent.ai_calls import call_model, is_timeout, record as record_ai_call
 from backend.modules.agent.planner import _log_call  # shared model-call log
+from backend.db.config import assistant_name
 
 SLIP_PROMPT = """Read this packing slip. Return ONLY a JSON object, no prose:
 {"supplier": str, "packing_slip_number": str, "customer_po_number": str, "delivery_date": str,
@@ -96,7 +97,7 @@ def _ask(client: Any, model: str, purpose: str, prompt: str, image: bytes, mime:
                    "latency_ms": latency, "error": f"{type(error).__name__}: {error}"})
         record_ai_call(cafe_id=None, purpose="other", model=model, latency_ms=latency, request=PHOTO_SUMMARY.get(purpose, purpose),
                        outcome="timeout" if is_timeout(error) else "failed", error=f"{type(error).__name__}: {error}")
-        raise VisionError(f"Muse couldn't read the image: {str(error).splitlines()[0][:200]}") from error
+        raise VisionError(f"{assistant_name()} couldn't read the image: {str(error).splitlines()[0][:200]}") from error
     record_ai_call(cafe_id=None, purpose="other", model=model, latency_ms=latency, request=PHOTO_SUMMARY.get(purpose, purpose), outcome="ok")
     text = response.choices[0].message.content or ""
     _log_call({"at": datetime.now(timezone.utc).isoformat(), "purpose": purpose, "model": model,
@@ -105,7 +106,7 @@ def _ask(client: Any, model: str, purpose: str, prompt: str, image: bytes, mime:
     try:
         return json.loads(match.group(1) if match else text), latency
     except json.JSONDecodeError as error:
-        raise VisionError("Muse's answer wasn't readable JSON; try a clearer photo.") from error
+        raise VisionError(f"{assistant_name()}'s answer wasn't readable JSON; try a clearer photo.") from error
 
 
 def read_slip(client: Any, model: str, image: bytes, mime: str) -> tuple[SlipRead, int]:
@@ -113,7 +114,7 @@ def read_slip(client: Any, model: str, image: bytes, mime: str) -> tuple[SlipRea
     try:
         return SlipRead.model_validate(data), latency
     except ValidationError as error:
-        raise VisionError("Muse read the slip but the fields didn't make sense; try again.") from error
+        raise VisionError(f"{assistant_name()} read the slip but the fields didn't make sense; try again.") from error
 
 
 def read_photo(client: Any, model: str, image: bytes, mime: str) -> tuple[PhotoRead, int]:
@@ -121,4 +122,4 @@ def read_photo(client: Any, model: str, image: bytes, mime: str) -> tuple[PhotoR
     try:
         return PhotoRead.model_validate(data), latency
     except ValidationError as error:
-        raise VisionError("Muse read the photo but the counts didn't make sense; try again.") from error
+        raise VisionError(f"{assistant_name()} read the photo but the counts didn't make sense; try again.") from error

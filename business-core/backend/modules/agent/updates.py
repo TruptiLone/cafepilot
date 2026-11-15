@@ -24,6 +24,7 @@ from backend.modules.inventory.models import InventoryItem
 from backend.modules.purchasing.models import PurchaseOrder, ShiftOffer
 from backend.modules.purchasing.service import delivery_for
 from backend.modules.staffing.models import Employee, Shift
+from backend.db.config import assistant_name
 
 CONFIRMED_ORDERS = ("confirmed", "partially_received", "received")
 
@@ -97,16 +98,16 @@ def updates(session: Session, cafe_id: str, since: datetime | None = None, limit
         if call is not None:  # the request began latency_ms before the row was written
             add(f"replan:{run.run_id}:started", "replan_started", "plans",
                 call.created_at - timedelta(milliseconds=call.latency_ms),
-                "Muse started looking for another way", None, False, run.parent_run_id, call.model)
+                f"{assistant_name()} started looking for another way", None, False, run.parent_run_id, call.model)
         add(f"replan:{run.run_id}:finished", "replan_finished", "plans", run.created_at,
-            "Muse found another way", run.goal, False, run.run_id, run.model)
+            f"{assistant_name()} found another way", run.goal, False, run.run_id, run.model)
 
     # Demo only: the scripted event discovery (see events.DEMO_DISCOVERY_EVENT_IDS), so simulated.
     found = session.scalars(select(CafeEvent).where(CafeEvent.cafe_id == cafe_id, CafeEvent.discovered_at.is_not(None)))
     for event in found:
         starts = event.starts_at.astimezone(tz)
         add(f"event:{event.event_id}:found", "event_found", "plans", event.discovered_at,
-            f"Muse found a new event: {event.name}, {day(starts)}",
+            f"{assistant_name()} found a new event: {event.name}, {day(starts)}",
             "; ".join(p for p in (event.location, event.notes) if p) or None, event.is_synthetic, None)
 
     out.sort(key=lambda u: u["at"], reverse=True)  # real instants, not strings (offsets differ across DST)

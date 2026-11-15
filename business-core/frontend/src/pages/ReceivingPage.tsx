@@ -22,6 +22,7 @@ import {
   type SamplePhoto,
 } from "../api/receiving";
 import { lineView, seenSummary, tally } from "./receivingView";
+import { assistant, visionModel } from "../utils/brand";
 
 function when(iso: string | null) {
   if (!iso) return "";
@@ -47,8 +48,8 @@ type Run = (kind: Exclude<Busy, null>, action: () => Promise<Receipt>) => Promis
 
 const BUSY_TEXT: Record<Exclude<Busy, null>, string> = {
   start: "Opening the delivery check…",
-  slip: "Muse is reading the packing slip…",
-  photo: "Muse is counting what it can see…",
+  get slip() { return `${assistant()} is reading the packing slip…`; },
+  get photo() { return `${assistant()} is counting what it can see…`; },
   count: "Comparing your count…",
   confirm: "Adding to stock…",
   credit: "Sending the credit request…",
@@ -135,8 +136,8 @@ function ReceivingPage() {
             <h1 id="page-title">Check a delivery</h1>
             <p className="rcv-subtitle">
               {bothRead
-                ? "Muse read the slip and the photo. Only what you accept goes into stock."
-                : "Look at the packing slip, then the delivery. Muse reads both; only what you accept goes into stock."}
+                ? `${assistant()} read the slip and the photo. Only what you accept goes into stock.`
+                : `Look at the packing slip, then the delivery. ${assistant()} reads both; only what you accept goes into stock.`}
             </p>
           </div>
           {receipt && <PoCard receipt={receipt} />}
@@ -360,7 +361,7 @@ function DeliveryCheck({ receipt, busy, run, onDone }: { receipt: Receipt; busy:
                       </>
                     ) : (
                       <>
-                        Read by <strong>Muse Spark</strong>
+                        Read by <strong>{visionModel()}</strong>
                       </>
                     )}
                   </p>
@@ -445,12 +446,12 @@ const TALLY = [
 function MuseBanner({ receipt, busy }: { receipt: Receipt; busy: Busy }) {
   const counts = tally(receipt.lines);
   const label = busy
-    ? "Muse is working"
+    ? `${assistant()} is working`
     : receipt.status === "confirmed"
       ? "Checked in"
       : receipt.has_photo_image
-        ? "Muse checked the delivery"
-        : "Muse";
+        ? `${assistant()} checked the delivery`
+        : assistant();
   return (
     <div className={`rcv-muse${busy ? " is-thinking" : ""}`}>
       <span className="rcv-muse__icon" aria-hidden="true">
@@ -594,7 +595,7 @@ function OnTheOrder({ order }: { order: OpenOrder | null }) {
     return (
       <>
         <h2 className="rcv-section-title">What arrived</h2>
-        <p className="rcv-card rcv-muted">Muse lists the items once it has read the slip.</p>
+        <p className="rcv-card rcv-muted">{assistant()} lists the items once it has read the slip.</p>
       </>
     );
   }
@@ -613,7 +614,7 @@ function OnTheOrder({ order }: { order: OpenOrder | null }) {
           <dl className="rcv-row__nums">
             <Num label="Ordered" value={line.packs ?? "—"} />
             <Num label="Slip says" value="—" />
-            <Num label="Muse saw" value="—" />
+            <Num label={`${assistant()} saw`} value="—" />
           </dl>
         </article>
       ))}
@@ -665,7 +666,7 @@ function LineRow({
       <dl className="rcv-row__nums">
         <Num label="Ordered" value={view.ordered ?? "—"} />
         <Num label="Slip says" value={view.slip ?? "—"} />
-        <Num label="Muse saw" value={view.tone === "wait" ? "—" : view.seen ?? "?"} note={view.counted != null ? `you counted ${view.counted}` : undefined} />
+        <Num label={`${assistant()} saw`} value={view.tone === "wait" ? "—" : view.seen ?? "?"} note={view.counted != null ? `you counted ${view.counted}` : undefined} />
       </dl>
       <div className="rcv-row__action">
         <span className={`rcv-chip rcv-chip--${view.tone}`}>{view.badge}</span>

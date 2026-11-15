@@ -13,18 +13,16 @@ import json
 import re
 from datetime import datetime, time as clock_time, timedelta, timezone
 from decimal import Decimal
-from functools import lru_cache
 from types import SimpleNamespace
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field, ValidationError
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.modules.demo import muse_limit
-from backend.db.config import ENV_FILE, get_settings
+from backend.db.config import assistant_name, get_settings
 from backend.modules.agent.ai_calls import call_model, is_timeout, record as record_ai_call
 from backend.modules.agent.planner import (
     ModelCallError,
@@ -43,19 +41,6 @@ MAX_ACTIONS = 3
 MAX_ROWS = 20
 READ_ACTIONS = {name: action for name, action in REGISTRY.items() if action.side_effect == "read"}
 NOT_ON_LIST = "That's not on our stock list."
-
-
-class ChatSettings(BaseSettings):
-    """The chat model, from business-core/.env (CHAT_MODEL); Muse Spark by default."""
-
-    model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
-
-    chat_model: str = "muse-spark-1.3"
-
-
-@lru_cache
-def chat_settings() -> ChatSettings:
-    return ChatSettings()
 
 
 class ChatTimeoutError(RuntimeError):
@@ -465,7 +450,7 @@ def _route(
         record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=f"Ask: {message}",
                        outcome="timeout" if timeout else "failed", error=record["error"])
         if timeout:
-            raise ChatTimeoutError(f"Muse didn't answer within {TIMEOUT_SECONDS} seconds. Try again.") from error
+            raise ChatTimeoutError(f"{assistant_name()} didn't answer within {TIMEOUT_SECONDS} seconds. Try again.") from error
         raise ModelCallError(_describe_model_error(error)) from error
     content = response.choices[0].message.content or ""
     record.update(latency_ms=latency_ms, response=content)
@@ -477,14 +462,14 @@ def _route(
         _log_call(record)
         record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=f"Ask: {message}",
                        outcome="failed", error="unreadable routing")
-        raise ModelCallError("Muse's answer wasn't readable. Try asking again.") from error
+        raise ModelCallError(f"{assistant_name()}'s answer wasn't readable. Try asking again.") from error
     _log_call(record)
     record_ai_call(cafe_id=cafe_id, purpose="chat", model=model, latency_ms=latency_ms, request=f"Ask: {message}", outcome="ok")
     return routing, latency_ms
 
 
 def answer(session: Session, client: Any, message: str, *, cafe_id: str, channel: str, as_of: datetime | None) -> dict[str, Any]:
-    model = chat_settings().chat_model
+    model = get_settings().chat_model
     reference, now, tz = build_reference(session, cafe_id, as_of)
     routing, latency_ms = _route(client, model, message, reference, channel, cafe_id)
     out: dict[str, Any] = {"intent": routing.intent, "message": message, "channel": channel, "model": model,

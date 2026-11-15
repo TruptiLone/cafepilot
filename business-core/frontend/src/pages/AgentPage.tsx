@@ -31,6 +31,7 @@ import { type SpeechRecognitionLike, speechRecognition } from "../components/mus
 import StoryGraph from "../components/muse/StoryGraph";
 import { planCounts } from "../components/muse/stages";
 import { buildStory, modelName, storyClosing } from "../components/muse/story";
+import { assistant, poweredBy } from "../utils/brand";
 
 const POLL_MS = 2000;
 const VIEW_KEY = "cafepilot-plan-view";
@@ -357,7 +358,7 @@ function AgentPage() {
   // A change asked in chat goes to the normal plan flow (it still waits for the owner's OK).
   function planFromChat(text: string) {
     setTab("events");
-    void plan(() => startRun(text), null, text);
+    void plan(() => startRun(text, chatAsOf), null, text);
   }
 
   async function handleAsk(event: FormEvent) {
@@ -366,7 +367,7 @@ function AgentPage() {
     if (!text || planningFor) return;
     const question = rejectedPlanning?.plan.status === "needs_clarification" ? rejectedPlanning.plan.question : null;
     const query = question && sentRequest ? `${sentRequest}\nAnswer to "${question}": ${text}` : text;
-    await plan(() => startRun(query), null, query);
+    await plan(() => startRun(query, chatAsOf), null, query);
     setRequest("");
   }
 
@@ -449,10 +450,10 @@ function AgentPage() {
             </svg>
           </div>
           <div>
-            <h1 className="mz-head-title">Muse</h1>
+            <h1 className="mz-head-title">{assistant()}</h1>
             <div className="mz-muted mz-powered">
               <span className="mz-powered__by">Powered by </span>
-              {tab === "events" && run ? modelName(run.model) : "Meta Muse models"}
+              {tab === "events" && run ? modelName(run.model) : poweredBy()}
             </div>
           </div>
           <div className="mz-live" data-live={live[0]} role="status">
@@ -462,7 +463,7 @@ function AgentPage() {
           <UpdatesBell className="updates--pane" />
         </header>
 
-        <nav className="mz-tabs" aria-label="Muse">
+        <nav className="mz-tabs" aria-label={assistant()}>
           <button
             type="button"
             className={`mz-tab${tab === "chat" ? " is-on" : ""}`}
@@ -502,7 +503,7 @@ function AgentPage() {
             </span>
             <div className="mz-found__body">
               <p className="mz-found__title">
-                Muse found a new event: {found.title}, {fmt(found.starts_at, { weekday: "short" })}{" "}
+                {assistant()} found a new event: {found.title}, {fmt(found.starts_at, { weekday: "short" })}{" "}
                 {fmt(found.starts_at, { month: "short", day: "numeric" })}
               </p>
               <p className="mz-found__text">{eventLine(found)}</p>
@@ -522,7 +523,7 @@ function AgentPage() {
 
         <div className={`mz-scroll${showPlan ? "" : " mz-scroll--home"}`} hidden={tab !== "events"}>
           {!showPlan && (
-            <section className="mz-events" aria-label="Events Muse found">
+            <section className="mz-events" aria-label={`Events ${assistant()} found`}>
               <header className="mz-greet">
                 <span className="mz-greet__mark" aria-hidden="true">
                   <svg viewBox="0 0 24 24">
@@ -582,7 +583,7 @@ function AgentPage() {
                   </article>
                 );
               })}
-              {events.length === 0 && <p className="mz-empty">No upcoming events yet. Muse lets you know when it finds one.</p>}
+              {events.length === 0 && <p className="mz-empty">No upcoming events yet. {assistant()} lets you know when it finds one.</p>}
               {pastEvents.length > 0 && (
                 <>
                   <h3 className="mz-label mz-label--section">Past events</h3>
@@ -602,7 +603,7 @@ function AgentPage() {
                 </>
               )}
               <div className="mz-quick">
-                <p className="mz-label">Or ask Muse</p>
+                <p className="mz-label">Or ask {assistant()}</p>
                 <div className="mz-chat__ex">
                   {EXAMPLES.map((q) => (
                     <button
@@ -643,7 +644,7 @@ function AgentPage() {
           {planningFor && <PlanningSkeleton title={events.find((e) => e.event_id === planningFor)?.title ?? "your request"} />}
 
           {run && !planningFor && counts && story && (
-            <section className="mz-plan" aria-label="Muse's plan">
+            <section className="mz-plan" aria-label={`${assistant()}'s plan`}>
               {run.parent_run_id && (
                 <p className="mz-parent">
                   This plan replaces a change that fell through.{" "}
@@ -654,7 +655,7 @@ function AgentPage() {
               )}
               <div className="mz-plan__head">
                 <div>
-                  <h2 className="mz-plan__goal">Muse's plan{run.event ? ` for the ${run.event.title.replace(/^Santa Clara /, "").toLowerCase()}` : ""}</h2>
+                  <h2 className="mz-plan__goal">{assistant()}'s plan{run.event ? ` for the ${run.event.title.replace(/^Santa Clara /, "").toLowerCase()}` : ""}</h2>
                   <p className="mz-muted">
                     {counts.checksDone} of {counts.checks} checks done
                     {counts.waiting > 0 ? ` · ${counts.waiting} ${counts.waiting === 1 ? "decision" : "decisions"} waiting` : ""}
@@ -746,15 +747,15 @@ function AgentPage() {
               type="text"
               value={request}
               onChange={(e) => setRequest(e.target.value)}
-              placeholder="Ask Muse… e.g. a catering order for 25 lattes Friday 9 AM"
-              aria-label="Ask Muse"
+              placeholder={`Ask ${assistant()}… e.g. a catering order for 25 lattes Friday 9 AM`}
+              aria-label={`Ask ${assistant()}`}
               disabled={planningFor !== null}
             />
             {speechRecognition() && (
               <button
                 type="button"
                 className={`mz-mic${listening ? " is-on" : ""}`}
-                aria-label={listening ? "Stop listening" : "Speak to Muse"}
+                aria-label={listening ? "Stop listening" : `Speak to ${assistant()}`}
                 aria-pressed={listening}
                 onClick={toggleMic}
               >
@@ -787,10 +788,10 @@ function replanLine(step: RunStep, run: AgentRun, model: string): string {
   if (step.action === "schedule_shift") {
     const args = (step.resolved_args ?? step.args) as Record<string, unknown>;
     const who = employeeName(run, String(args.employee_id)).split(" ")[0];
-    return `${who} declined. Muse is looking for someone else… · ${model}`;
+    return `${who} declined. ${assistant()} is looking for someone else… · ${model}`;
   }
   const supplier = String((step.result as Record<string, unknown> | null)?.supplier_name ?? "The supplier");
-  return `${supplier} declined. Muse is looking for another supplier… · ${model}`;
+  return `${supplier} declined. ${assistant()} is looking for another supplier… · ${model}`;
 }
 
 /** "in 27 s", or "after 2 attempts; the last took 27 s": latency_ms covers the final model call only. */
@@ -803,7 +804,7 @@ function planTiming(attempts: number, latencyMs: number | undefined): string {
 function PlanningSkeleton({ title }: { title: string }) {
   return (
     <div className="mz-card mz-graph-card mz-planning" aria-live="polite">
-      <div className="mz-plan__goal">Muse is planning for {title}…</div>
+      <div className="mz-plan__goal">{assistant()} is planning for {title}…</div>
       <p className="mz-muted">Checking the forecast, stock, suppliers and the roster. Usually 10 to 20 seconds.</p>
       <div className="mz-skel">
         <i className="w" />
@@ -831,7 +832,7 @@ function PlanningNotice({ planning }: { planning: Planning }) {
       <div className="mz-notice" role="status">
         <h3>One question first</h3>
         <p>{plan.question}</p>
-        <p className="mz-muted">Type your answer below. Muse gets it together with your request.</p>
+        <p className="mz-muted">Type your answer below. {assistant()} gets it together with your request.</p>
       </div>
     );
   }

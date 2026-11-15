@@ -213,6 +213,9 @@ TIME
 7. Every timestamp needs the café's UTC offset FOR THAT DATE, taken from CONTEXT
    utc_offset_by_date (daylight saving changes it). Use knowledge_as_of from CONTEXT as as_of
    for stock unless the owner names another time.
+7b. CONTEXT current_time is "now" for this café, even when it is earlier than the date you believe
+   it is (demos are set on a fixed earlier date). Events and times after it are in the future: plan
+   for them; never ask for a date because one looks past.
 
 STAFFING
 8. Take thresholds and espresso-capable roles from REFERENCE DATA cafe_policies; never guess them.
@@ -262,14 +265,20 @@ def utc_offsets_by_date(timezone_name: str, start: datetime, days: int = 14) -> 
 
 
 def build_messages(query: str, context: PlanningContext) -> list[dict[str, str]]:
+    # knowledge_as_of is "now" for the plan. In the demo it is a fixed earlier date (Thu Nov 5 2026), so the
+    # real clock is never sent: a model that saw it took the Nov 8 market for a past event and asked for a date.
+    today = context.as_of.astimezone(ZoneInfo(context.timezone))
     user_content = {
         "context": {
             "cafe_id": context.cafe_id,
             "cafe_timezone": context.timezone,
-            "current_time": context.now.isoformat(),
+            "today": f"{today:%A, %B} {today.day}, {today:%Y}",
+            "current_time": context.as_of.isoformat(),
             "knowledge_as_of": context.as_of.isoformat(),
-            "utc_offset_by_date": utc_offsets_by_date(context.timezone, context.now),
-            "note": "Use knowledge_as_of as the as_of argument for stock estimates.",
+            "utc_offset_by_date": utc_offsets_by_date(context.timezone, context.as_of),
+            "note": "current_time is now for this café (in a demo it is set earlier than the real date). "
+                    "Dates after it are in the future, even if they look past to you. Use knowledge_as_of "
+                    "as the as_of argument for stock estimates.",
         },
         "action_list": describe_for_planner(),
         "reference_data": context.reference,
@@ -384,16 +393,17 @@ def read_calls(limit: int = 100) -> list[dict[str, Any]]:
 def _describe_model_error(error: Exception) -> str:
     status = getattr(error, "status_code", None)
     name = type(error).__name__
+    api = "The OpenAI API" if get_settings().model_provider == "openai" else "The Meta Model API"
     if status == 401:
-        return "The Meta Model API rejected the API key (401). Check MODEL_API_KEY in business-core/.env."
+        return f"{api} rejected the API key (401). Check MODEL_API_KEY in business-core/.env."
     if status == 429:
-        return "The Meta Model API is rate-limiting requests (429). Wait a minute and try again."
+        return f"{api} is rate-limiting requests (429). Wait a minute and try again."
     if "Timeout" in name:
-        return "The Meta Model API took too long to answer. Try again."
+        return f"{api} took too long to answer. Try again."
     if "Connection" in name:
-        return "Could not reach the Meta Model API. Check your internet connection."
+        return f"Could not reach the {api[4:]}. Check your internet connection."
     detail = str(error).splitlines()[0][:200] if str(error) else name
-    return f"The Meta Model API returned an error ({status or name}): {detail}"
+    return f"{api} returned an error ({status or name}): {detail}"
 
 
 def plan_query(
